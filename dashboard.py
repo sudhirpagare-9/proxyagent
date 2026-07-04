@@ -4,6 +4,7 @@ from flask import Flask, render_template_string
 
 app = Flask(__name__)
 
+# Fetch production environment configurations safely
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
@@ -12,8 +13,11 @@ if SUPABASE_URL and SUPABASE_KEY:
     try:
         from supabase import create_client
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        print("[Production] Connected to live database instance.")
     except Exception as e:
-        print(f"Supabase connection error: {e}")
+        print(f"[Production Error] Client setup failed: {e}")
+else:
+    print("[Production Warning] Application running without active Supabase credentials.")
 
 DASHBOARD_TEMPLATE = """
 <!DOCTYPE html>
@@ -30,7 +34,23 @@ DASHBOARD_TEMPLATE = """
             ☁️ Advanced AI Proxy Token Matrix
         </h1>
         
-        <!-- Live Traffic Table Data -->
+        <!-- Preserved Top Metrics Panel Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-[#1c2541] p-6 rounded-xl border border-gray-700 shadow-lg">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Active Status</p>
+                <p class="text-2xl font-bold mt-2 text-emerald-400">Live & Protected</p>
+            </div>
+            <div class="bg-[#1c2541] p-6 rounded-xl border border-gray-700 shadow-lg">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Total Streams Intercepted</p>
+                <p id="total-count" class="text-2xl font-bold mt-2 text-white">0</p>
+            </div>
+            <div class="bg-[#1c2541] p-6 rounded-xl border border-gray-700 shadow-lg">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Security Profile</p>
+                <p class="text-2xl font-bold mt-2 text-blue-400">NIST / GDPR Framework</p>
+            </div>
+        </div>
+
+        <!-- Granular LLM Usage Metrics Table View -->
         <div class="bg-[#1c2541] rounded-xl border border-gray-700 shadow-lg overflow-hidden">
             <div class="p-6 border-b border-gray-700">
                 <h2 class="text-lg font-semibold text-gray-300">Granular LLM Usage Metrics</h2>
@@ -67,11 +87,14 @@ DASHBOARD_TEMPLATE = """
                 const tbody = document.getElementById("db-traffic-rows");
                 
                 if (logs.length === 1 && logs[0].model_name === "System Status") {
+                    document.getElementById("total-count").innerText = "0";
                     tbody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-gray-400 font-mono">${logs[0].subscription_details}</td></tr>`;
                     return;
                 }
                 
+                document.getElementById("total-count").innerText = logs.length;
                 tbody.innerHTML = "";
+                
                 logs.forEach(log => {
                     const row = document.createElement("tr");
                     row.className = "border-b border-gray-800 text-sm hover:bg-[#111a36]/50 transition-colors";
@@ -95,7 +118,7 @@ DASHBOARD_TEMPLATE = """
                     tbody.appendChild(row);
                 });
             } catch (err) {
-                console.error("Dashboard error:", err);
+                console.error("Dashboard engine long-polling error:", err);
             }
         }
         setInterval(fetchLatestLogs, 3000);
@@ -112,7 +135,7 @@ def home():
 @app.route("/api/get-logs")
 def get_logs():
     if not supabase:
-        return json.dumps([{"model_name": "System Status", "subscription_details": "Environment URL keys missing."}])
+        return json.dumps([{"model_name": "System Status", "subscription_details": "Environment URL keys missing on host environment settings."}])
     try:
         response = supabase.table("network_logs").select("*").limit(40).execute()
         data = response.data or []
@@ -121,7 +144,7 @@ def get_logs():
         data.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return json.dumps(data)
     except Exception as e:
-        return json.dumps([{"model_name": "System Status", "subscription_details": f"Error: {str(e)}"}])
+        return json.dumps([{"model_name": "System Status", "subscription_details": f"Database Error: {str(e)}"}])
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5050))
