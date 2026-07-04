@@ -1,0 +1,11 @@
+"C:\Users\Admin\AppData\Local\Programs\Python\Python311\Scripts\mitmdump" -s ai_agent_proxy.py --listen-port 8080
+
+C:\Python314\Scripts\mitmdump.exe -s ai_agent_proxy.py --listen-port 8080
+
+
+https://qwsnkbpsumqobrqkqpht.supabase.co
+
+sb_publishable_IPKGvB9I6G7Ix0q2kkpucw_8JdGDaHh
+
+
+https://api.render.com/deploy/srv-d94ln9pkh4rs73ffg95g?key=kcUYQRpNHTY
