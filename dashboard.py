@@ -4,7 +4,6 @@ from flask import Flask, render_template_string
 
 app = Flask(__name__)
 
-# Fetch environment variables safely
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
@@ -13,11 +12,8 @@ if SUPABASE_URL and SUPABASE_KEY:
     try:
         from supabase import create_client
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        print("[Dashboard] Supabase client connection established successfully.")
     except Exception as e:
-        print(f"[Dashboard] Error initializing Supabase client connection: {e}")
-else:
-    print("[Dashboard] WARNING: Supabase keys missing in environment configuration.")
+        print(f"Supabase connection error: {e}")
 
 DASHBOARD_TEMPLATE = """
 <!DOCTYPE html>
@@ -29,44 +25,33 @@ DASHBOARD_TEMPLATE = """
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-[#0b1329] text-gray-100 font-sans min-h-screen p-8">
-    <div class="max-w-5xl mx-auto">
+    <div class="max-w-7xl mx-auto">
         <h1 class="text-3xl font-bold mb-8 text-indigo-400 flex items-center gap-3">
-            ☁️ Cloud AI Proxy Analytics Dashboard
+            ☁️ Advanced AI Proxy Token Matrix
         </h1>
         
-        <!-- Metrics Cards Container Grid Layout -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <div class="bg-[#1c2541] p-6 rounded-xl border border-gray-700 shadow-lg">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Active Status</p>
-                <p id="status-card" class="text-2xl font-bold mt-2 text-emerald-400">Cloud Live</p>
-            </div>
-            <div class="bg-[#1c2541] p-6 rounded-xl border border-gray-700 shadow-lg">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Total Streams Intercepted</p>
-                <p id="total-count" class="text-2xl font-bold mt-2 text-white">0</p>
-            </div>
-            <div class="bg-[#1c2541] p-6 rounded-xl border border-gray-700 shadow-lg">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Security Profile</p>
-                <p class="text-2xl font-bold mt-2 text-blue-400">NIST / GDPR</p>
-            </div>
-        </div>
-
-        <!-- Dynamic Database Log Matrix View -->
+        <!-- Live Traffic Table Data -->
         <div class="bg-[#1c2541] rounded-xl border border-gray-700 shadow-lg overflow-hidden">
             <div class="p-6 border-b border-gray-700">
-                <h2 class="text-lg font-semibold text-gray-300">Live Traffic Logs (Fetched from Supabase)</h2>
+                <h2 class="text-lg font-semibold text-gray-300">Granular LLM Usage Metrics</h2>
             </div>
             <div class="overflow-x-auto">
                 <table class="w-full text-left border-collapse">
                     <thead>
                         <tr class="bg-[#111a36] text-gray-400 text-xs uppercase tracking-wider border-b border-gray-700">
                             <th class="p-4">Timestamp</th>
-                            <th class="p-4">Captured Model</th>
-                            <th class="p-4">Status / Event Description</th>
+                            <th class="p-4">Model Name</th>
+                            <th class="p-4">Version</th>
+                            <th class="p-4">Thinking Level</th>
+                            <th class="p-4">Input Tokens</th>
+                            <th class="p-4">Output Tokens</th>
+                            <th class="p-4">Balance Tokens</th>
+                            <th class="p-4">Subscription</th>
                         </tr>
                     </thead>
                     <tbody id="db-traffic-rows">
                         <tr>
-                            <td colspan="3" class="p-4 text-center text-gray-500">Awaiting incoming cloud data pipeline...</td>
+                            <td colspan="8" class="p-4 text-center text-gray-500">Connecting to telemetry storage...</td>
                         </tr>
                     </tbody>
                 </table>
@@ -74,18 +59,15 @@ DASHBOARD_TEMPLATE = """
         </div>
     </div>
 
-    <!-- Long-Polling Script to Query Database updates dynamically -->
     <script>
         async function fetchLatestLogs() {
             try {
                 const response = await fetch('/api/get-logs');
                 const logs = await response.json();
-                
                 const tbody = document.getElementById("db-traffic-rows");
-                document.getElementById("total-count").innerText = logs.length;
                 
-                if (logs.length === 0 || (logs.length === 1 && logs[0].model === "Fallback Mode")) {
-                    tbody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-gray-400">${logs[0]?.tokens || 'No logs found.'}</td></tr>`;
+                if (logs.length === 1 && logs[0].model_name === "System Status") {
+                    tbody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-gray-400 font-mono">${logs[0].subscription_details}</td></tr>`;
                     return;
                 }
                 
@@ -93,19 +75,29 @@ DASHBOARD_TEMPLATE = """
                 logs.forEach(log => {
                     const row = document.createElement("tr");
                     row.className = "border-b border-gray-800 text-sm hover:bg-[#111a36]/50 transition-colors";
+                    
+                    let timeStr = "N/A";
+                    if (log.created_at) {
+                        const d = new Date(log.created_at);
+                        timeStr = d.toLocaleTimeString();
+                    }
+
                     row.innerHTML = `
-                        <td class="p-4 text-gray-400 font-mono">${log.created_at ? new Date(log.created_at).toLocaleTimeString() : 'N/A'}</td>
-                        <td class="p-4 font-semibold text-indigo-300">${log.model || 'Unknown'}</td>
-                        <td class="p-4 text-gray-300">${log.tokens || 'Payload Captured'}</td>
+                        <td class="p-4 text-gray-400 font-mono">${timeStr}</td>
+                        <td class="p-4 font-semibold text-indigo-300">${log.model_name || 'N/A'}</td>
+                        <td class="p-4 text-gray-300">${log.version || 'N/A'}</td>
+                        <td class="p-4"><span class="px-2 py-1 text-xs rounded bg-purple-900/50 text-purple-300 border border-purple-700">${log.thinking_level || 'None'}</span></td>
+                        <td class="p-4 font-mono text-emerald-400">${log.input_tokens ?? 0}</td>
+                        <td class="p-4 font-mono text-orange-400">${log.output_tokens ?? 0}</td>
+                        <td class="p-4 font-mono text-blue-400">${log.balance_tokens ?? 0}</td>
+                        <td class="p-4 text-gray-400 text-xs">${log.subscription_details || 'N/A'}</td>
                     `;
                     tbody.appendChild(row);
                 });
             } catch (err) {
-                console.error("Failed fetching latest telemetry logs from server:", err);
+                console.error("Dashboard error:", err);
             }
         }
-        
-        // Polling interval cycle: every 3 seconds
         setInterval(fetchLatestLogs, 3000);
         fetchLatestLogs();
     </script>
@@ -120,19 +112,16 @@ def home():
 @app.route("/api/get-logs")
 def get_logs():
     if not supabase:
-        return json.dumps([{"model": "Fallback Mode", "tokens": "Database configuration missing on host settings.", "created_at": None}])
+        return json.dumps([{"model_name": "System Status", "subscription_details": "Environment URL keys missing."}])
     try:
-        # Avoid syntax breaking variants entirely by using flat selection and Python array-level sorting
-        response = supabase.table("network_logs").select("*").limit(50).execute()
+        response = supabase.table("network_logs").select("*").limit(40).execute()
         data = response.data or []
-        
-        # Safe in-memory sorting by creation timestamp
-        if data and "created_at" in data[0]:
-            data.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-            
+        if not data:
+            return json.dumps([{"model_name": "System Status", "subscription_details": "✓ Database connected. Waiting for local proxy streams..."}])
+        data.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return json.dumps(data)
     except Exception as e:
-        return json.dumps([{"model": "Fallback Mode", "tokens": f"Query Error: {str(e)}", "created_at": None}])
+        return json.dumps([{"model_name": "System Status", "subscription_details": f"Error: {str(e)}"}])
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5050))
