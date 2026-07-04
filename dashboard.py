@@ -84,8 +84,8 @@ DASHBOARD_TEMPLATE = """
                 const tbody = document.getElementById("db-traffic-rows");
                 document.getElementById("total-count").innerText = logs.length;
                 
-                if (logs.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-gray-500">No logs found in database table.</td></tr>`;
+                if (logs.length === 0 || (logs.length === 1 && logs[0].model === "Fallback Mode")) {
+                    tbody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-gray-400">${logs[0]?.tokens || 'No logs found.'}</td></tr>`;
                     return;
                 }
                 
@@ -122,11 +122,17 @@ def get_logs():
     if not supabase:
         return json.dumps([{"model": "Fallback Mode", "tokens": "Database configuration missing on host settings.", "created_at": None}])
     try:
-        # Changed 'descending=True' to 'desc=True' to match the latest SDK version
-        response = supabase.table("network_logs").select("*").order("created_at", desc=True).limit(25).execute()
-        return json.dumps(response.data)
+        # Avoid syntax breaking variants entirely by using flat selection and Python array-level sorting
+        response = supabase.table("network_logs").select("*").limit(50).execute()
+        data = response.data or []
+        
+        # Safe in-memory sorting by creation timestamp
+        if data and "created_at" in data[0]:
+            data.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+            
+        return json.dumps(data)
     except Exception as e:
-        return json.dumps([{"model": "Error Firing Query", "tokens": str(e), "created_at": None}])
+        return json.dumps([{"model": "Fallback Mode", "tokens": f"Query Error: {str(e)}", "created_at": None}])
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5050))
