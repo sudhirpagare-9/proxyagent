@@ -116,9 +116,7 @@ def get_logs():
         return json.dumps(response.data)
     except Exception as e:
         return json.dumps([])
-
     
     if __name__ == "__main__":
-    # Render assigns a dynamic port variable; fall back to 5050 for local testing
     port = int(os.environ.get("PORT", 5050))
     app.run(host="0.0.0.0", port=port, debug=False)
