@@ -122,7 +122,8 @@ def get_logs():
     if not supabase:
         return json.dumps([{"model": "Fallback Mode", "tokens": "Database configuration missing on host settings.", "created_at": None}])
     try:
-        response = supabase.table("network_logs").select("*").order("created_at", descending=True).limit(25).execute()
+        # Changed 'descending=True' to 'desc=True' to match the latest SDK version
+        response = supabase.table("network_logs").select("*").order("created_at", desc=True).limit(25).execute()
         return json.dumps(response.data)
     except Exception as e:
         return json.dumps([{"model": "Error Firing Query", "tokens": str(e), "created_at": None}])
