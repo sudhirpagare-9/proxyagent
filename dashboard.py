@@ -34,7 +34,7 @@ DASHBOARD_TEMPLATE = """
             ☁️ Advanced AI Proxy Token Matrix
         </h1>
         
-        <!-- Preserved Top Metrics Panel Grid -->
+        <!-- Top Summary Metrics Cards (Preserved) -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <div class="bg-[#1c2541] p-6 rounded-xl border border-gray-700 shadow-lg">
                 <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Active Status</p>
@@ -135,7 +135,7 @@ def home():
 @app.route("/api/get-logs")
 def get_logs():
     if not supabase:
-        return json.dumps([{"model_name": "System Status", "subscription_details": "Environment URL keys missing on host environment settings."}])
+        return json.dumps([{"model_name": "System Status", "subscription_details": "Environment URL keys missing on host settings."}])
     try:
         response = supabase.table("network_logs").select("*").limit(40).execute()
         data = response.data or []
