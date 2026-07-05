@@ -206,10 +206,10 @@ def get_logs():
     if not supabase:
         return json.dumps([{"model_name": "System Status", "subscription_details": "Environment URL keys missing on host settings."}])
     try:
-        # FIX: Explicitly sort by created_at descending directly in Supabase BEFORE limiting the dataset to 100 entries.
+        # Correct parameter desc=True applied here
         response = supabase.table("network_logs")\
                            .select("*")\
-                           .order("created_at", descending=True)\
+                           .order("created_at", desc=True)\
                            .limit(100)\
                            .execute()
         
@@ -231,7 +231,8 @@ def download_csv():
         return "Database initialization error.", 500
         
     try:
-        response = supabase.table("network_logs").select("*").order("created_at", descending=True).execute()
+        # Correct parameter desc=True applied here
+        response = supabase.table("network_logs").select("*").order("created_at", desc=True).execute()
         records = response.data or []
         
         if not records:
