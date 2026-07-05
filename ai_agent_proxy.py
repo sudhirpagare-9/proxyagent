@@ -1,42 +1,41 @@
+import os
 import json
 from mitmproxy import http
 from supabase import create_client, Client
 
-SUPABASE_URL = "https://your-project-id.supabase.co"
-SUPABASE_KEY = "your-supabase-anon-key-here"
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+SUPABASE_URL = os.environ.get("SUPABASE_URL") or "https://your-actual-project-id.supabase.co"
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or "your-actual-anon-key-here"
 
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TARGET_DOMAINS = ["chatgpt.com", "openai.com", "claude.ai", "anthropic.com", "perplexity.ai", "gemini.google.com"]
+
+# Operational Diagnostic: Confirm visibility of outbound target requests
+def request(flow: http.HTTPFlow) -> None:
+    if any(domain in flow.request.pretty_url for domain in TARGET_DOMAINS):
+        print(f"[Proxy Intercept Outbound] Target traffic spotted: {flow.request.pretty_url}")
 
 def response(flow: http.HTTPFlow) -> None:
     if any(domain in flow.request.pretty_url for domain in TARGET_DOMAINS):
         try:
             url_host = flow.request.pretty_host
+            print(f"[Proxy Intercept Activity] Caught streaming response from: {url_host}")
             
-            # Default fallback initial tracking assignments
-            model_name = "AI Model Session"
-            version = "Stable"
-            thinking_level = "Standard"
-            input_tokens = 450
-            output_tokens = 280
-            balance_tokens = 94500
+            # Default fallback mappings
+            model_name, version, thinking_level = "AI Model Session", "Stable", "Standard"
+            input_tokens, output_tokens, balance_tokens = 520, 340, 88400
             subscription_details = "Pro Tier"
 
             if "claude" in url_host:
-                model_name = "Claude"
-                version = "3.5 Sonnet"
-                thinking_level = "High"
+                model_name, version, thinking_level = "Claude", "3.5 Sonnet", "High"
             elif "chatgpt" in url_host or "openai" in url_host:
-                model_name = "GPT"
-                version = "4o"
-                thinking_level = "Dynamic"
+                model_name, version, thinking_level = "GPT", "4o", "Dynamic"
             elif "gemini" in url_host:
-                model_name = "Gemini"
-                version = "1.5 Pro"
-                thinking_level = "Adaptive"
+                model_name, version, thinking_level = "Gemini", "1.5 Pro", "Adaptive"
+            elif "perplexity" in url_host:
+                model_name, version, thinking_level = "Perplexity", "Sonar Online", "Deep Research"
 
-            # Parse structural JSON if body contents allow
-            body_text = flow.request.get_text(as_bytes=False) or ""
+            # Parse dynamic model properties if available safely
+            body_text = flow.request.get_text() or ""
             if body_text and '"model"' in body_text:
                 try:
                     parsed = json.loads(body_text)
@@ -55,7 +54,13 @@ def response(flow: http.HTTPFlow) -> None:
                 "subscription_details": subscription_details
             }
             
-            supabase.table("network_logs").insert(log_payload).execute()
-            print(f"[Proxy Matrix Sync] Log entry generated for {model_name} ({version})")
+            # Fire data stream directly into Supabase
+            res = supabase.table("network_logs").insert(log_payload).execute()
+            print(f"[Proxy Matrix Sync] Success! Stored row in DB for {model_name}.")
         except Exception as err:
-            print(f"[Proxy Error]: {err}")
+            print(f"[Proxy Insertion Error]: {err}")
+
+# Error tracking hook to capture dropped TLS connection handshakes
+def error(flow: http.HTTPFlow) -> None:
+    if any(domain in flow.request.pretty_url for domain in TARGET_DOMAINS):
+        print(f"[Proxy TLS Error] Connection dropped for {flow.request.pretty_url}. Error: {flow.error}")
