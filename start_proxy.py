@@ -12,7 +12,7 @@ async def start_proxy():
         listen_port=8080,
         upstream_cert=False,
         ssl_insecure=True, 
-        # Explicit bypass array prevents third-party WebSocket interruptions and socket drops
+        # Added explicit bypass patterns to drop background telemetry and web service noise
         ignore_hosts=[
             r".*supabase\.co(: \d+)?",
             r".*onrender\.com(: \d+)?",
@@ -21,6 +21,8 @@ async def start_proxy():
             r".*intercom\.io(: \d+)?",
             r".*whatsapp\.com(: \d+)?",
             r".*github\.com(: \d+)?",
+            r".*clients6\.google\.com(: \d+)?",
+            r".*stripe\.com(: \d+)?",
         ]
     )
 

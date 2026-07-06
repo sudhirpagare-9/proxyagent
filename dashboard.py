@@ -39,7 +39,7 @@ DASHBOARD_TEMPLATE = """
             <a href="/api/download-csv" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold px-4 py-2.5 rounded-xl border border-indigo-400/20 shadow-md transition-all">📥 Export History (.CSV)</a>
         </div>
 
-        <!-- Hardware Registry (With Inline CSS Fallbacks to prevent unstyled text clumping) -->
+        <!-- Hardware Device Authorization Registry Control Section -->
         <div class="bg-[#1c2541] rounded-xl border border-gray-700 shadow-lg p-6 mb-8">
             <h2 class="text-xl font-bold text-indigo-300 mb-4">🛡️ Hardware Device Authorization Registry</h2>
             <div class="overflow-x-auto">
@@ -60,7 +60,7 @@ DASHBOARD_TEMPLATE = """
             </div>
         </div>
 
-        <!-- Usage Table View -->
+        <!-- Granular LLM Usage Metrics Table View -->
         <div class="bg-[#1c2541] rounded-xl border border-gray-700 shadow-lg overflow-hidden">
             <div class="p-6 border-b border-gray-700">
                 <h2 class="text-lg font-semibold text-gray-300">Granular LLM Usage Metrics</h2>
@@ -167,6 +167,7 @@ DASHBOARD_TEMPLATE = """
                     return;
                 }
 
+                // Cleaned interpolation loops: Removed the broken backslash escape markers completely
                 logs.forEach(log => {
                     let timeStr = "N/A";
                     if (log.created_at) {
@@ -223,7 +224,6 @@ def ingest_log():
     try:
         check = supabase.table("clients_registry").select("*").eq("hw_id", hw_id).execute()
         device_status = "PENDING"
-        client_display_name = hostname
         
         if not check.data:
             new_device = {
@@ -234,13 +234,6 @@ def ingest_log():
             supabase.table("clients_registry").insert(new_device).execute()
         else:
             device_status = check.data[0].get("status", "PENDING")
-            db_client_name = check.data[0].get("client_name")
-            
-            # Explicit protection block against literal "Unknown" strings breaking identity displays
-            if not db_client_name or str(db_client_name).lower() == "unknown":
-                client_display_name = hostname if (hostname and str(hostname).lower() != "unknown") else hw_id
-            else:
-                client_display_name = db_client_name
         
         if device_status == "BLOCKED":
             return "Access Privileges Suspended by Dashboard Admin Control.", 403
@@ -248,6 +241,7 @@ def ingest_log():
         if device_status == "PENDING":
             return "Registration pending admin approval.", 202
 
+        # Fixed relational mapping constraint layout: Pass exact primary hw_id keys directly into client_id columns to avoid DB Error 400
         log_entry = {
             "model_name": payload.get("model_name"),
             "version": payload.get("version"),
@@ -256,7 +250,7 @@ def ingest_log():
             "output_tokens": payload.get("output_tokens"),
             "balance_tokens": payload.get("balance_tokens"),
             "subscription_details": payload.get("subscription_details"),
-            "client_id": client_display_name,
+            "client_id": hw_id, 
             "app_name": payload.get("app_name", "Generic HTTP App")
         }
         supabase.table("network_logs").insert(log_entry).execute()
@@ -299,8 +293,25 @@ def admin_delete_device():
 def get_logs():
     if not supabase: return jsonify([])
     try:
+        # Relational Mapping Layer: Fetch metrics logs and map names on the fly
         response = supabase.table("network_logs").select("*").order("created_at", desc=True).limit(100).execute()
-        return Response(json.dumps(response.data or []), mimetype="application/json")
+        logs = response.data or []
+        
+        devices_res = supabase.table("clients_registry").select("hw_id", "client_name", "hostname").execute()
+        devices = devices_res.data or []
+        device_map = {}
+        for d in devices:
+            friendly_name = d.get("client_name") or d.get("hostname") or d.get("hw_id")
+            if not friendly_name or str(friendly_name).lower() == "unknown":
+                friendly_name = d.get("hostname") or d.get("hw_id")
+            device_map[d["hw_id"]] = friendly_name
+
+        for log in logs:
+            cid = log.get("client_id")
+            if cid in device_map:
+                log["client_id"] = device_map[cid]
+
+        return Response(json.dumps(logs), mimetype="application/json")
     except Exception as e:
         return Response(json.dumps({"error": f"Schema match failure: {str(e)}"}), mimetype="application/json")
 
