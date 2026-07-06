@@ -6,7 +6,6 @@ import asyncio
 import requests
 from mitmproxy import http
 
-# Route traffic metrics directly through the centralized app pipeline
 INGEST_URL = "https://proxyagent-dashboard.onrender.com/api/ingest"
 TARGET_DOMAINS = ["chatgpt.com", "openai.com", "claude.ai", "anthropic.com", "perplexity.ai", "gemini.google.com", "google.com"]
 
@@ -20,7 +19,6 @@ def get_system_identifiers():
     except Exception:
         return "HW-UNKNOWN", "Unknown-Host", "00:00:00:00:00:00"
 
-# Read hardware fingerprint locally 
 HW_ID, HOSTNAME, MAC_ADDRESS = get_system_identifiers()
 
 def parse_application_name(user_agent_string):
@@ -44,11 +42,10 @@ def parse_application_name(user_agent_string):
         return "Postman Client"
     elif "python-requests" in ua:
         return "Python Requests"
-    return user_agent_string[:24] # Fallback to shortened raw User-Agent
+    return user_agent_string[:24]
 
 def _forward_to_ingest_pipeline(payload):
     try:
-        # Offload network payload delivery to the central system registry
         response = requests.post(INGEST_URL, json=payload, timeout=5)
         print(f"[Proxy Matrix Sync] Ingest Node Status Code Response: {response.status_code}")
     except Exception as err:
@@ -67,7 +64,6 @@ async def response(flow: http.HTTPFlow) -> None:
             url_host = flow.request.pretty_host.lower()
             print(f"[Proxy Intercept Activity] Processing traffic stream from: {url_host}")
             
-            # Match baseline structures
             model_name, version, thinking_level = "AI Model Session", "Stable", "Standard"
             input_tokens, output_tokens, balance_tokens = 520, 340, 88400
             subscription_details = "Pro Tier"
@@ -81,7 +77,6 @@ async def response(flow: http.HTTPFlow) -> None:
             elif "chatgpt" in url_host or "openai" in url_host:
                 model_name, version, thinking_level = "GPT", "4o", "Dynamic"
 
-            # Intercept payload metadata if available
             body_text = flow.request.get_text() or ""
             if body_text:
                 try:
@@ -95,11 +90,9 @@ async def response(flow: http.HTTPFlow) -> None:
                 except Exception:
                     pass
 
-            # Extract source browser identity from the actual live request headers
             user_agent = flow.request.headers.get("User-Agent", "Generic HTTP App")
             detected_app = parse_application_name(user_agent)
 
-            # Package telemetry payload
             log_payload = {
                 "hw_id": HW_ID,
                 "hostname": HOSTNAME,
@@ -112,9 +105,8 @@ async def response(flow: http.HTTPFlow) -> None:
                 "balance_tokens": int(balance_tokens),
                 "subscription_details": subscription_details,
                 "app_name": detected_app
-                }
+            }
             
-            # Execute worker thread safely to keep your browsing latency near zero
             loop = asyncio.get_running_loop()
             loop.run_in_executor(None, _forward_to_ingest_pipeline, log_payload)
 

@@ -96,7 +96,6 @@ DASHBOARD_TEMPLATE = """
                 const devices = await r.json();
                 const tbody = document.getElementById("admin-device-rows");
                 
-                // Inspect if the server explicitly returned an environmental database error block
                 if (devices.error) {
                     tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-red-400 font-mono bg-red-950/20 rounded-lg">⚠️ Database Query Interruption: ${devices.message}</td></tr>`;
                     return;
@@ -198,8 +197,8 @@ DASHBOARD_TEMPLATE = """
         // Setup loop cycles
         fetchDevices();
         fetchLogs();
-        setInterval(fetchDevices, 4000); // Poll for new hardware authorization requests
-        setInterval(fetchLogs, 4000);    // Update AI log traffic data rows
+        setInterval(fetchDevices, 4000); 
+        setInterval(fetchLogs, 4000);    
     </script>
 </body>
 </html>
@@ -209,42 +208,45 @@ DASHBOARD_TEMPLATE = """
 def home():
     return render_template_string(DASHBOARD_TEMPLATE, supabase_url=SUPABASE_URL, supabase_key=SUPABASE_KEY)
 
-# ADVANCED INTELLECTUAL INGESTION INTERCEPT ROUTE
+# NON-BLOCKING INGESTION ENGINE
 @app.route("/api/ingest", methods=["POST"])
 def ingest_log():
     if not supabase:
         return jsonify({"error": "Database context engine offline."}), 500
     
     payload = request.json
-    hw_id = payload.get("hw_id")
+    if not payload:
+        return "Missing payload data layer.", 400
+
+    hw_id = payload.get("hw_id", "HW-UNKNOWN")
     hostname = payload.get("hostname", "Unknown-Host")
     mac_address = payload.get("mac_address", "00:00:00:00:00:00")
-    
-    # Trace original public IP correctly across proxy layers
     client_ip = request.headers.get("X-Forwarded-For", request.remote_addr).split(',')[0].strip()
 
     try:
-        # Check if hardware address layout profile is already registered inside our registry
+        # Check if hardware layout profile is already registered inside our registry
         check = supabase.table("clients_registry").select("*").eq("hw_id", hw_id).execute()
         
+        device_status = "PENDING"
+        client_display_name = hostname
+        
         if not check.data:
-            # AUTO REGISTRATION PIPELINE: Add unauthorized node profile to review jail
+            # AUTO ONBOARDING PIPELINE: Instantly create profile if seen for the first time
             new_device = {
                 "hw_id": hw_id, "hostname": hostname, 
                 "mac_address": mac_address, "ip_address": client_ip, 
                 "status": "PENDING", "client_name": hostname
             }
             supabase.table("clients_registry").insert(new_device).execute()
-            return "Registration Process Pending Authorization Loop.", 202
+        else:
+            device_status = check.data[0].get("status", "PENDING")
+            client_display_name = check.data[0].get("client_name", hostname)
         
-        device_status = check.data[0]["status"]
-        
-        if device_status == "PENDING":
-            return "Registration Pending Admin Approval Constraints.", 202
-        elif device_status == "BLOCKED":
+        # Hard Security Enforcement Guardrail
+        if device_status == "BLOCKED":
             return "Access Privileges Suspended by Dashboard Admin Control.", 403
             
-        # APPROVED: Map matching client friendly alias name, package structural parameters, write out log
+        # Write metric straight to table logs (Runs immediately for PENDING and APPROVED states)
         log_entry = {
             "model_name": payload.get("model_name"),
             "version": payload.get("version"),
@@ -253,25 +255,24 @@ def ingest_log():
             "output_tokens": payload.get("output_tokens"),
             "balance_tokens": payload.get("balance_tokens"),
             "subscription_details": payload.get("subscription_details"),
-            "client_id": check.data[0]["client_name"],
+            "client_id": client_display_name,
             "app_name": payload.get("app_name", "Generic HTTP App")
         }
         supabase.table("network_logs").insert(log_entry).execute()
-        return "Log Telemetry Sync Success Context Map OK", 200
+        return "Log Telemetry Sync Success", 200
 
     except Exception as e:
+        print(f"[Ingest Server Crash Avoided]: {e}")
         return f"Ingest Pipeline Exception Interruption: {str(e)}", 400
 
-# SAFE REST MANAGEMENT PORTAL ENDPOINTS
+# REST ENDPOINTS
 @app.route("/api/admin/devices")
 def admin_get_devices():
-    if not supabase: 
-        return jsonify([])
+    if not supabase: return jsonify([])
     try:
         res = supabase.table("clients_registry").select("*").order("created_at", desc=True).execute()
         return jsonify(res.data or [])
     except Exception as e:
-        print(f"[Portal Security Warning] Missing table dependency 'clients_registry': {e}")
         return jsonify({"error": "missing_table", "message": "Please execute table script in Supabase SQL editor."})
 
 @app.route("/api/admin/device/update", methods=["POST"])
@@ -296,23 +297,20 @@ def admin_delete_device():
 
 @app.route("/api/get-logs")
 def get_logs():
-    if not supabase: 
-        return jsonify([])
+    if not supabase: return jsonify([])
     try:
         response = supabase.table("network_logs").select("*").order("created_at", desc=True).limit(100).execute()
         return json.dumps(response.data or [])
     except Exception as e:
-        return json.dumps({"error": f"Ensure network_logs matching schema exists: {str(e)}"})
+        return json.dumps({"error": f"Schema match failure: {str(e)}"})
 
 @app.route("/api/download-csv")
 def download_csv():
-    if not supabase: 
-        return "Database initialization link error.", 500
+    if not supabase: return "Database link error.", 500
     try:
         response = supabase.table("network_logs").select("*").order("created_at", desc=True).execute()
         records = response.data or []
-        if not records: 
-            return "No records data generated yet.", 404
+        if not records: return "No records data generated yet.", 404
             
         si = io.StringIO()
         writer = csv.DictWriter(si, fieldnames=records[0].keys())
@@ -321,10 +319,10 @@ def download_csv():
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output = Response(si.getvalue(), mimetype="text/csv")
-        output.headers["Content-Disposition"] = f"attachment; filename=proxy_matrix_history_{timestamp}.csv"
+        output.headers["Content-Disposition"] = f"attachment; filename=proxy_history_{timestamp}.csv"
         return output
     except Exception as e:
-        return f"Export report compilation malfunction exception: {str(e)}", 500
+        return f"Report error: {str(e)}", 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5050))
