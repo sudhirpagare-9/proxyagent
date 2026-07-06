@@ -96,34 +96,33 @@ DASHBOARD_TEMPLATE = """
                 const tbody = document.getElementById("admin-device-rows");
                 
                 if (devices.error) {
-                    tbody.innerHTML = `<tr><td colspan="5" style="padding: 16px; text-align: center; color: #f87171;">⚠️ Database Query Interruption: ${devices.message}</td></tr>`;
+                    tbody.innerHTML = '<tr><td colspan="5" style="padding: 16px; text-align: center; color: #f87171;">⚠️ Database Query Interruption: ' + devices.message + '</td></tr>';
                     return;
                 }
                 
                 tbody.innerHTML = "";
                 if (devices.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="5" style="padding: 16px; text-align: center; color: #9ca3af;">No client machines profiled yet. Pending node requests will appear here automatically.</td></tr>`;
+                    tbody.innerHTML = '<tr><td colspan="5" style="padding: 16px; text-align: center; color: #9ca3af;">No client machines profiled yet. Pending node requests will appear here automatically.</td></tr>';
                     return;
                 }
 
+                // Standard string concatenation avoids browser string normalization errors
                 devices.forEach(d => {
-                    let statusBadge = `<span class="px-2 py-0.5 rounded text-xs bg-yellow-900/50 text-yellow-300 border border-yellow-700">PENDING APPROVAL</span>`;
-                    if (d.status === 'APPROVED') statusBadge = `<span class="px-2 py-0.5 rounded text-xs bg-emerald-900/50 text-emerald-300 border border-emerald-700">APPROVED</span>`;
-                    if (d.status === 'BLOCKED') statusBadge = `<span class="px-2 py-0.5 rounded text-xs bg-red-900/50 text-red-300 border border-red-700">BLOCKED</span>`;
+                    let statusBadge = '<span class="px-2 py-0.5 rounded text-xs bg-yellow-900/50 text-yellow-300 border border-yellow-700">PENDING APPROVAL</span>';
+                    if (d.status === 'APPROVED') statusBadge = '<span class="px-2 py-0.5 rounded text-xs bg-emerald-900/50 text-emerald-300 border border-emerald-700">APPROVED</span>';
+                    if (d.status === 'BLOCKED') statusBadge = '<span class="px-2 py-0.5 rounded text-xs bg-red-900/50 text-red-300 border border-red-700">BLOCKED</span>';
 
-                    tbody.innerHTML += `
-                        <tr class="border-b border-gray-800 hover:bg-[#111a36]/30">
-                            <td style="padding: 12px;" class="p-3 font-mono font-bold">${d.hostname}</td>
-                            <td style="padding: 12px;" class="p-3 font-mono text-gray-400">${d.mac_address}</td>
-                            <td style="padding: 12px;" class="p-3 font-mono text-indigo-300">${d.ip_address || 'N/A'}</td>
-                            <td style="padding: 12px;" class="p-3">${statusBadge}</td>
-                            <td style="padding: 12px; text-align: right;" class="p-3 text-right space-x-2">
-                                <button onclick="updateDevice('${d.hw_id}', 'APPROVED')" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-2.5 py-1 rounded font-semibold text-white transition-all">Approve</button>
-                                <button onclick="updateDevice('${d.hw_id}', 'BLOCKED')" class="bg-amber-600 hover:bg-amber-500 text-xs px-2.5 py-1 rounded font-semibold text-white transition-all">Block</button>
-                                <button onclick="deleteDevice('${d.hw_id}')" class="bg-red-600 hover:bg-red-500 text-xs px-2.5 py-1 rounded font-semibold text-white transition-all">Delete</button>
-                            </td>
-                        </tr>
-                    `;
+                    tbody.innerHTML += '<tr class="border-b border-gray-800 hover:bg-[#111a36]/30">' +
+                        '<td style="padding: 12px;" class="p-3 font-mono font-bold">' + d.hostname + '</td>' +
+                        '<td style="padding: 12px;" class="p-3 font-mono text-gray-400">' + d.mac_address + '</td>' +
+                        '<td style="padding: 12px;" class="p-3 font-mono text-indigo-300">' + (d.ip_address || 'N/A') + '</td>' +
+                        '<td style="padding: 12px;" class="p-3">' + statusBadge + '</td>' +
+                        '<td style="padding: 12px; text-align: right;" class="p-3 text-right space-x-2">' +
+                            '<button onclick="updateDevice(\'' + d.hw_id + '\', \'APPROVED\')" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-2.5 py-1 rounded font-semibold text-white transition-all">Approve</button>' +
+                            '<button onclick="updateDevice(\'' + d.hw_id + '\', \'BLOCKED\')" class="bg-amber-600 hover:bg-amber-500 text-xs px-2.5 py-1 rounded font-semibold text-white transition-all">Block</button>' +
+                            '<button onclick="deleteDevice(\'' + d.hw_id + '\')" class="bg-red-600 hover:bg-red-500 text-xs px-2.5 py-1 rounded font-semibold text-white transition-all">Delete</button>' +
+                        '</td>' +
+                    '</tr>';
                 });
             } catch(e) { 
                 console.error("JSON UI Stream parsing exception thrown:", e); 
@@ -157,17 +156,17 @@ DASHBOARD_TEMPLATE = """
                 const tbody = document.getElementById("db-traffic-rows");
                 
                 if (logs.error) {
-                    tbody.innerHTML = `<tr><td colspan="9" style="padding: 16px; text-align: center; color: #f87171;">⚠️ Telemetry Processing Interruption: ${logs.error}</td></tr>`;
+                    tbody.innerHTML = '<tr><td colspan="9" style="padding: 16px; text-align: center; color: #f87171;">⚠️ Telemetry Processing Interruption: ' + logs.error + '</td></tr>';
                     return;
                 }
                 
                 tbody.innerHTML = "";
                 if (logs.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="9" style="padding: 16px; text-align: center; color: #9ca3af;">Waiting for local client proxy activations...</td></tr>`;
+                    tbody.innerHTML = '<tr><td colspan="9" style="padding: 16px; text-align: center; color: #9ca3af;">Waiting for local client proxy activations...</td></tr>';
                     return;
                 }
 
-                // FIXED: Completely removed backslash prefixes to allow browser template rendering
+                // FIXED: Explicit string concatenation ensures reliable browser UI token parsing
                 logs.forEach(log => {
                     let timeStr = "N/A";
                     if (log.created_at) {
@@ -175,19 +174,17 @@ DASHBOARD_TEMPLATE = """
                         timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).toLowerCase();
                     }
 
-                    tbody.innerHTML += `
-                        <tr class="border-b border-gray-800 text-sm hover:bg-[#111a36]/50 transition-colors">
-                            <td style="padding: 16px;" class="p-4 text-gray-400 font-mono">${timeStr}</td>
-                            <td style="padding: 16px;" class="p-4 font-bold text-emerald-400 font-mono">${log.client_id || 'Unknown'}</td>
-                            <td style="padding: 16px;" class="p-4 text-sky-400 font-medium font-mono">${log.app_name || 'Generic HTTP App'}</td>
-                            <td style="padding: 16px;" class="p-4 font-semibold text-indigo-300">${log.model_name || 'N/A'}</td>
-                            <td style="padding: 16px;" class="p-4 text-gray-300 font-mono">${log.version || 'N/A'}</td>
-                            <td style="padding: 16px;" class="p-4"><span class="px-2 py-1 text-xs rounded bg-purple-900/50 text-purple-300 border border-purple-700">${log.thinking_level || 'None'}</span></td>
-                            <td style="padding: 16px;" class="p-4 font-mono text-emerald-400">${log.input_tokens ?? 0}</td>
-                            <td style="padding: 16px;" class="p-4 font-mono text-orange-400">${log.output_tokens ?? 0}</td>
-                            <td style="padding: 16px;" class="p-4 text-gray-400 text-xs">${log.subscription_details || 'N/A'}</td>
-                        </tr>
-                    `;
+                    tbody.innerHTML += '<tr class="border-b border-gray-800 text-sm hover:bg-[#111a36]/50 transition-colors">' +
+                        '<td style="padding: 16px;" class="p-4 text-gray-400 font-mono">' + timeStr + '</td>' +
+                        '<td style="padding: 16px;" class="p-4 font-bold text-emerald-400 font-mono">' + (log.client_id || 'Unknown') + '</td>' +
+                        '<td style="padding: 16px;" class="p-4 text-sky-400 font-medium font-mono">' + (log.app_name || 'Generic HTTP App') + '</td>' +
+                        '<td style="padding: 16px;" class="p-4 font-semibold text-indigo-300">' + (log.model_name || 'N/A') + '</td>' +
+                        '<td style="padding: 16px;" class="p-4 text-gray-300 font-mono">' + (log.version || 'N/A') + '</td>' +
+                        '<td style="padding: 16px;" class="p-4"><span class="px-2 py-1 text-xs rounded bg-purple-900/50 text-purple-300 border border-purple-700">' + (log.thinking_level || 'None') + '</span></td>' +
+                        '<td style="padding: 16px;" class="p-4 font-mono text-emerald-400">' + (log.input_tokens !== undefined ? log.input_tokens : 0) + '</td>' +
+                        '<td style="padding: 16px;" class="p-4 font-mono text-orange-400">' + (log.output_tokens !== undefined ? log.output_tokens : 0) + '</td>' +
+                        '<td style="padding: 16px;" class="p-4 text-gray-400 text-xs">' + (log.subscription_details || 'N/A') + '</td>' +
+                    '</tr>';
                 });
             } catch (err) { 
                 console.error("Traffic render thread runtime execution failure:", err); 
