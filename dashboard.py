@@ -96,7 +96,7 @@ DASHBOARD_TEMPLATE = """
                 const tbody = document.getElementById("admin-device-rows");
                 
                 if (devices.error) {
-                    tbody.innerHTML = `<tr><td colspan="5" style="padding: 16px; text-align: center; color: #f87171;">⚠️ Database Query Interruption: \${devices.message}</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="5" style="padding: 16px; text-align: center; color: #f87171;">⚠️ Database Query Interruption: ${devices.message}</td></tr>`;
                     return;
                 }
                 
@@ -113,14 +113,14 @@ DASHBOARD_TEMPLATE = """
 
                     tbody.innerHTML += `
                         <tr class="border-b border-gray-800 hover:bg-[#111a36]/30">
-                            <td style="padding: 12px;" class="p-3 font-mono font-bold">\${d.hostname}</td>
-                            <td style="padding: 12px;" class="p-3 font-mono text-gray-400">\${d.mac_address}</td>
-                            <td style="padding: 12px;" class="p-3 font-mono text-indigo-300">\${d.ip_address || 'N/A'}</td>
-                            <td style="padding: 12px;" class="p-3">\${statusBadge}</td>
+                            <td style="padding: 12px;" class="p-3 font-mono font-bold">${d.hostname}</td>
+                            <td style="padding: 12px;" class="p-3 font-mono text-gray-400">${d.mac_address}</td>
+                            <td style="padding: 12px;" class="p-3 font-mono text-indigo-300">${d.ip_address || 'N/A'}</td>
+                            <td style="padding: 12px;" class="p-3">${statusBadge}</td>
                             <td style="padding: 12px; text-align: right;" class="p-3 text-right space-x-2">
-                                <button onclick="updateDevice('\${d.hw_id}', 'APPROVED')" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-2.5 py-1 rounded font-semibold text-white transition-all">Approve</button>
-                                <button onclick="updateDevice('\${d.hw_id}', 'BLOCKED')" class="bg-amber-600 hover:bg-amber-500 text-xs px-2.5 py-1 rounded font-semibold text-white transition-all">Block</button>
-                                <button onclick="deleteDevice('\${d.hw_id}')" class="bg-red-600 hover:bg-red-500 text-xs px-2.5 py-1 rounded font-semibold text-white transition-all">Delete</button>
+                                <button onclick="updateDevice('${d.hw_id}', 'APPROVED')" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-2.5 py-1 rounded font-semibold text-white transition-all">Approve</button>
+                                <button onclick="updateDevice('${d.hw_id}', 'BLOCKED')" class="bg-amber-600 hover:bg-amber-500 text-xs px-2.5 py-1 rounded font-semibold text-white transition-all">Block</button>
+                                <button onclick="deleteDevice('${d.hw_id}')" class="bg-red-600 hover:bg-red-500 text-xs px-2.5 py-1 rounded font-semibold text-white transition-all">Delete</button>
                             </td>
                         </tr>
                     `;
@@ -157,7 +157,7 @@ DASHBOARD_TEMPLATE = """
                 const tbody = document.getElementById("db-traffic-rows");
                 
                 if (logs.error) {
-                    tbody.innerHTML = `<tr><td colspan="9" style="padding: 16px; text-align: center; color: #f87171;">⚠️ Telemetry Processing Interruption: \${logs.error}</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="9" style="padding: 16px; text-align: center; color: #f87171;">⚠️ Telemetry Processing Interruption: ${logs.error}</td></tr>`;
                     return;
                 }
                 
@@ -167,7 +167,7 @@ DASHBOARD_TEMPLATE = """
                     return;
                 }
 
-                // Cleaned JavaScript String Literal Blocks (Removed backslash escape prefixing)
+                // FIXED: Completely removed backslash prefixes to allow browser template rendering
                 logs.forEach(log => {
                     let timeStr = "N/A";
                     if (log.created_at) {
@@ -177,15 +177,15 @@ DASHBOARD_TEMPLATE = """
 
                     tbody.innerHTML += `
                         <tr class="border-b border-gray-800 text-sm hover:bg-[#111a36]/50 transition-colors">
-                            <td style="padding: 16px;" class="p-4 text-gray-400 font-mono">\${timeStr}</td>
-                            <td style="padding: 16px;" class="p-4 font-bold text-emerald-400 font-mono">\${log.client_id || 'Unknown'}</td>
-                            <td style="padding: 16px;" class="p-4 text-sky-400 font-medium font-mono">\${log.app_name || 'Generic HTTP App'}</td>
-                            <td style="padding: 16px;" class="p-4 font-semibold text-indigo-300">\${log.model_name || 'N/A'}</td>
-                            <td style="padding: 16px;" class="p-4 text-gray-300 font-mono">\${log.version || 'N/A'}</td>
-                            <td style="padding: 16px;" class="p-4"><span class="px-2 py-1 text-xs rounded bg-purple-900/50 text-purple-300 border border-purple-700">\${log.thinking_level || 'None'}</span></td>
-                            <td style="padding: 16px;" class="p-4 font-mono text-emerald-400">\${log.input_tokens ?? 0}</td>
-                            <td style="padding: 16px;" class="p-4 font-mono text-orange-400">\${log.output_tokens ?? 0}</td>
-                            <td style="padding: 16px;" class="p-4 text-gray-400 text-xs">\${log.subscription_details || 'N/A'}</td>
+                            <td style="padding: 16px;" class="p-4 text-gray-400 font-mono">${timeStr}</td>
+                            <td style="padding: 16px;" class="p-4 font-bold text-emerald-400 font-mono">${log.client_id || 'Unknown'}</td>
+                            <td style="padding: 16px;" class="p-4 text-sky-400 font-medium font-mono">${log.app_name || 'Generic HTTP App'}</td>
+                            <td style="padding: 16px;" class="p-4 font-semibold text-indigo-300">${log.model_name || 'N/A'}</td>
+                            <td style="padding: 16px;" class="p-4 text-gray-300 font-mono">${log.version || 'N/A'}</td>
+                            <td style="padding: 16px;" class="p-4"><span class="px-2 py-1 text-xs rounded bg-purple-900/50 text-purple-300 border border-purple-700">${log.thinking_level || 'None'}</span></td>
+                            <td style="padding: 16px;" class="p-4 font-mono text-emerald-400">${log.input_tokens ?? 0}</td>
+                            <td style="padding: 16px;" class="p-4 font-mono text-orange-400">${log.output_tokens ?? 0}</td>
+                            <td style="padding: 16px;" class="p-4 text-gray-400 text-xs">${log.subscription_details || 'N/A'}</td>
                         </tr>
                     `;
                 });
@@ -241,7 +241,6 @@ def ingest_log():
         if device_status == "PENDING":
             return "Registration pending admin approval.", 202
 
-        # Safe Telemetry Mapping Structure
         log_entry = {
             "model_name": payload.get("model_name"),
             "version": payload.get("version"),
@@ -258,7 +257,6 @@ def ingest_log():
             supabase.table("network_logs").insert(log_entry).execute()
         except Exception as db_err:
             print(f"[Supabase Schema Fallback Activated] Strict constraint hit: {db_err}")
-            # Dynamic Fallback: Safely re-attempts insertion with standard relational keys to guarantee response delivery
             safe_entry = {
                 "client_id": hw_id,
                 "model_name": payload.get("model_name", "AI Session Connection"),
