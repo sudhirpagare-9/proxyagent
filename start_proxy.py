@@ -41,7 +41,6 @@ async def start_proxy():
     try:
         await master.run()
     except OSError as os_err:
-        # Gracefully handle socket dropping (WinError 64) without crashing the server loop
         if getattr(os_err, 'winerror', None) == 64 or os_err.errno == errno.WSAENETRESET:
             print("[Proxy Warning] A network socket connection was dropped by the host OS or client (WinError 64). Continuing loop...", file=sys.stderr)
         else:

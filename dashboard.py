@@ -206,9 +206,8 @@ DASHBOARD_TEMPLATE = """
 
 @app.route("/")
 def home():
-    return render_template_string(DASHBOARD_TEMPLATE, supabase_url=SUPABASE_URL, supabase_key=SUPABASE_KEY)
+    return render_template_string(DASHBOARD_TEMPLATE)
 
-# NON-BLOCKING INGESTION ENGINE
 @app.route("/api/ingest", methods=["POST"])
 def ingest_log():
     if not supabase:
@@ -224,14 +223,11 @@ def ingest_log():
     client_ip = request.headers.get("X-Forwarded-For", request.remote_addr).split(',')[0].strip()
 
     try:
-        # Check if hardware layout profile is already registered inside our registry
         check = supabase.table("clients_registry").select("*").eq("hw_id", hw_id).execute()
-        
         device_status = "PENDING"
         client_display_name = hostname
         
         if not check.data:
-            # AUTO ONBOARDING PIPELINE: Instantly create profile if seen for the first time
             new_device = {
                 "hw_id": hw_id, "hostname": hostname, 
                 "mac_address": mac_address, "ip_address": client_ip, 
@@ -242,11 +238,9 @@ def ingest_log():
             device_status = check.data[0].get("status", "PENDING")
             client_display_name = check.data[0].get("client_name", hostname)
         
-        # Hard Security Enforcement Guardrail
         if device_status == "BLOCKED":
             return "Access Privileges Suspended by Dashboard Admin Control.", 403
             
-        # Write metric straight to table logs (Runs immediately for PENDING and APPROVED states)
         log_entry = {
             "model_name": payload.get("model_name"),
             "version": payload.get("version"),
@@ -265,7 +259,6 @@ def ingest_log():
         print(f"[Ingest Server Crash Avoided]: {e}")
         return f"Ingest Pipeline Exception Interruption: {str(e)}", 400
 
-# REST ENDPOINTS
 @app.route("/api/admin/devices")
 def admin_get_devices():
     if not supabase: return jsonify([])
@@ -273,7 +266,7 @@ def admin_get_devices():
         res = supabase.table("clients_registry").select("*").order("created_at", desc=True).execute()
         return jsonify(res.data or [])
     except Exception as e:
-        return jsonify({"error": "missing_table", "message": "Please execute table script in Supabase SQL editor."})
+        return jsonify({"error": "missing_table", "message": str(e)})
 
 @app.route("/api/admin/device/update", methods=["POST"])
 def admin_update_device():
@@ -300,9 +293,9 @@ def get_logs():
     if not supabase: return jsonify([])
     try:
         response = supabase.table("network_logs").select("*").order("created_at", desc=True).limit(100).execute()
-        return json.dumps(response.data or [])
+        return Response(json.dumps(response.data or []), mimetype="application/json")
     except Exception as e:
-        return json.dumps({"error": f"Schema match failure: {str(e)}"})
+        return Response(json.dumps({"error": f"Schema match failure: {str(e)}"}), mimetype="application/json")
 
 @app.route("/api/download-csv")
 def download_csv():
