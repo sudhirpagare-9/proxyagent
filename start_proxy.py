@@ -7,7 +7,6 @@ from mitmproxy.options import Options
 from mitmproxy.tools.dump import DumpMaster
 
 async def start_proxy():
-    # Fixed: Removed 'connection_strategy' to avoid KeyError
     options = Options(
         listen_host='0.0.0.0',
         listen_port=8080,
@@ -16,7 +15,7 @@ async def start_proxy():
         ignore_hosts=[
             r".*supabase\.co(: \d+)?",
             r".*onrender\.com(: \d+)?",
-        ][cite: 4]
+        ]
     )
 
     master = DumpMaster(options)
@@ -54,7 +53,6 @@ async def start_proxy():
         master.shutdown()
 
 if __name__ == "__main__":
-    # Fixed: Removed manual event loop policy manipulation to satisfy Python 3.14+ requirements
     try:
         asyncio.run(start_proxy())
     except (KeyboardInterrupt, SystemExit):
