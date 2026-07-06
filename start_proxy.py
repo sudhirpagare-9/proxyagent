@@ -16,7 +16,7 @@ async def start_proxy():
         ignore_hosts=[
             r".*supabase\.co(: \d+)?",
             r".*onrender\.com(: \d+)?",
-        ]
+        ][cite: 4]
     )
 
     master = DumpMaster(options)
