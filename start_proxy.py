@@ -12,7 +12,7 @@ async def start_proxy():
         listen_port=8080,
         upstream_cert=False,
         ssl_insecure=True, 
-        # Added explicit bypass patterns to drop background telemetry and web service noise
+        # Expanded telemetry ignore patterns to drop background asset tracker requests
         ignore_hosts=[
             r".*supabase\.co(: \d+)?",
             r".*onrender\.com(: \d+)?",
@@ -23,6 +23,9 @@ async def start_proxy():
             r".*github\.com(: \d+)?",
             r".*clients6\.google\.com(: \d+)?",
             r".*stripe\.com(: \d+)?",
+            r".*bing\.com(: \d+)?",
+            r".*google\.com\/log.*",
+            r".*microsoft\.com(: \d+)?",
         ]
     )
 

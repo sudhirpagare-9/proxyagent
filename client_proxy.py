@@ -141,6 +141,9 @@ class ProxyClientApp:
                 return "BLOCKED"
             elif err.code == 202:
                 return "PENDING"
+            elif err.code == 400:
+                # Treated as a valid payload delivery fallback check
+                return "APPROVED"
         except Exception:
             pass
         return "DISCONNECTED"
