@@ -3,7 +3,8 @@ import json
 import socket
 import uuid
 import asyncio
-import requests
+import urllib.request
+import urllib.error
 from mitmproxy import http
 
 INGEST_URL = "https://proxyagent-dashboard.onrender.com/api/ingest"
@@ -46,10 +47,20 @@ def parse_application_name(user_agent_string):
 
 def _forward_to_ingest_pipeline(payload):
     try:
-        response = requests.post(INGEST_URL, json=payload, timeout=5)
-        print(f"[Proxy Matrix Sync] Ingest Node Status Code Response: {response.status_code}")
+        data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(
+            INGEST_URL, 
+            data=data, 
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            status = response.getcode()
+            print(f"[Proxy Matrix Sync] Ingest Node Status Code Response: {status}")
+    except urllib.error.URLError as err:
+        print(f"[Proxy Outbound Sync Error] Network or URL issue: {err}")
     except Exception as err:
-        print(f"[Proxy Outbound Sync Error]: {err}")
+        print(f"[Proxy Outbound Sync Error] Unexpected error: {err}")
 
 async def request(flow: http.HTTPFlow) -> None:
     if any(domain in flow.request.pretty_url for domain in TARGET_DOMAINS):
@@ -77,7 +88,7 @@ async def response(flow: http.HTTPFlow) -> None:
             elif "chatgpt" in url_host or "openai" in url_host:
                 model_name, version, thinking_level = "GPT", "4o", "Dynamic"
 
-            body_text = flow.request.get_text() or ""
+            body_text = flow.request.text or ""
             if body_text:
                 try:
                     parsed = json.loads(body_text)
