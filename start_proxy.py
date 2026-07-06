@@ -12,17 +12,23 @@ async def start_proxy():
         listen_port=8080,
         upstream_cert=False,
         ssl_insecure=True, 
+        # Explicit bypass array prevents third-party WebSocket interruptions and socket drops
         ignore_hosts=[
             r".*supabase\.co(: \d+)?",
             r".*onrender\.com(: \d+)?",
+            r".*linkedin\.com(: \d+)?",
+            r".*render\.com(: \d+)?",
+            r".*intercom\.io(: \d+)?",
+            r".*whatsapp\.com(: \d+)?",
+            r".*github\.com(: \d+)?",
         ]
     )
 
     master = DumpMaster(options)
-    
     script_path = os.path.abspath("ai_agent_proxy.py")
+    
     if not os.path.exists(script_path):
-        print(f"[Proxy Error] Interceptor script not found at: {script_path}", file=sys.stderr)
+        print(f"[Proxy Error] Interceptor script not found at target directory: {script_path}", file=sys.stderr)
         return
 
     try:
@@ -42,14 +48,17 @@ async def start_proxy():
         await master.run()
     except OSError as os_err:
         if getattr(os_err, 'winerror', None) == 64 or os_err.errno == errno.WSAENETRESET:
-            print("[Proxy Warning] A network socket connection was dropped by the host OS or client (WinError 64). Continuing loop...", file=sys.stderr)
+            print("[Proxy Warning] Network socket connection dropped by host OS or client. Continuing loop...", file=sys.stderr)
         else:
             print(f"[Proxy Network Error] OS Network Exception encountered: {os_err}", file=sys.stderr)
     except (KeyboardInterrupt, SystemExit):
         pass
     finally:
         print("[Proxy Matrix Sync] Shutting down master...")
-        master.shutdown()
+        try:
+            master.shutdown()
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     try:

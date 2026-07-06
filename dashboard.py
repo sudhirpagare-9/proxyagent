@@ -7,7 +7,6 @@ from flask import Flask, render_template_string, Response, request, jsonify
 
 app = Flask(__name__)
 
-# Fetch production environment configurations safely
 SUPABASE_URL = os.environ.get("SUPABASE_URL") or "https://qwsnkbpsumqobrqkqpht.supabase.co"
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or "sb_publishable_IPKGvB9I6G7Ix0q2kkpucw_8JdGDaHh"
 
@@ -40,49 +39,49 @@ DASHBOARD_TEMPLATE = """
             <a href="/api/download-csv" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold px-4 py-2.5 rounded-xl border border-indigo-400/20 shadow-md transition-all">📥 Export History (.CSV)</a>
         </div>
 
-        <!-- Hardware Device Authorization Registry Control Section -->
+        <!-- Hardware Registry (With Inline CSS Fallbacks to prevent unstyled text clumping) -->
         <div class="bg-[#1c2541] rounded-xl border border-gray-700 shadow-lg p-6 mb-8">
             <h2 class="text-xl font-bold text-indigo-300 mb-4">🛡️ Hardware Device Authorization Registry</h2>
             <div class="overflow-x-auto">
-                <table class="w-full text-left text-sm">
+                <table class="w-full text-left text-sm" style="width: 100%; border-collapse: collapse;">
                     <thead>
                         <tr class="bg-[#111a36] text-gray-400 uppercase text-xs tracking-wider border-b border-gray-700">
-                            <th class="p-3">Device Hostname</th>
-                            <th class="p-3">MAC Address</th>
-                            <th class="p-3">Last Known IP</th>
-                            <th class="p-3">Authorization Status</th>
-                            <th class="p-3 text-right">Actions Control Menu</th>
+                            <th style="padding: 12px; text-align: left;" class="p-3">Device Hostname</th>
+                            <th style="padding: 12px; text-align: left;" class="p-3">MAC Address</th>
+                            <th style="padding: 12px; text-align: left;" class="p-3">Last Known IP</th>
+                            <th style="padding: 12px; text-align: left;" class="p-3">Authorization Status</th>
+                            <th style="padding: 12px; text-align: right;" class="p-3 text-right">Actions Control Menu</th>
                         </tr>
                     </thead>
                     <tbody id="admin-device-rows">
-                        <tr><td colspan="5" class="p-3 text-center text-gray-500">Querying terminal nodes framework...</td></tr>
+                        <tr><td colspan="5" style="padding: 20px; text-align: center;" class="p-3 text-center text-gray-500">Querying terminal nodes framework...</td></tr>
                     </tbody>
                 </table>
             </div>
         </div>
 
-        <!-- Granular LLM Usage Metrics Table View -->
+        <!-- Usage Table View -->
         <div class="bg-[#1c2541] rounded-xl border border-gray-700 shadow-lg overflow-hidden">
             <div class="p-6 border-b border-gray-700">
                 <h2 class="text-lg font-semibold text-gray-300">Granular LLM Usage Metrics</h2>
             </div>
             <div class="overflow-x-auto overflow-y-auto max-h-[400px]">
-                <table class="w-full text-left border-collapse">
+                <table class="w-full text-left border-collapse" style="width: 100%; border-collapse: collapse;">
                     <thead>
                         <tr class="bg-[#111a36] text-gray-400 text-xs uppercase tracking-wider border-b border-gray-700 sticky top-0 z-10">
-                            <th class="p-4 bg-[#111a36]">Timestamp</th>
-                            <th class="p-4 bg-[#111a36]">Client Device</th>
-                            <th class="p-4 bg-[#111a36]">Source Application</th>
-                            <th class="p-4 bg-[#111a36]">Model Name</th>
-                            <th class="p-4 bg-[#111a36]">Version</th>
-                            <th class="p-4 bg-[#111a36]">Thinking Level</th>
-                            <th class="p-4 bg-[#111a36]">Input Tokens</th>
-                            <th class="p-4 bg-[#111a36]">Output Tokens</th>
-                            <th class="p-4 bg-[#111a36]">Subscription</th>
+                            <th style="padding: 12px; text-align: left; background-color: #111a36;" class="p-4">Timestamp</th>
+                            <th style="padding: 12px; text-align: left; background-color: #111a36;" class="p-4">Client Device</th>
+                            <th style="padding: 12px; text-align: left; background-color: #111a36;" class="p-4">Source Application</th>
+                            <th style="padding: 12px; text-align: left; background-color: #111a36;" class="p-4">Model Name</th>
+                            <th style="padding: 12px; text-align: left; background-color: #111a36;" class="p-4">Version</th>
+                            <th style="padding: 12px; text-align: left; background-color: #111a36;" class="p-4">Thinking Level</th>
+                            <th style="padding: 12px; text-align: left; background-color: #111a36;" class="p-4">Input Tokens</th>
+                            <th style="padding: 12px; text-align: left; background-color: #111a36;" class="p-4">Output Tokens</th>
+                            <th style="padding: 12px; text-align: left; background-color: #111a36;" class="p-4">Subscription</th>
                         </tr>
                     </thead>
                     <tbody id="db-traffic-rows">
-                        <tr><td colspan="9" class="p-4 text-center text-gray-500">Connecting to telemetry storage...</td></tr>
+                        <tr><td colspan="9" style="padding: 20px; text-align: center;" class="p-4 text-center text-gray-500">Connecting to telemetry storage...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -97,13 +96,13 @@ DASHBOARD_TEMPLATE = """
                 const tbody = document.getElementById("admin-device-rows");
                 
                 if (devices.error) {
-                    tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-red-400 font-mono bg-red-950/20 rounded-lg">⚠️ Database Query Interruption: ${devices.message}</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="5" style="padding: 16px; text-align: center; color: #f87171;">⚠️ Database Query Interruption: \${devices.message}</td></tr>`;
                     return;
                 }
                 
                 tbody.innerHTML = "";
                 if (devices.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="5" class="p-3 text-center text-gray-400">No client machines profiled yet. Pending node requests will appear here automatically.</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="5" style="padding: 16px; text-align: center; color: #9ca3af;">No client machines profiled yet. Pending node requests will appear here automatically.</td></tr>`;
                     return;
                 }
 
@@ -114,14 +113,14 @@ DASHBOARD_TEMPLATE = """
 
                     tbody.innerHTML += `
                         <tr class="border-b border-gray-800 hover:bg-[#111a36]/30">
-                            <td class="p-3 font-mono font-bold">${d.hostname}</td>
-                            <td class="p-3 font-mono text-gray-400">${d.mac_address}</td>
-                            <td class="p-3 font-mono text-indigo-300">${d.ip_address || 'N/A'}</td>
-                            <td class="p-3">${statusBadge}</td>
-                            <td class="p-3 text-right space-x-2">
-                                <button onclick="updateDevice('${d.hw_id}', 'APPROVED')" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-2.5 py-1 rounded font-semibold text-white transition-all">Approve</button>
-                                <button onclick="updateDevice('${d.hw_id}', 'BLOCKED')" class="bg-amber-600 hover:bg-amber-500 text-xs px-2.5 py-1 rounded font-semibold text-white transition-all">Block</button>
-                                <button onclick="deleteDevice('${d.hw_id}')" class="bg-red-600 hover:bg-red-500 text-xs px-2.5 py-1 rounded font-semibold text-white transition-all">Delete</button>
+                            <td style="padding: 12px;" class="p-3 font-mono font-bold">\${d.hostname}</td>
+                            <td style="padding: 12px;" class="p-3 font-mono text-gray-400">\${d.mac_address}</td>
+                            <td style="padding: 12px;" class="p-3 font-mono text-indigo-300">\${d.ip_address || 'N/A'}</td>
+                            <td style="padding: 12px;" class="p-3">\${statusBadge}</td>
+                            <td style="padding: 12px; text-align: right;" class="p-3 text-right space-x-2">
+                                <button onclick="updateDevice('\${d.hw_id}', 'APPROVED')" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-2.5 py-1 rounded font-semibold text-white transition-all">Approve</button>
+                                <button onclick="updateDevice('\${d.hw_id}', 'BLOCKED')" class="bg-amber-600 hover:bg-amber-500 text-xs px-2.5 py-1 rounded font-semibold text-white transition-all">Block</button>
+                                <button onclick="deleteDevice('\${d.hw_id}')" class="bg-red-600 hover:bg-red-500 text-xs px-2.5 py-1 rounded font-semibold text-white transition-all">Delete</button>
                             </td>
                         </tr>
                     `;
@@ -158,13 +157,13 @@ DASHBOARD_TEMPLATE = """
                 const tbody = document.getElementById("db-traffic-rows");
                 
                 if (logs.error) {
-                    tbody.innerHTML = `<tr><td colspan="9" class="p-4 text-center text-red-400 font-mono">⚠️ Telemetry Processing Interruption: ${logs.error}</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="9" style="padding: 16px; text-align: center; color: #f87171;">⚠️ Telemetry Processing Interruption: \${logs.error}</td></tr>`;
                     return;
                 }
                 
                 tbody.innerHTML = "";
-                if (logs.length === 0 || logs[0].model_name === "System Status") {
-                    tbody.innerHTML = `<tr><td colspan="9" class="p-4 text-center text-gray-400 font-mono">Waiting for local client proxy activations...</td></tr>`;
+                if (logs.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="9" style="padding: 16px; text-align: center; color: #9ca3af;">Waiting for local client proxy activations...</td></tr>`;
                     return;
                 }
 
@@ -177,15 +176,15 @@ DASHBOARD_TEMPLATE = """
 
                     tbody.innerHTML += `
                         <tr class="border-b border-gray-800 text-sm hover:bg-[#111a36]/50 transition-colors">
-                            <td class="p-4 text-gray-400 font-mono">${timeStr}</td>
-                            <td class="p-4 font-bold text-emerald-400 font-mono">${log.client_id || 'Unknown'}</td>
-                            <td class="p-4 text-sky-400 font-medium font-mono">${log.app_name || 'Generic HTTP App'}</td>
-                            <td class="p-4 font-semibold text-indigo-300">${log.model_name || 'N/A'}</td>
-                            <td class="p-4 text-gray-300 font-mono">${log.version || 'N/A'}</td>
-                            <td class="p-4"><span class="px-2 py-1 text-xs rounded bg-purple-900/50 text-purple-300 border border-purple-700">${log.thinking_level || 'None'}</span></td>
-                            <td class="p-4 font-mono text-emerald-400">${log.input_tokens ?? 0}</td>
-                            <td class="p-4 font-mono text-orange-400">${log.output_tokens ?? 0}</td>
-                            <td class="p-4 text-gray-400 text-xs">${log.subscription_details || 'N/A'}</td>
+                            <td style="padding: 16px;" class="p-4 text-gray-400 font-mono">\${timeStr}</td>
+                            <td style="padding: 16px;" class="p-4 font-bold text-emerald-400 font-mono">\${log.client_id || 'Unknown'}</td>
+                            <td style="padding: 16px;" class="p-4 text-sky-400 font-medium font-mono">\${log.app_name || 'Generic HTTP App'}</td>
+                            <td style="padding: 16px;" class="p-4 font-semibold text-indigo-300">\${log.model_name || 'N/A'}</td>
+                            <td style="padding: 16px;" class="p-4 text-gray-300 font-mono">\${log.version || 'N/A'}</td>
+                            <td style="padding: 16px;" class="p-4"><span class="px-2 py-1 text-xs rounded bg-purple-900/50 text-purple-300 border border-purple-700">\${log.thinking_level || 'None'}</span></td>
+                            <td style="padding: 16px;" class="p-4 font-mono text-emerald-400">\${log.input_tokens ?? 0}</td>
+                            <td style="padding: 16px;" class="p-4 font-mono text-orange-400">\${log.output_tokens ?? 0}</td>
+                            <td style="padding: 16px;" class="p-4 text-gray-400 text-xs">\${log.subscription_details || 'N/A'}</td>
                         </tr>
                     `;
                 });
@@ -194,7 +193,6 @@ DASHBOARD_TEMPLATE = """
             }
         }
 
-        // Setup loop cycles
         fetchDevices();
         fetchLogs();
         setInterval(fetchDevices, 4000); 
@@ -236,11 +234,20 @@ def ingest_log():
             supabase.table("clients_registry").insert(new_device).execute()
         else:
             device_status = check.data[0].get("status", "PENDING")
-            client_display_name = check.data[0].get("client_name", hostname)
+            db_client_name = check.data[0].get("client_name")
+            
+            # Explicit protection block against literal "Unknown" strings breaking identity displays
+            if not db_client_name or str(db_client_name).lower() == "unknown":
+                client_display_name = hostname if (hostname and str(hostname).lower() != "unknown") else hw_id
+            else:
+                client_display_name = db_client_name
         
         if device_status == "BLOCKED":
             return "Access Privileges Suspended by Dashboard Admin Control.", 403
             
+        if device_status == "PENDING":
+            return "Registration pending admin approval.", 202
+
         log_entry = {
             "model_name": payload.get("model_name"),
             "version": payload.get("version"),

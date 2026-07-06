@@ -8,7 +8,7 @@ import urllib.error
 from mitmproxy import http
 
 INGEST_URL = "https://proxyagent-dashboard.onrender.com/api/ingest"
-TARGET_DOMAINS = ["chatgpt.com", "openai.com", "claude.ai", "anthropic.com", "perplexity.ai", "gemini.google.com", "google.com"]
+TARGET_DOMAINS = ["chatgpt.com", "openai.com", "claude.ai", "anthropic.com", "perplexity.ai", "gemini.google.com", "aistudio.google.com"]
 
 def get_system_identifiers():
     try:
@@ -41,8 +41,8 @@ def parse_application_name(user_agent_string):
         return "Firefox Browser"
     elif "postman" in ua:
         return "Postman Client"
-    elif "python-requests" in ua:
-        return "Python Requests"
+    elif "python-requests" in ua or "python-urllib" in ua:
+        return "Python Runtime"
     return user_agent_string[:24]
 
 def _forward_to_ingest_pipeline(payload):
@@ -56,11 +56,11 @@ def _forward_to_ingest_pipeline(payload):
         )
         with urllib.request.urlopen(req, timeout=5) as response:
             status = response.getcode()
-            print(f"[Proxy Matrix Sync] Ingest Node Status Code Response: {status}")
+            print(f"[Proxy Matrix Sync] Ingest Node Response Status: {status}")
     except urllib.error.URLError as err:
-        print(f"[Proxy Outbound Sync Error] Network or URL issue: {err}")
+        print(f"[Proxy Outbound Sync Error] Telemetry ingest link issue: {err}")
     except Exception as err:
-        print(f"[Proxy Outbound Sync Error] Unexpected error: {err}")
+        print(f"[Proxy Outbound Sync Error] Unexpected dispatch error: {err}")
 
 async def request(flow: http.HTTPFlow) -> None:
     if any(domain in flow.request.pretty_url for domain in TARGET_DOMAINS):
@@ -88,13 +88,15 @@ async def response(flow: http.HTTPFlow) -> None:
             elif "chatgpt" in url_host or "openai" in url_host:
                 model_name, version, thinking_level = "GPT", "4o", "Dynamic"
 
-            body_text = flow.request.text or ""
+            body_text = flow.request.get_text(strict=False) or ""
             if body_text:
                 try:
                     parsed = json.loads(body_text)
                     if isinstance(parsed, dict):
                         if "model" in parsed:
-                            version = str(parsed["model"])
+                            model_val = parsed["model"]
+                            if isinstance(model_val, (str, int, float)):
+                                version = str(model_val)[:50]
                         if "usage" in parsed and isinstance(parsed["usage"], dict):
                             input_tokens = parsed["usage"].get("prompt_tokens", input_tokens)
                             output_tokens = parsed["usage"].get("completion_tokens", output_tokens)
