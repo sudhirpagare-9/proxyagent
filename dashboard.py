@@ -3,21 +3,13 @@ import json
 import io
 import csv
 from datetime import datetime
-from flask import Flask, render_template_string, Response, request
+from flask import Flask, render_template_string, Response, request, jsonify
 
 app = Flask(__name__)
 
-# Fetch production environment configurations safely
+# Fetch production environment configurations safely[cite: 1]
 SUPABASE_URL = os.environ.get("SUPABASE_URL") or "https://qwsnkbpsumqobrqkqpht.supabase.co"
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or "sb_publishable_IPKGvB9I6G7Ix0q2kkpucw_8JdGDaHh"
-
-# Simple token dictionary for distributed clients mapping Token -> Client Name
-# In production, you could move this to an environment variable or another DB table
-AUTHORIZED_CLIENTS = {
-    "xyz_token_production_01": "Client-Office-Main",
-    "xyz_token_production_02": "Client-Remote-Laptop",
-    "xyz_token_development_03": "Client-Testing-VM"
-}
 
 supabase = None
 if SUPABASE_URL and SUPABASE_KEY:
@@ -37,54 +29,50 @@ DASHBOARD_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Cloud Proxy Analytics</title>
-    <!-- Tailwind CSS Engine -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Core Supabase Client Library Bundle for WebSockets -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body class="bg-[#0b1329] text-gray-100 font-sans min-h-screen p-8">
     <div class="max-w-7xl mx-auto">
         
-        <!-- Header Section with Integrated Download Button -->
+        <!-- Header -->
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
-            <h1 class="text-3xl font-bold text-indigo-400 flex items-center gap-3">
-                ☁️ Advanced AI Proxy Token Matrix
-            </h1>
-            <a href="/api/download-csv" 
-               class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold px-4 py-2.5 rounded-xl border border-indigo-400/20 shadow-md transition-all transform active:scale-95">
-                📥 Export History (.CSV)
-            </a>
+            <h1 class="text-3xl font-bold text-indigo-400 flex items-center gap-3">☁️ Advanced AI Proxy Token Matrix</h1>
+            <a href="/api/download-csv" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold px-4 py-2.5 rounded-xl border border-indigo-400/20 shadow-md transition-all">📥 Export History (.CSV)</a>
         </div>
-        
-        <!-- Top Summary Metrics Cards (Preserved) -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <div class="bg-[#1c2541] p-6 rounded-xl border border-gray-700 shadow-lg">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Active Status</p>
-                <p class="text-2xl font-bold mt-2 text-emerald-400">Live & Protected</p>
-            </div>
-            <div class="bg-[#1c2541] p-6 rounded-xl border border-gray-700 shadow-lg">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Total Streams Intercepted</p>
-                <p id="total-count" class="text-2xl font-bold mt-2 text-white">0</p>
-            </div>
-            <div class="bg-[#1c2541] p-6 rounded-xl border border-gray-700 shadow-lg">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Security Profile</p>
-                <p class="text-2xl font-bold mt-2 text-blue-400">NIST / GDPR Framework</p>
+
+        <!-- Hardware Device Authorization Registry -->
+        <div class="bg-[#1c2541] rounded-xl border border-gray-700 shadow-lg p-6 mb-8">
+            <h2 class="text-xl font-bold text-indigo-300 mb-4">🛡️ Hardware Device Authorization Registry</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead>
+                        <tr class="bg-[#111a36] text-gray-400 uppercase text-xs tracking-wider border-b border-gray-700">
+                            <th class="p-3">Device Hostname</th>
+                            <th class="p-3">MAC Address</th>
+                            <th class="p-3">Last Known IP</th>
+                            <th class="p-3">Authorization Status</th>
+                            <th class="p-3 text-right">Actions Control Menu</th>
+                        </tr>
+                    </thead>
+                    <tbody id="admin-device-rows">
+                        <tr><td colspan="5" class="p-3 text-center text-gray-500">Querying terminal nodes framework...</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
-        <!-- Granular LLM Usage Metrics Table View with Custom Scroll Container -->
+        <!-- Granular LLM Usage Metrics Table View -->
         <div class="bg-[#1c2541] rounded-xl border border-gray-700 shadow-lg overflow-hidden">
             <div class="p-6 border-b border-gray-700">
                 <h2 class="text-lg font-semibold text-gray-300">Granular LLM Usage Metrics</h2>
             </div>
-            <!-- FIXED SCROLL CONTAINER: Prevents page from overflowing vertically -->
-            <div class="overflow-x-auto overflow-y-auto max-h-[520px] custom-scrollbar">
+            <div class="overflow-x-auto overflow-y-auto max-h-[400px]">
                 <table class="w-full text-left border-collapse">
                     <thead>
-                        <!-- Sticky header configuration so columns remain visible while scrolling -->
-                        <tr class="bg-[#111a36] text-gray-400 text-xs uppercase tracking-wider border-b border-gray-700 sticky top-0 z-10 shadow-sm">
+                        <tr class="bg-[#111a36] text-gray-400 text-xs uppercase tracking-wider border-b border-gray-700 sticky top-0 z-10">
                             <th class="p-4 bg-[#111a36]">Timestamp</th>
-                            <th class="p-4 bg-[#111a36]">Client ID</th>
+                            <th class="p-4 bg-[#111a36]">Client Device</th>
+                            <th class="p-4 bg-[#111a36]">Source Application</th> <!-- NEW HEADER -->
                             <th class="p-4 bg-[#111a36]">Model Name</th>
                             <th class="p-4 bg-[#111a36]">Version</th>
                             <th class="p-4 bg-[#111a36]">Thinking Level</th>
@@ -94,111 +82,101 @@ DASHBOARD_TEMPLATE = """
                         </tr>
                     </thead>
                     <tbody id="db-traffic-rows">
-                        <tr>
-                            <td colspan="8" class="p-4 text-center text-gray-500">Connecting to telemetry storage...</td>
-                        </tr>
+                        <tr><td colspan="9" class="p-4 text-center text-gray-500">Connecting to telemetry storage...</td></tr>
                     </tbody>
                 </table>
             </div>
         </div>
     </div>
 
-    <!-- Scrollbar styling inject to keep it clean looking -->
-    <style>
-        .custom-scrollbar::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-            background: #111a36;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-            background: #312e81;
-            border-radius: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-            background: #4338ca;
-        }
-    </style>
-
     <script>
-        // Mount client details using variables safely populated by Flask backend variables
-        const url = "{{ supabase_url }}";
-        const key = "{{ supabase_key }}";
-        
-        if (!url || !key) {
-            document.getElementById("db-traffic-rows").innerHTML = `<tr><td colspan="8" class="p-4 text-center text-gray-400 font-mono">Environment URL keys missing on host settings.</td></tr>`;
-        }
-
-        const supabaseClient = supabase.createClient(url, key);
-        let logsCache = [];
-
-        function renderRows() {
-            const tbody = document.getElementById("db-traffic-rows");
-            document.getElementById("total-count").innerText = logsCache.length;
-
-            if (logsCache.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-gray-400 font-mono">✓ Database connected. Waiting for local proxy streams...</td></tr>`;
-                return;
-            }
-
-            tbody.innerHTML = "";
-            logsCache.forEach(log => {
-                const row = document.createElement("tr");
-                row.className = "border-b border-gray-800 text-sm hover:bg-[#111a36]/50 transition-colors";
+        async function fetchDevices() {
+            try {
+                const r = await fetch('/api/admin/devices');
+                const devices = await r.json();
+                const tbody = document.getElementById("admin-device-rows");
+                tbody.innerHTML = "";
                 
-                let timeStr = "N/A";
-                if (log.created_at) {
-                    const d = new Date(log.created_at);
-                    timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).toLowerCase() + ' am';
+                if (devices.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="p-3 text-center text-gray-400">No client machines profiled yet.</td></tr>`;
+                    return;
                 }
 
-                row.innerHTML = `
-                    <td class="p-4 text-gray-400 font-mono">${timeStr}</td>
-                    <td class="p-4 font-semibold text-emerald-400 font-mono">${log.client_id || 'External-Agent'}</td>
-                    <td class="p-4 font-semibold text-indigo-300">${log.model_name || 'N/A'}</td>
-                    <td class="p-4 text-gray-300 font-mono">${log.version || 'N/A'}</td>
-                    <td class="p-4"><span class="px-2 py-1 text-xs rounded bg-purple-900/50 text-purple-300 border border-purple-700">${log.thinking_level || 'None'}</span></td>
-                    <td class="p-4 font-mono text-emerald-400">${log.input_tokens ?? 0}</td>
-                    <td class="p-4 font-mono text-orange-400">${log.output_tokens ?? 0}</td>
-                    <td class="p-4 text-gray-400 text-xs">${log.subscription_details || 'N/A'}</td>
-                `;
-                tbody.appendChild(row);
-            });
+                devices.forEach(d => {
+                    let statusBadge = `<span class="px-2 py-0.5 rounded text-xs bg-yellow-900/50 text-yellow-300 border border-yellow-700">PENDING APPROVAL</span>`;
+                    if (d.status === 'APPROVED') statusBadge = `<span class="px-2 py-0.5 rounded text-xs bg-emerald-900/50 text-emerald-300 border border-emerald-700">APPROVED</span>`;
+                    if (d.status === 'BLOCKED') statusBadge = `<span class="px-2 py-0.5 rounded text-xs bg-red-900/50 text-red-300 border border-red-700">BLOCKED</span>`;
+
+                    tbody.innerHTML += `
+                        <tr class="border-b border-gray-800 hover:bg-[#111a36]/30">
+                            <td class="p-3 font-mono font-bold">${d.hostname}</td>
+                            <td class="p-3 font-mono text-gray-400">${d.mac_address}</td>
+                            <td class="p-3 font-mono text-indigo-300">${d.ip_address || 'N/A'}</td>
+                            <td class="p-3">${statusBadge}</td>
+                            <td class="p-3 text-right space-x-2">
+                                <button onclick="updateDevice('${d.hw_id}', 'APPROVED')" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-2.5 py-1 rounded font-semibold text-white">Approve</button>
+                                <button onclick="updateDevice('${d.hw_id}', 'BLOCKED')" class="bg-amber-600 hover:bg-amber-500 text-xs px-2.5 py-1 rounded font-semibold text-white">Block</button>
+                                <button onclick="deleteDevice('${d.hw_id}')" class="bg-red-600 hover:bg-red-500 text-xs px-2.5 py-1 rounded font-semibold text-white">Delete</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            } catch(e) { console.error(e); }
         }
 
-        // Hydrate baseline rows instantly on page mount
-        async function fetchInitialLogs() {
+        async function updateDevice(hw_id, status) {
+            await fetch('/api/admin/device/update', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ hw_id, status })
+            });
+            fetchDevices();
+            fetchLogs();
+        }
+
+        async function deleteDevice(hw_id) {
+            if (!confirm("Are you sure you want to completely remove this node profile?")) return;
+            await fetch('/api/admin/device/delete', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ hw_id })
+            });
+            fetchDevices();
+        }
+
+        async function fetchLogs() {
             try {
                 const response = await fetch('/api/get-logs');
-                const initialLogs = await response.json();
+                const logs = await response.json();
+                const tbody = document.getElementById("db-traffic-rows");
+                tbody.innerHTML = "";
                 
-                if (initialLogs.length === 1 && initialLogs[0].model_name === "System Status") {
-                    logsCache = [];
-                } else {
-                    logsCache = initialLogs;
+                if (logs.length === 0 || logs[0].model_name === "System Status") {
+                    tbody.innerHTML = `<tr><td colspan="9" class="p-4 text-center text-gray-400">Waiting for local streams...</td></tr>`;
+                    return;
                 }
-                renderRows();
-            } catch (err) {
-                console.error("Baseline extraction failure:", err);
-            }
+
+                logs.forEach(log => {
+                    tbody.innerHTML += `
+                        <tr class="border-b border-gray-800 text-sm hover:bg-[#111a36]/50">
+                            <td class="p-4 text-gray-400 font-mono">${log.created_at ? new Date(log.created_at).toLocaleTimeString() : 'N/A'}</td>
+                            <td class="p-4 font-bold text-emerald-400 font-mono">${log.client_id || 'Unknown'}</td>
+                            <td class="p-4 text-sky-400 font-medium font-mono">${log.app_name || 'Generic HTTP App'}</td> <!-- NEW COLUMN DATA -->
+                            <td class="p-4 font-semibold text-indigo-300">${log.model_name || 'N/A'}</td>
+                            <td class="p-4 text-gray-300 font-mono">${log.version || 'N/A'}</td>
+                            <td class="p-4"><span class="px-2 py-1 text-xs rounded bg-purple-900/50 text-purple-300 border border-purple-700">${log.thinking_level || 'None'}</span></td>
+                            <td class="p-4 font-mono text-emerald-400">${log.input_tokens ?? 0}</td>
+                            <td class="p-4 font-mono text-orange-400">${log.output_tokens ?? 0}</td>
+                            <td class="p-4 text-gray-400 text-xs">${log.subscription_details || 'N/A'}</td>
+                        </tr>
+                    `;
+                });
+            } catch (err) { console.error(err); }
         }
 
-        // Open live webhook socket channel pipeline directly to postgres modifications
-        function listenToRealtimeLogs() {
-            supabaseClient
-                .channel('public_network_logs_changes')
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'network_logs' }, (payload) => {
-                    console.log("[Live Event Stream] Appending row payload via webhook:", payload.new);
-                    logsCache.unshift(payload.new);
-                    renderRows();
-                })
-                .subscribe();
-        }
-
-        fetchInitialLogs().then(() => {
-            listenToRealtimeLogs();
-        });
+        fetchDevices();
+        fetchLogs();
+        setInterval(fetchLogs, 5000); 
     </script>
 </body>
 </html>
@@ -208,73 +186,96 @@ DASHBOARD_TEMPLATE = """
 def home():
     return render_template_string(DASHBOARD_TEMPLATE, supabase_url=SUPABASE_URL, supabase_key=SUPABASE_KEY)
 
-# NEW: Edge Ingestion endpoint for distributed agent scripts
 @app.route("/api/ingest", methods=["POST"])
 def ingest_log():
     if not supabase:
-        return jsonify({"error": "Database link unavailable"}), 500
+        return "Database initialization link error.", 500
     
-    # Extract client access token from headers
-    client_key = request.headers.get("X-Client-Key")
-    if not client_key or client_key not in AUTHORIZED_CLIENTS:
-        return "Unauthorized Client Key Exception", 401
+    payload = request.json
+    hw_id = payload.get("hw_id")
+    hostname = payload.get("hostname", "Unknown-Host")
+    mac_address = payload.get("mac_address", "00:00:00:00:00:00")
     
+    client_ip = request.headers.get("X-Forwarded-For", request.remote_addr).split(',')[0].strip()
+
     try:
-        payload = request.json
-        # Map the token to a clean descriptive client name
-        payload["client_id"] = AUTHORIZED_CLIENTS[client_key]
+        check = supabase.table("clients_registry").select("*").eq("hw_id", hw_id).execute()
         
-        # Secure database write using the server's backend connection context
-        supabase.table("network_logs").insert(payload).execute()
-        return "Log Telemetry Accepted", 200
+        if not check.data:
+            new_device = {
+                "hw_id": hw_id, "hostname": hostname, 
+                "mac_address": mac_address, "ip_address": client_ip, 
+                "status": "PENDING", "client_name": hostname
+            }
+            supabase.table("clients_registry").insert(new_device).execute()
+            return "Registration Process Pending Authorization.", 202
+        
+        device_status = check.data[0]["status"]
+        
+        if device_status == "PENDING":
+            return "Registration Pending Admin Approval.", 202
+        elif device_status == "BLOCKED":
+            return "Access Privileges Suspended.", 403
+            
+        # Extract and write the app_name parameter securely to Supabase
+        log_entry = {
+            "model_name": payload.get("model_name"),
+            "version": payload.get("version"),
+            "thinking_level": payload.get("thinking_level"),
+            "input_tokens": payload.get("input_tokens"),
+            "output_tokens": payload.get("output_tokens"),
+            "balance_tokens": payload.get("balance_tokens"),
+            "subscription_details": payload.get("subscription_details"),
+            "client_id": check.data[0]["client_name"],
+            "app_name": payload.get("app_name", "Unknown App")  # NEW FIELD INGESTION
+        }
+        supabase.table("network_logs").insert(log_entry).execute()
+        return "Log Telemetry Sync OK", 200
+
     except Exception as e:
-        return f"Ingestion pipeline malfunction: {str(e)}", 400
+        return f"Ingest Error Interruption: {str(e)}", 400
+
+@app.route("/api/admin/devices")
+def admin_get_devices():
+    if not supabase: return jsonify([])
+    res = supabase.table("clients_registry").select("*").order("created_at", desc=True).execute()
+    return jsonify(res.data or [])
+
+@app.route("/api/admin/device/update", methods=["POST"])
+def admin_update_device():
+    data = request.json
+    supabase.table("clients_registry").update({"status": data["status"]}).eq("hw_id", data["hw_id"]).execute()
+    return "OK", 200
+
+@app.route("/api/admin/device/delete", methods=["POST"])
+def admin_delete_device():
+    data = request.json
+    supabase.table("clients_registry").delete().eq("hw_id", data["hw_id"]).execute()
+    return "OK", 200
 
 @app.route("/api/get-logs")
 def get_logs():
-    if not supabase:
-        return json.dumps([{"model_name": "System Status", "subscription_details": "Environment URL keys missing on host settings."}])
+    if not supabase: return json.dumps([])
     try:
-        response = supabase.table("network_logs")\
-                           .select("*")\
-                           .order("created_at", desc=True)\
-                           .limit(100)\
-                           .execute()
-        
-        data = response.data or []
-        if not data:
-            return json.dumps([{"model_name": "System Status", "subscription_details": "✓ Database connected. Waiting for local proxy streams..."}])
-        
-        return json.dumps(data)
-    except Exception as e:
-        return json.dumps([{"model_name": "System Status", "subscription_details": f"Database Error: {str(e)}"}])
+        response = supabase.table("network_logs").select("*").order("created_at", desc=True).limit(100).execute()
+        return json.dumps(response.data or [])
+    except Exception: return json.dumps([])
 
 @app.route("/api/download-csv")
 def download_csv():
-    if not supabase:
-        return "Database initialization error.", 500
-        
+    if not supabase: return "Error", 500
     try:
         response = supabase.table("network_logs").select("*").order("created_at", desc=True).execute()
         records = response.data or []
-        
-        if not records:
-            return "No data logged yet.", 404
-
+        if not records: return "No data", 404
         si = io.StringIO()
-        headers = records[0].keys()
-        writer = csv.DictWriter(si, fieldnames=headers)
-        
+        writer = csv.DictWriter(si, fieldnames=records[0].keys())
         writer.writeheader()
         writer.writerows(records)
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output = Response(si.getvalue(), mimetype="text/csv")
-        output.headers["Content-Disposition"] = f"attachment; filename=proxy_matrix_history_{timestamp}.csv"
+        output.headers["Content-Disposition"] = "attachment; filename=proxy_history.csv"
         return output
-
-    except Exception as e:
-        return f"Failed to generate report generation asset: {str(e)}", 500
+    except Exception: return "Failed", 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5050))
