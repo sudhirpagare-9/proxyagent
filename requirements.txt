@@ -1,5 +1,4 @@
-mitmproxy
-requests
 flask
-supabase
 gunicorn
+supabase
+
