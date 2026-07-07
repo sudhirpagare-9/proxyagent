@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <title>AI Proxy Dashboard</title>
+</head>
+<body class="bg-[#0b1329] text-gray-100 p-8">
+    <div class="max-w-7xl mx-auto">
+        <h1 class="text-3xl font-bold text-indigo-400 mb-8">☁️ AI Proxy Analytics</h1>
+        <table class="w-full text-left text-sm bg-[#1c2541] rounded-lg">
+            <tbody id="admin-device-rows"></tbody>
+        </table>
+    </div>
+    <script>
+        async function fetchDevices() {
+            const r = await fetch('/api/admin/devices');
+            const data = await r.json();
+            document.getElementById("admin-device-rows").innerHTML = data.map(d => `
+                <tr class="border-b border-gray-700">
+                    <td class="p-4 font-mono">${d.hostname}</td>
+                    <td class="p-4">${d.status}</td>
+                    <td class="p-4">
+                        <button onclick="update('${d.hw_id}', 'APPROVED')" class="bg-emerald-600 px-2 py-1 rounded">Approve</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+        async function update(hw_id, status) {
+            await fetch('/api/admin/device/update', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ hw_id, status })
+            });
+            fetchDevices();
+        }
+        setInterval(fetchDevices, 5000);
+        fetchDevices();
+    </script>
+</body>
+</html>
