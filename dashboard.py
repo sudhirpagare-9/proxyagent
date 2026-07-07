@@ -1,49 +1,56 @@
 import os
-from flask import Flask, Response, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
 
 app = Flask(__name__)
 
-# Supabase Config
+# --- Supabase Setup ---
+# Do NOT hardcode keys here. Use environment variables.
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-supabase = None
 
+supabase = None
 if SUPABASE_URL and SUPABASE_KEY:
     try:
         from supabase import create_client
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    except: pass
+    except Exception as e:
+        print(f"Supabase Init Error: {e}")
 
-# --- HTML UI ---
-HTML = """
+DASHBOARD_HTML = """
 <!DOCTYPE html>
-<html>
-<head><script src="https://cdn.tailwindcss.com"></script></head>
-<body class="bg-slate-900 text-white p-8">
-    <h1 class="text-2xl font-bold mb-4">Proxy Control Center</h1>
-    <table class="w-full bg-slate-800 rounded shadow-lg">
-        <tbody id="rows"></tbody>
-    </table>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <title>AI Proxy Dashboard</title>
+</head>
+<body class="bg-[#0b1329] text-gray-100 p-8">
+    <div class="max-w-7xl mx-auto">
+        <h1 class="text-3xl font-bold text-indigo-400 mb-8">☁️ AI Proxy Analytics</h1>
+        <table class="w-full bg-gray-800 rounded-lg overflow-hidden">
+            <thead class="bg-gray-700 text-left">
+                <tr><th class="p-3">Device ID</th><th class="p-3">Status</th><th class="p-3 text-right">Actions</th></tr>
+            </thead>
+            <tbody id="device-table"></tbody>
+        </table>
+    </div>
     <script>
         async function fetchDevices() {
-            const res = await fetch('/api/devices');
-            const data = await res.json();
-            document.getElementById("rows").innerHTML = data.map(d => `
-                <tr class="border-b border-slate-700">
-                    <td class="p-3">${d.hostname}</td>
-                    <td class="p-3 font-bold ${d.status === 'APPROVED' ? 'text-green-400' : 'text-red-400'}">${d.status}</td>
-                    <td class="p-3">
-                        <button onclick="update('${d.hw_id}', 'APPROVED')" class="bg-green-600 px-2 py-1 rounded text-xs">Approve</button>
-                        <button onclick="update('${d.hw_id}', 'BLOCKED')" class="bg-red-600 px-2 py-1 rounded text-xs ml-1">Block</button>
-                    </td>
-                </tr>
-            `).join('');
+            try {
+                // Fetch relative to the current domain
+                const response = await fetch('/api/admin/devices');
+                const data = await response.json();
+                const tbody = document.getElementById('device-table');
+                tbody.innerHTML = '';
+                data.forEach(d => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `<td class="p-3">${d.hw_id}</td>
+                        <td class="p-3"><span class="${d.status === 'APPROVED' ? 'text-green-500' : 'text-yellow-500'}">${d.status}</span></td>
+                        <td class="p-3 text-right">...</td>`;
+                    tbody.appendChild(row);
+                });
+            } catch(e) { console.error("Fetch Error:", e); }
         }
-        async function update(hw_id, status) {
-            await fetch('/api/update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ hw_id, status })});
-            fetchDevices();
-        }
-        setInterval(fetchDevices, 5000);
         fetchDevices();
     </script>
 </body>
@@ -51,23 +58,19 @@ HTML = """
 """
 
 @app.route("/")
-def home(): return Response(HTML, mimetype='text/html')
+def home():
+    return render_template_string(DASHBOARD_HTML)
 
-@app.route("/api/devices")
-def get_devices():
-    if not supabase: return jsonify([])
-    return jsonify(supabase.table("clients_registry").select("*").execute().data or [])
-
-@app.route("/api/update", methods=["POST"])
-def update():
-    supabase.table("clients_registry").update({"status": request.json["status"]}).eq("hw_id", request.json["hw_id"]).execute()
-    return "OK"
-
-@app.route("/api/client/status/<hw_id>")
-def check_status(hw_id):
-    if not supabase: return jsonify({"status": "BLOCKED"})
-    res = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).single().execute()
-    return jsonify({"status": res.data.get("status", "BLOCKED") if res.data else "BLOCKED"})
+@app.route("/api/admin/devices")
+def admin_get_devices():
+    if not supabase: 
+        return jsonify({"error": "Supabase not configured"}), 500
+    try:
+        # Ensure your table name 'clients_registry' exists in Supabase
+        res = supabase.table("clients_registry").select("*").execute()
+        return jsonify(res.data or [])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    app.run(host="0.0.0.0", port=5000)
