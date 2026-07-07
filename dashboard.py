@@ -25,27 +25,58 @@ def index():
     return render_template_string("""
     <!DOCTYPE html>
     <html class="bg-gray-900 text-white">
-    <head><script src="https://cdn.tailwindcss.com"></script></head>
+    <head>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
     <body class="p-8">
         <h1 class="text-2xl font-bold mb-4">Proxy Control Center</h1>
-        <table class="w-full bg-gray-800 rounded p-4">
-            <thead><tr><th class="p-2 text-left">Client ID</th><th class="p-2 text-left">Last Sync</th></tr></thead>
-            <tbody id="device-table"></tbody>
-        </table>
+        <div class="overflow-x-auto bg-gray-800 rounded p-4">
+            <table class="w-full text-left">
+                <thead>
+                    <tr class="text-gray-400 border-b border-gray-700">
+                        <th class="p-2">HW ID</th>
+                        <th class="p-2">Hostname</th>
+                        <th class="p-2">mac_address</th>
+                        <th class="p-2">IP Address</th>
+                        <th class="p-2">Status</th>
+                        <th class="p-2">client_name</th>
+						<th class="p-2">created_at</th>
+                    </tr>
+                </thead>
+                <tbody id="device-table">
+                    <tr><td colspan="4" class="p-4 text-center text-gray-500">Loading data...</td></tr>
+                </tbody>
+            </table>
+        </div>
         <script>
             fetch('/api/admin/devices')
-                .then(res => {
-                    if (!res.ok) throw new Error('Network response was not ok');
-                    return res.json();
-                })
+                .then(res => res.json())
                 .then(data => {
                     const tbody = document.getElementById('device-table');
                     tbody.innerHTML = '';
+                    
+                    if (!data || data.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="4" class="p-4 text-center text-gray-500">No records found</td></tr>';
+                        return;
+                    }
+
                     data.forEach(d => {
-                        tbody.innerHTML += `<tr><td class="p-2">${d.hw_id || 'Unknown'}</td><td class="p-2">${d.last_sync || 'N/A'}</td></tr>`;
+                        tbody.innerHTML += `
+                            <tr class="border-b border-gray-700">
+                                <td class="p-2">${d.hw_id || 'N/A'}</td>
+                                <td class="p-2">${d.hostname || 'N/A'}</td>
+                                <td class="p-2">${d.mac_address || 'N/A'}</td>
+                                <td class="p-2">${d.ip_address || 'N/A'}</td>
+                                <td class="p-2 text-green-400">${d.status || 'N/A'}</td>
+                                <td class="p-2">${d.client_name || 'N/A'}</td>
+								<td class="p-2">${d.created_at || 'N/A'}</td>
+                            </tr>`;
                     });
                 })
-                .catch(err => console.error("Fetch error:", err));
+                .catch(err => {
+                    console.error("Fetch error:", err);
+                    document.getElementById('device-table').innerHTML = '<tr><td colspan="4" class="p-4 text-red-500 text-center">Error loading data</td></tr>';
+                });
         </script>
     </body>
     </html>
@@ -56,7 +87,7 @@ def get_devices():
     if not supabase:
         return jsonify({"error": "Supabase not configured"}), 500
     try:
-        # Fetching from the table
+        # Fetching all columns from the table
         response = supabase.table("clients_registry").select("*").execute()
         return jsonify(response.data)
     except Exception as e:
