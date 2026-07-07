@@ -38,35 +38,55 @@
         const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
         // 2. Fetch and Render Data
-        async function loadClients() {
-            const { data, error } = await supabase.from('clients_registry').select('*');
-            if (error) { console.error(error); return; }
+      // Inside your <script> tag in index.html
+async function loadClients() {
+    const { data, error } = await supabase.from('clients_registry').select('*');
+    if (error) { console.error(error); return; }
 
-            const body = document.getElementById('clientBody');
-            body.innerHTML = '';
+    const body = document.getElementById('clientBody');
+    body.innerHTML = '';
 
-            data.forEach(client => {
-                const row = `<tr>
-                    <td>${client.hw_id}</td>
-                    <td>${client.client_name || 'N/A'}</td>
-                    <td class="${client.status}">${client.status}</td>
-                    <td>${client.model_used || '-'}</td>
-                    <td>${client.input_tokens || 0}</td>
-                    <td>${client.output_tokens || 0}</td>
-                    <td>
-                        <button onclick="toggleStatus('${client.hw_id}', '${client.status}')">Toggle</button>
-                        <button onclick="deleteClient('${client.hw_id}')" style="color:red">Delete</button>
-                    </td>
-                </tr>`;
-                body.innerHTML += row;
-            });
-        }
+    data.forEach(client => {
+        // Add the new columns here
+        const row = `<tr>
+            <td>${client.hw_id}</td>
+            <td>${client.client_name || 'N/A'}</td>
+            <td class="${client.status}">${client.status}</td>
+            <td>${client.model_used || '-'}</td>
+            <td>${client.input_tokens || 0}</td>
+            <td>${client.output_tokens || 0}</td>
+            <td>
+                <button onclick="toggleStatus('${client.hw_id}', '${client.status}')">Toggle</button>
+                <button onclick="deleteClient('${client.hw_id}')" style="color:red">Delete</button>
+            </td>
+        </tr>`;
+        body.innerHTML += row;
+    });
+}
 
         // 3. Actions
-        async function toggleStatus(hw_id, currentStatus) {
-            const nextStatus = currentStatus === 'approved' ? 'pending' : 'approved';
-            await supabase.from('clients_registry').update({ status: nextStatus }).eq('hw_id', hw_id);
-            loadClients();
+        // Replace your toggleStatus function in index.html
+async function toggleStatus(hw_id, currentStatus) {
+    const isApproving = currentStatus !== 'approved';
+    
+    // Update both status and the timestamp
+    const updatePayload = {
+        status: isApproving ? 'approved' : 'pending',
+        approved_at: isApproving ? new Date().toISOString() : null
+    };
+
+    const { error } = await supabase
+        .from('clients_registry')
+        .update(updatePayload)
+        .eq('hw_id', hw_id);
+
+    if (error) {
+        console.error("Error updating status:", error);
+    } else {
+        alert(isApproving ? "Client Approved!" : "Client set to Pending.");
+        loadClients(); // Refresh list
+    }
+}
         }
 
         async function deleteClient(hw_id) {

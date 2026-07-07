@@ -48,32 +48,45 @@ class AIInterceptor:
         except Exception as e:
             print(f"[ERROR] Registration failed: {e}")
 
-    def poll_status(self):
-        while True:
-            if supabase:
-                try:
-                    # ONLY fetch status, never update/overwrite it
-                    res = supabase.table("clients_registry").select("status").eq("hw_id", MY_HW_ID).single().execute()
-                    self.is_approved = (res.data.get("status") == "approved")
-                except Exception as e:
-                    self.is_approved = False
-            time.sleep(30)
+  def poll_status(self):
+    while True:
+        if supabase:
+            try:
+                # SELECT ONLY: Do not update status here!
+                res = supabase.table("clients_registry").select("status").eq("hw_id", MY_HW_ID).single().execute()
+                self.is_approved = (res.data.get("status") == "approved")
+            except: 
+                self.is_approved = False
+        time.sleep(30)
 
     def request(self, flow: http.HTTPFlow):
         if not self.is_approved and "supabase" not in flow.request.pretty_host:
             flow.kill()
 
-    def response(self, flow: http.HTTPFlow):
-        if self.is_approved and "api.openai.com" in flow.request.pretty_host:
+  def response(self, flow: http.HTTPFlow):
+        # 1. Print the host to the console so you can see what traffic is passing through
+        print(f"[DEBUG] Traffic detected: {flow.request.pretty_host}")
+
+        # 2. Broaden the check (Remove specific 'api.openai.com' constraint for testing)
+        # Change this to match the host you are actually using, or leave it broad to see data
+        if self.is_approved:
             try:
+                # Print the content to confirm we are getting data
                 data = json.loads(flow.response.content)
+                print(f"[DEBUG] Intercepted data: {data}")
+                
                 usage = data.get("usage", {})
+                
+                # Push to Supabase
                 supabase.table("clients_registry").update({
                     "model_used": data.get("model", "unknown"),
                     "input_tokens": usage.get("prompt_tokens", 0),
                     "output_tokens": usage.get("completion_tokens", 0)
                 }).eq("hw_id", MY_HW_ID).execute()
-            except: pass
+                print("[SUCCESS] Metrics updated in DB")
+            except Exception as e:
+                # Remove 'pass' so you can see errors in the console!
+                print(f"[ERROR] Failed to process traffic: {e}")
 
 # --- RUNNER ---
 async def start_proxy():
@@ -83,10 +96,16 @@ async def start_proxy():
     await master.run()
 
 def run_proxy_in_thread():
+    # Properly define the event loop for this thread
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    loop.run_until_complete(start_proxy())
-
+    
+    options = Options(listen_host='127.0.0.1', listen_port=8080)
+    master = DumpMaster(options, with_termlog=False, with_dumper=False)
+    master.addons.add(AIInterceptor())
+    
+    # Run the loop
+    loop.run_until_complete(master.run())
 class App:
     def __init__(self, root):
         self.root = root
