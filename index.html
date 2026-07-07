@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Proxy Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f4f4f9; }
+        table { width: 100%; border-collapse: collapse; background: white; margin-top: 20px; }
+        th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
+        .approved { color: green; font-weight: bold; }
+        .pending { color: orange; font-weight: bold; }
+        button { cursor: pointer; padding: 5px 10px; }
+    </style>
+</head>
+<body>
+
+    <h1>AI Proxy Management</h1>
+    <table id="clientTable">
+        <thead>
+            <tr>
+                <th>HW ID</th>
+                <th>Client Name</th>
+                <th>Status</th>
+                <th>Model</th>
+                <th>Input Tokens</th>
+                <th>Output Tokens</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="clientBody"></tbody>
+    </table>
+
+    <script>
+        // 1. Initialize Supabase (Replace with your actual keys)
+        const SUPABASE_URL = 'YOUR_SUPABASE_URL';
+        const SUPABASE_KEY = 'YOUR_SUPABASE_ANON_KEY';
+        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        // 2. Fetch and Render Data
+        async function loadClients() {
+            const { data, error } = await supabase.from('clients_registry').select('*');
+            if (error) { console.error(error); return; }
+
+            const body = document.getElementById('clientBody');
+            body.innerHTML = '';
+
+            data.forEach(client => {
+                const row = `<tr>
+                    <td>${client.hw_id}</td>
+                    <td>${client.client_name || 'N/A'}</td>
+                    <td class="${client.status}">${client.status}</td>
+                    <td>${client.model_used || '-'}</td>
+                    <td>${client.input_tokens || 0}</td>
+                    <td>${client.output_tokens || 0}</td>
+                    <td>
+                        <button onclick="toggleStatus('${client.hw_id}', '${client.status}')">Toggle</button>
+                        <button onclick="deleteClient('${client.hw_id}')" style="color:red">Delete</button>
+                    </td>
+                </tr>`;
+                body.innerHTML += row;
+            });
+        }
+
+        // 3. Actions
+        async function toggleStatus(hw_id, currentStatus) {
+            const nextStatus = currentStatus === 'approved' ? 'pending' : 'approved';
+            await supabase.from('clients_registry').update({ status: nextStatus }).eq('hw_id', hw_id);
+            loadClients();
+        }
+
+        async function deleteClient(hw_id) {
+            if(confirm("Delete this client?")) {
+                await supabase.from('clients_registry').delete().eq('hw_id', hw_id);
+                loadClients();
+            }
+        }
+
+        // Initial Load
+        loadClients();
+    </script>
+</body>
+</html>
