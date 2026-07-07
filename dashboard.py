@@ -1,13 +1,30 @@
 import os
+import logging
 from flask import Flask, jsonify, render_template_string
 from supabase import create_client
 
+# Setup logging
+logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
-# Initialize Supabase
+# Initialize Supabase safely
 url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_KEY")
-supabase = create_client(url, key)
+
+if not url or not key:
+    logging.error("SUPABASE_URL or SUPABASE_KEY missing!")
+    supabase = None
+else:
+    supabase = create_client(url, key)
+
+@app.route("/api/admin/toggle_status/<hw_id>/<new_status>")
+def toggle_status(hw_id, new_status):
+    if not supabase: return jsonify({"error": "DB config missing"}), 500
+    if new_status not in ['approved', 'blocked', 'pending']:
+        return jsonify({"error": "Invalid status"}), 400
+    
+    supabase.table("clients_registry").update({"status": new_status}).eq("hw_id", hw_id).execute()
+    return jsonify({"success": True})
 
 @app.route("/")
 def index():
@@ -17,49 +34,39 @@ def index():
     <head><script src="https://cdn.tailwindcss.com"></script></head>
     <body class="p-8">
         <h1 class="text-2xl font-bold mb-4">Proxy Control Center</h1>
-        <div class="overflow-x-auto">
-            <table class="w-full bg-gray-800 rounded p-4 text-sm">
-                <thead>
-                    <tr class="text-gray-400 border-b border-gray-700">
-                        <th class="p-2 text-left">HW ID</th>
-                        <th class="p-2 text-left">Hostname</th>
-                        <th class="p-2 text-left">IP Address</th>
-                        <th class="p-2 text-left">Status</th>
-                    </tr>
-                </thead>
-                <tbody id="device-table">
-                    <tr><td colspan="4" class="p-4 text-center">Loading...</td></tr>
-                </tbody>
-            </table>
-        </div>
+        <table class="w-full bg-gray-800 rounded p-4 text-sm">
+            <thead>
+                <tr class="text-gray-400 border-b border-gray-700">
+                    <th class="p-2">HW ID</th>
+                    <th class="p-2">Hostname</th>
+                    <th class="p-2">Status</th>
+                    <th class="p-2">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="device-table"></tbody>
+        </table>
         <script>
-            // Use an absolute path or relative path carefully
+            function updateStatus(id, status) {
+                fetch(`/api/admin/toggle_status/${id}/${status}`)
+                    .then(() => location.reload());
+            }
+
             fetch('/api/admin/devices')
-                .then(res => {
-                    if (!res.ok) throw new Error('HTTP ' + res.status);
-                    return res.json();
-                })
+                .then(res => res.json())
                 .then(data => {
                     const tbody = document.getElementById('device-table');
-                    tbody.innerHTML = '';
-                    if (data.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="4" class="p-4 text-center">No records found</td></tr>';
-                    } else {
-                        data.forEach(d => {
-                            tbody.innerHTML += `
-                                <tr class="border-b border-gray-700">
-                                    <td class="p-2">${d.hw_id || 'N/A'}</td>
-                                    <td class="p-2">${d.hostname || 'N/A'}</td>
-                                    <td class="p-2">${d.ip_address || 'N/A'}</td>
-                                    <td class="p-2 text-green-400">${d.status || 'N/A'}</td>
-                                </tr>`;
-                        });
-                    }
-                })
-                .catch(err => {
-                    document.getElementById('device-table').innerHTML = 
-                        `<tr><td colspan="4" class="p-4 text-center text-red-500">Error: ${err.message}</td></tr>`;
-                    console.error("Fetch error:", err);
+                    data.forEach(d => {
+                        tbody.innerHTML += `
+                            <tr class="border-b border-gray-700">
+                                <td class="p-2">${d.hw_id}</td>
+                                <td class="p-2">${d.hostname || 'N/A'}</td>
+                                <td class="p-2">${d.status || 'pending'}</td>
+                                <td class="p-2">
+                                    <button onclick="updateStatus('${d.hw_id}', 'approved')" class="bg-green-600 px-2 py-1 rounded mr-2">Approve</button>
+                                    <button onclick="updateStatus('${d.hw_id}', 'blocked')" class="bg-red-600 px-2 py-1 rounded">Block</button>
+                                </td>
+                            </tr>`;
+                    });
                 });
         </script>
     </body>
@@ -68,8 +75,8 @@ def index():
 
 @app.route("/api/admin/devices")
 def get_devices():
+    if not supabase: return jsonify({"error": "DB config missing"}), 500
     try:
-        # Ensure 'clients_registry' matches your table name exactly
         response = supabase.table("clients_registry").select("*").execute()
         return jsonify(response.data)
     except Exception as e:
