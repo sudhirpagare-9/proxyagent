@@ -17,10 +17,10 @@ def get_unique_id():
         with open("client_id.txt", "r") as f:
             return f.read().strip()
     
-    # Fallback: BIOS serial -> MAC -> UUID
     try: 
+        # Using a timeout prevents the script from hanging on old hardware
         cmd = "wmic bios get serialnumber"
-        output = subprocess.check_output(cmd, shell=True).decode().split('\n')[1].strip()
+        output = subprocess.check_output(cmd, shell=True, timeout=5).decode().split('\n')[1].strip()
         if output and output.lower() not in ["to be filled by o.e.m.", "system serial number"]:
             return output
     except: pass
@@ -37,7 +37,6 @@ is_allowed = False
 
 def check_approval_status():
     global last_check, is_allowed
-    # Check DB every 60 seconds
     if time.time() - last_check > 60:
         try:
             response = supabase.table("clients_registry").select("status").eq("hw_id", MY_HW_ID).single().execute()
@@ -52,17 +51,17 @@ def request(flow: http.HTTPFlow):
         flow.kill()
         return
 
-    # If approved, log traffic
-    try:
-        # Corrected: peername[0] gets the IP
-        client_ip = flow.client_conn.peername[0]
-        
-        data = {
-            "hw_id": MY_HW_ID, 
-            "hostname": flow.request.pretty_host, 
-            "status": "approved",
-            "ip_address": client_ip
-        }
-        supabase.table("clients_registry").upsert(data).execute()
-    except Exception as e:
-        print(f"Sync error: {e}")
+    # Safety: Ensure connection exists before accessing peername
+    if flow.client_conn and flow.client_conn.peername:
+        try:
+            client_ip = flow.client_conn.peername[0]
+            data = {
+                "hw_id": MY_HW_ID, 
+                "hostname": flow.request.pretty_host, 
+                "status": "approved",
+                "ip_address": client_ip
+            }
+            supabase.table("clients_registry").upsert(data).execute()
+        except Exception as e:
+            # Silently fail or log to avoid crashing the proxy flow
+            print(f"Sync error: {e}")
