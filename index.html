@@ -41,6 +41,7 @@
                         <button onclick="toggleStatus('${client.hw_id}', '${client.status}')">
                             ${isApproved ? 'Block' : 'Approve'}
                         </button>
+                        <button onclick="deleteClient('${client.hw_id}')" style="color:red">Delete</button>
                     </td>
                 </tr>`;
                 body.innerHTML += row;
@@ -50,6 +51,11 @@
         async function toggleStatus(hw_id, currentStatus) {
             const newStatus = (currentStatus === 'approved') ? 'pending' : 'approved';
             await supabase.from('clients_registry').update({ status: newStatus }).eq('hw_id', hw_id);
+            loadClients();
+        }
+
+        async function deleteClient(hw_id) {
+            await supabase.from('clients_registry').delete().eq('hw_id', hw_id);
             loadClients();
         }
 

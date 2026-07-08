@@ -12,6 +12,7 @@ from mitmproxy import http
 from supabase import create_client
 
 # --- CONFIG ---
+# Ensure these are set in your OS environment variables
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
@@ -29,22 +30,22 @@ class AIInterceptor:
         threading.Thread(target=self.poll_status, daemon=True).start()
 
     def register_device(self):
-        """Register device with required fields to prevent null constraints."""
+        """Fixes the null constraint error by providing all required fields."""
         if supabase:
             try:
-                # Use upsert to handle registration gracefully
+                # Upsert ensures we don't crash if the device is already registered
                 supabase.table("clients_registry").upsert({
                     "hw_id": MY_HW_ID,
                     "status": "pending",
-                    "hostname": socket.gethostname(), # FIX: Provides hostname
-                    "ip_address": "127.0.0.1",       # FIX: Provides IP
+                    "hostname": socket.gethostname(), # Fixes null constraint
+                    "ip_address": socket.gethostbyname(socket.gethostname()), # Fixes null constraint
                     "client_name": "My Client Machine"
                 }).execute()
             except Exception as e:
                 print(f"[ERROR] Failed to register: {e}")
 
     def poll_status(self):
-        """Continuously check DB for approval."""
+        """Checks DB for approval status every 10 seconds."""
         while True:
             if supabase:
                 try:
@@ -55,7 +56,7 @@ class AIInterceptor:
             time.sleep(10)
 
     def response(self, flow: http.HTTPFlow):
-        """Log token usage only if approved."""
+        """Intercepts AI responses and updates Supabase metrics."""
         if self.is_approved and "api.openai.com" in flow.request.pretty_host:
             try:
                 data = json.loads(flow.response.content)
