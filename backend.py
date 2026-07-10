@@ -15,7 +15,7 @@ app.add_middleware(
 
 # Configuration: Use os.getenv() to prevent crashes
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 SHARED_SECRET = os.getenv("MY_SHARED_SECRET")
 
 # Initialize Supabase
