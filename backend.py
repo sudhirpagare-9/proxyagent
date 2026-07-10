@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from supabase import create_client
 import os
@@ -13,7 +13,7 @@ SHARED_SECRET = os.environ.get("MY_SHARED_SECRET")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 3. Serve the dashboard
+# 3. Serve the dashboard (After app is initialized)
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     with open("index.html", "r") as f:
