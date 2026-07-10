@@ -3,22 +3,23 @@ from fastapi.responses import HTMLResponse
 from supabase import create_client
 import os
 
-# Initialize app FIRST
+# 1. Initialize app FIRST
 app = FastAPI()
 
-# Configuration
+# 2. Configuration
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 SHARED_SECRET = os.environ.get("MY_SHARED_SECRET")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Routes
+# 3. Serve the dashboard
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     with open("index.html", "r") as f:
         return f.read()
 
+# 4. API Routes
 @app.post("/register")
 async def register(data: dict, api_key: str = Header(...)):
     if api_key != SHARED_SECRET: raise HTTPException(status_code=401)
