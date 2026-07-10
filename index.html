@@ -8,22 +8,25 @@
     </table>
 
     <script>
-        const API_URL = "https://your-api-url.onrender.com"; // Your deployed backend URL
-        const SECRET = "my_secure_random_key_123";           // Must match the one in Backend Env Vars
+        // Update these values to match your deployed environment
+        const API_URL = "https://your-api-url.onrender.com"; 
+        const SECRET = "YOUR_SHARED_SECRET_PASSWORD";
 
         async function loadClients() {
-            const res = await fetch(`${API_URL}/clients`, { headers: {'api-key': SECRET} });
-            const result = await res.json();
-            const body = document.getElementById('clientBody');
-            body.innerHTML = '';
-            
-            result.data.forEach(client => {
-                body.innerHTML += `<tr>
-                    <td>${client.hw_id}</td>
-                    <td>${client.status}</td>
-                    <td><button onclick="toggle('${client.hw_id}', '${client.status}')">Toggle</button></td>
-                </tr>`;
-            });
+            try {
+                const res = await fetch(`${API_URL}/clients`, { headers: {'api-key': SECRET} });
+                const result = await res.json();
+                const body = document.getElementById('clientBody');
+                body.innerHTML = '';
+                
+                result.data.forEach(client => {
+                    body.innerHTML += `<tr>
+                        <td>${client.hw_id}</td>
+                        <td>${client.status}</td>
+                        <td><button onclick="toggle('${client.hw_id}', '${client.status}')">Toggle Status</button></td>
+                    </tr>`;
+                });
+            } catch (e) { console.error("Fetch failed:", e); }
         }
 
         async function toggle(hw_id, currentStatus) {
