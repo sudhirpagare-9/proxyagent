@@ -1,84 +1,44 @@
-import os
-import threading
-import tkinter as tk
-import asyncio
-import uuid
-import json
-import socket
-import time
+import threading, socket, uuid, requests, json, asyncio, tkinter as tk
 from mitmproxy.tools.dump import DumpMaster
 from mitmproxy.options import Options
 from mitmproxy import http
-from supabase import create_client
 
-# --- CONFIG ---
-# Ensure these are set in your OS environment variables
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+# CONFIGURATION
+GATEWAY_URL = "https://your-api-url.onrender.com" # Your deployed backend URL
+SHARED_SECRET = "my_secure_random_key_123"        # Must match the one in Backend Env Vars
 
-def get_hw_id():
-    return str(uuid.getnode())
+MY_HW_ID = str(uuid.getnode())
 
-MY_HW_ID = get_hw_id()
-
-# --- PROXY ADDON ---
 class AIInterceptor:
     def __init__(self):
         self.is_approved = False
         self.register_device()
-        threading.Thread(target=self.poll_status, daemon=True).start()
-
+        
     def register_device(self):
-        """Fixes the null constraint error by providing all required fields."""
-        if supabase:
-            try:
-                # Upsert ensures we don't crash if the device is already registered
-                supabase.table("clients_registry").upsert({
-                    "hw_id": MY_HW_ID,
-                    "status": "pending",
-                    "hostname": socket.gethostname(), # Fixes null constraint
-                    "ip_address": socket.gethostbyname(socket.gethostname()), # Fixes null constraint
-                    "client_name": "My Client Machine"
-                }).execute()
-            except Exception as e:
-                print(f"[ERROR] Failed to register: {e}")
-
-    def poll_status(self):
-        """Checks DB for approval status every 10 seconds."""
-        while True:
-            if supabase:
-                try:
-                    res = supabase.table("clients_registry").select("status").eq("hw_id", MY_HW_ID).single().execute()
-                    self.is_approved = (res.data.get("status") == "approved")
-                except: 
-                    self.is_approved = False
-            time.sleep(10)
+        try:
+            requests.post(f"{GATEWAY_URL}/register", headers={"api-key": SHARED_SECRET}, json={
+                "hw_id": MY_HW_ID, "hostname": socket.gethostname(), "status": "pending"
+            })
+        except Exception as e: print(f"Reg Error: {e}")
 
     def response(self, flow: http.HTTPFlow):
-        """Intercepts AI responses and updates Supabase metrics."""
-        if self.is_approved and "api.openai.com" in flow.request.pretty_host:
+        if "api.openai.com" in flow.request.pretty_host:
             try:
                 data = json.loads(flow.response.content)
                 usage = data.get("usage", {})
-                supabase.table("clients_registry").update({
+                requests.post(f"{GATEWAY_URL}/update-usage", headers={"api-key": SHARED_SECRET}, json={
+                    "hw_id": MY_HW_ID,
                     "model_used": data.get("model", "unknown"),
                     "input_tokens": usage.get("prompt_tokens", 0),
                     "output_tokens": usage.get("completion_tokens", 0)
-                }).eq("hw_id", MY_HW_ID).execute()
+                })
             except: pass
 
-# --- RUNNER ---
 async def start_proxy():
-    options = Options(listen_host='127.0.0.1', listen_port=8080)
-    master = DumpMaster(options, with_termlog=False, with_dumper=False)
+    master = DumpMaster(Options(listen_host='127.0.0.1', listen_port=8080))
     master.addons.add(AIInterceptor())
     await master.run()
 
-def run_proxy_in_thread():
-    try:
-        asyncio.run(start_proxy())
-    except Exception as e:
-        print(f"Proxy error: {e}")
-
-# ... (Include your existing GUI Class/App code here) ...
+if __name__ == "__main__":
+    threading.Thread(target=lambda: asyncio.run(start_proxy()), daemon=True).start()
+    tk.Tk().mainloop()

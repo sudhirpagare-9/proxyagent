@@ -1,64 +1,40 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Proxy Dashboard</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <style>
-        body { font-family: sans-serif; padding: 20px; background: #f4f4f9; }
-        table { width: 100%; border-collapse: collapse; background: white; margin-top: 20px; }
-        th, td { padding: 12px; border: 1px solid #ddd; }
-        .approved { color: green; font-weight: bold; }
-        .pending { color: orange; font-weight: bold; }
-    </style>
-</head>
+<html>
 <body>
     <h1>AI Proxy Management</h1>
-    <table>
-        <thead>
-            <tr><th>HW ID</th><th>Status</th><th>Model</th><th>In</th><th>Out</th><th>Actions</th></tr>
-        </thead>
+    <table id="clientTable" border="1">
+        <thead><tr><th>HW ID</th><th>Status</th><th>Action</th></tr></thead>
         <tbody id="clientBody"></tbody>
     </table>
 
     <script>
-        const supabase = supabase.createClient('YOUR_URL', 'YOUR_KEY');
+        const API_URL = "https://your-api-url.onrender.com"; // Your deployed backend URL
+        const SECRET = "my_secure_random_key_123";           // Must match the one in Backend Env Vars
 
         async function loadClients() {
-            const { data } = await supabase.from('clients_registry').select('*');
+            const res = await fetch(`${API_URL}/clients`, { headers: {'api-key': SECRET} });
+            const result = await res.json();
             const body = document.getElementById('clientBody');
             body.innerHTML = '';
-
-            data.forEach(client => {
-                const isApproved = client.status === 'approved';
-                const row = `<tr>
+            
+            result.data.forEach(client => {
+                body.innerHTML += `<tr>
                     <td>${client.hw_id}</td>
-                    <td class="${client.status}">${client.status}</td>
-                    <td>${client.model_used || '-'}</td>
-                    <td>${client.input_tokens || 0}</td>
-                    <td>${client.output_tokens || 0}</td>
-                    <td>
-                        <button onclick="toggleStatus('${client.hw_id}', '${client.status}')">
-                            ${isApproved ? 'Block' : 'Approve'}
-                        </button>
-                        <button onclick="deleteClient('${client.hw_id}')" style="color:red">Delete</button>
-                    </td>
+                    <td>${client.status}</td>
+                    <td><button onclick="toggle('${client.hw_id}', '${client.status}')">Toggle</button></td>
                 </tr>`;
-                body.innerHTML += row;
             });
         }
 
-        async function toggleStatus(hw_id, currentStatus) {
+        async function toggle(hw_id, currentStatus) {
             const newStatus = (currentStatus === 'approved') ? 'pending' : 'approved';
-            await supabase.from('clients_registry').update({ status: newStatus }).eq('hw_id', hw_id);
+            await fetch(`${API_URL}/toggle-status`, {
+                method: 'POST',
+                headers: {'api-key': SECRET, 'Content-Type': 'application/json'},
+                body: JSON.stringify({hw_id: hw_id, status: newStatus})
+            });
             loadClients();
         }
-
-        async function deleteClient(hw_id) {
-            await supabase.from('clients_registry').delete().eq('hw_id', hw_id);
-            loadClients();
-        }
-
         loadClients();
     </script>
 </body>
