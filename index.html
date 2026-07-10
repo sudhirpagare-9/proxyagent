@@ -17,9 +17,9 @@
     </table>
 
     <script>
-        // Automatically uses the URL where this file is hosted
+        // Automatically points to your deployed backend
         const API_URL = window.location.origin; 
-        const SECRET = "Sud#!r!^)&!!)*"; // Ensure this matches the MY_SHARED_SECRET in Render
+        const SECRET = "Sud#!r!^)&!!)*"; // Match this with Render ENV
 
         async function loadClients() {
             try {
@@ -31,13 +31,14 @@
                 body.innerHTML = '';
                 
                 result.data.forEach(client => {
-                    const newStatus = (client.status === 'approved') ? 'pending' : 'approved';
+                    const nextStatus = (client.status === 'approved') ? 'pending' : 'approved';
                     body.innerHTML += `<tr>
                         <td class="p-2 border">${client.hw_id}</td>
                         <td class="p-2 border">${client.status}</td>
                         <td class="p-2 border">
-                            <button onclick="toggle('${client.hw_id}', '${client.status}')" class="bg-blue-600 px-3 py-1 rounded">
-                                Toggle to ${newStatus}
+                            <button onclick="toggle('${client.hw_id}', '${nextStatus}')" 
+                                    class="bg-blue-600 px-3 py-1 rounded">
+                                Set to ${nextStatus}
                             </button>
                         </td>
                     </tr>`;
@@ -47,14 +48,13 @@
             }
         }
 
-        async function toggle(hw_id, currentStatus) {
-            const newStatus = (currentStatus === 'approved') ? 'pending' : 'approved';
+        async function toggle(hw_id, newStatus) {
             await fetch(`${API_URL}/toggle-status`, {
                 method: 'POST',
                 headers: {'api-key': SECRET, 'Content-Type': 'application/json'},
                 body: JSON.stringify({hw_id: hw_id, status: newStatus})
             });
-            loadClients();
+            loadClients(); // Refresh list after change
         }
 
         loadClients();
