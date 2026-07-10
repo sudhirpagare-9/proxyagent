@@ -6,42 +6,57 @@
 <body class="bg-gray-900 text-white p-8">
     <h1 class="text-2xl mb-4">AI Proxy Management</h1>
     <table class="w-full bg-gray-800 rounded border border-gray-700">
-        <thead><tr><th class="p-2">HW ID</th><th class="p-2">Status</th><th class="p-2">Action</th></tr></thead>
+        <thead>
+            <tr class="text-left">
+                <th class="p-2">HW ID</th>
+                <th class="p-2">Status</th>
+                <th class="p-2">Action</th>
+            </tr>
+        </thead>
         <tbody id="clientBody"></tbody>
     </table>
 
     <script>
-        const API_URL = "https://YOUR_ACTUAL_RENDER_URL.onrender.com"; 
-        const SECRET = "your_shared_secret_password"; // MUST match Render Env Var MY_SHARED_SECRET
+        // Dynamically sets the API URL to match your Render domain
+        const API_URL = window.location.origin; 
+        const SECRET = "a_long_random_string_you_choose"; // Ensure this matches your Render Environment Variable 'MY_SHARED_SECRET'
 
         async function loadClients() {
-            const res = await fetch(`${API_URL}/clients`, { headers: {'api-key': SECRET} });
-            const result = await res.json();
-            const body = document.getElementById('clientBody');
-            body.innerHTML = '';
-            
-            result.data.forEach(client => {
-                const newStatus = (client.status === 'approved') ? 'pending' : 'approved';
-                body.innerHTML += `<tr>
-                    <td class="p-2 border">${client.hw_id}</td>
-                    <td class="p-2 border">${client.status}</td>
-                    <td class="p-2 border">
-                        <button onclick="toggle('${client.hw_id}', '${newStatus}')" class="bg-blue-600 px-3 py-1 rounded">
-                            Set to ${newStatus}
-                        </button>
-                    </td>
-                </tr>`;
-            });
+            try {
+                const res = await fetch(`${API_URL}/clients`, { 
+                    headers: {'api-key': SECRET} 
+                });
+                const result = await res.json();
+                const body = document.getElementById('clientBody');
+                body.innerHTML = '';
+                
+                result.data.forEach(client => {
+                    const newStatus = (client.status === 'approved') ? 'pending' : 'approved';
+                    body.innerHTML += `<tr>
+                        <td class="p-2 border">${client.hw_id}</td>
+                        <td class="p-2 border">${client.status}</td>
+                        <td class="p-2 border">
+                            <button onclick="toggle('${client.hw_id}', '${client.status}')" class="bg-blue-600 px-3 py-1 rounded">
+                                Toggle to ${newStatus}
+                            </button>
+                        </td>
+                    </tr>`;
+                });
+            } catch (e) {
+                console.error("Fetch failed:", e);
+            }
         }
 
-        async function toggle(hw_id, newStatus) {
+        async function toggle(hw_id, currentStatus) {
+            const newStatus = (currentStatus === 'approved') ? 'pending' : 'approved';
             await fetch(`${API_URL}/toggle-status`, {
                 method: 'POST',
                 headers: {'api-key': SECRET, 'Content-Type': 'application/json'},
                 body: JSON.stringify({hw_id: hw_id, status: newStatus})
             });
-            loadClients();
+            loadClients(); // Refresh table
         }
+
         loadClients();
     </script>
 </body>
