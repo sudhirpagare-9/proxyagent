@@ -18,7 +18,7 @@
 
     <script>
         const API_URL = window.location.origin;
-        // Fix for SyntaxError: Ensure this value is wrapped in quotes
+        // IMPORTANT: Replace the string below with the exact value of your MY_SHARED_SECRET
         const SECRET = "Surrrddiiihhh167157"; 
 
         async function loadClients() {
@@ -26,6 +26,9 @@
                 const res = await fetch(`${API_URL}/clients`, { 
                     headers: {'api-key': SECRET} 
                 });
+                
+                if (!res.ok) throw new Error("Unauthorized");
+
                 const result = await res.json();
                 const body = document.getElementById('clientBody');
                 body.innerHTML = '';
@@ -37,12 +40,15 @@
                         <td class="p-2 border">${client.status}</td>
                         <td class="p-2 border">
                             <button onclick="toggle('${client.hw_id}', '${nextStatus}')" class="bg-blue-600 px-3 py-1 rounded">
-                                Set to ${nextStatus}
+                                Toggle to ${nextStatus}
                             </button>
                         </td>
                     </tr>`;
                 });
-            } catch (e) { console.error("Fetch failed:", e); }
+            } catch (e) { 
+                console.error("Fetch failed:", e);
+                document.getElementById('clientBody').innerHTML = '<tr><td colspan="3" class="p-4 text-red-500">Failed to load data. Check console.</td></tr>';
+            }
         }
 
         async function toggle(hw_id, newStatus) {
