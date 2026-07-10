@@ -17,9 +17,9 @@
     </table>
 
     <script>
-        // Dynamically sets the API URL to match your Render domain
+        // Automatically uses the URL where this file is hosted
         const API_URL = window.location.origin; 
-        const SECRET = "Sud#!r!^)&!!)*"; // Ensure this matches your Render Environment Variable 'MY_SHARED_SECRET'
+        const SECRET = "Sud#!r!^)&!!)*"; // Ensure this matches the MY_SHARED_SECRET in Render
 
         async function loadClients() {
             try {
@@ -54,7 +54,7 @@
                 headers: {'api-key': SECRET, 'Content-Type': 'application/json'},
                 body: JSON.stringify({hw_id: hw_id, status: newStatus})
             });
-            loadClients(); // Refresh table
+            loadClients();
         }
 
         loadClients();
