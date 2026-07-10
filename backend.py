@@ -5,14 +5,15 @@ import os
 
 app = FastAPI()
 
-# Fix: Using .get() to safely retrieve environment variables
+# Configuration
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 SHARED_SECRET = os.environ.get("MY_SHARED_SECRET")
 
+# Initialize Supabase
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 1. The Dashboard Route
+# 1. Dashboard (The Root Route)
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return """
@@ -46,15 +47,18 @@ async def index():
 # 2. Existing API Routes
 @app.get("/api/admin/devices")
 async def get_devices():
+    # Fetch all clients
     response = supabase.table("clients_registry").select("*").execute()
     return response.data
 
 @app.get("/toggle-status/{hw_id}/{new_status}")
 async def toggle_status(hw_id: str, new_status: str):
+    # Update client status
     return supabase.table("clients_registry").update({"status": new_status}).eq("hw_id", hw_id).execute()
 
 @app.post("/update-usage")
 async def update_usage(data: dict, api_key: str = Header(...)):
+    # Simple auth check
     if api_key != SHARED_SECRET:
-        raise HTTPException(status_code=401)
+        raise HTTPException(status_code=401, detail="Unauthorized")
     return supabase.table("clients_registry").update(data).eq("hw_id", data["hw_id"]).execute()
