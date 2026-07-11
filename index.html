@@ -1,128 +1,27 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Proxy Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-900 text-gray-100 p-8">
-    <div class="max-w-7xl mx-auto">
-        <h1 class="text-3xl font-bold mb-6 text-blue-400">AI Proxy Management Dashboard</h1>
+<html class="dark">
+<body class="bg-gray-900 text-white p-10">
+    <h2 class="text-2xl mb-5">Client Access Control</h2>
+    <table class="w-full bg-gray-800 rounded">
+        <thead><tr class="text-left"><th class="p-3">HW ID</th><th>Hostname</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody id="clients"></tbody>
+    </table>
 
-        <section class="mb-10">
-            <h2 class="text-xl mb-4 font-semibold text-gray-300">Connected Clients</h2>
-            <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-x-auto">
-                <table class="w-full text-sm text-left">
-                    <thead class="text-xs uppercase bg-gray-700 text-gray-300">
-                        <tr>
-                            <th class="p-3">HW ID</th>
-                            <th class="p-3">Hostname</th>
-                            <th class="p-3">IP Address</th>
-                            <th class="p-3">Location</th>
-                            <th class="p-3">Status</th>
-                            <th class="p-3">Action</th>
-                        </tr>
-                    </thead>
-                    <tbody id="clientBody">
-                        <tr><td colspan="6" class="p-4 text-center">Loading clients...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
-
-        <section>
-            <h2 class="text-xl mb-4 font-semibold text-gray-300">Live AI Traffic Analytics</h2>
-            <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-x-auto">
-                <table class="w-full text-sm text-left">
-                    <thead class="text-xs uppercase bg-gray-700 text-gray-300">
-                        <tr>
-                            <th class="p-3">Time</th>
-                            <th class="p-3">Model</th>
-                            <th class="p-3">Type</th>
-                            <th class="p-3">Input</th>
-                            <th class="p-3">Output</th>
-                            <th class="p-3">Balance</th>
-                        </tr>
-                    </thead>
-                    <tbody id="analyticsBody">
-                        <tr><td colspan="6" class="p-4 text-center">Loading analytics...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
-    </div>
-
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
-        const API_URL = window.location.origin;
-
-        function getApiKey() {
-            let key = sessionStorage.getItem('api_key');
-            if (!key) {
-                key = prompt("Please enter your API Key to access the dashboard:");
-                if (key) sessionStorage.setItem('api_key', key);
-            }
-            return key;
+        const sb = supabase.createClient('URL', 'KEY');
+        async function fetchClients() {
+            const { data } = await sb.from('clients_registry').select('*');
+            document.getElementById('clients').innerHTML = data.map(c => `
+                <tr><td class="p-3">${c.hw_id}</td><td>${c.hostname}</td><td>${c.status}</td>
+                <td><button onclick="update('${c.hw_id}', '${c.status}')" class="bg-blue-600 px-3 py-1 rounded">
+                ${c.status === 'approved' ? 'Deny' : 'Approve'}</button></td></tr>`).join('');
         }
-
-        async function loadClients() {
-            const secret = getApiKey();
-            if (!secret) return;
-            try {
-                const res = await fetch(`${API_URL}/clients`, { headers: {'api-key': secret} });
-                const result = await res.json();
-                const body = document.getElementById('clientBody');
-                body.innerHTML = '';
-                result.data.forEach(c => {
-                    const statusBadge = c.status === 'approved' ? 'bg-green-600' : 'bg-yellow-600';
-                    body.innerHTML += `
-                        <tr class="border-b border-gray-700">
-                            <td class="p-3">${c.hw_id}</td>
-                            <td class="p-3">${c.hostname || 'N/A'}</td>
-                            <td class="p-3">${c.ip_address || 'N/A'}</td>
-                            <td class="p-3">${c.country || 'N/A'}</td>
-                            <td class="p-3"><span class="${statusBadge} px-2 py-1 rounded text-xs">${c.status}</span></td>
-                            <td class="p-3"><button onclick="toggle('${c.hw_id}', '${c.status === 'approved' ? 'pending' : 'approved'}')" class="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded transition">Toggle</button></td>
-                        </tr>`;
-                });
-            } catch (e) { console.error(e); }
+        async function update(id, cur) {
+            await sb.from('clients_registry').update({status: cur === 'approved' ? 'pending' : 'approved'}).eq('hw_id', id);
+            fetchClients();
         }
-
-        async function loadAnalytics() {
-            const secret = getApiKey();
-            if (!secret) return;
-            try {
-                const res = await fetch(`${API_URL}/analytics`, { headers: {'api-key': secret} });
-                const result = await res.json();
-                const body = document.getElementById('analyticsBody');
-                body.innerHTML = '';
-                result.data.slice(-10).reverse().forEach(log => {
-                    body.innerHTML += `
-                        <tr class="border-b border-gray-700">
-                            <td class="p-3 text-gray-400">${new Date(log.created_at).toLocaleTimeString()}</td>
-                            <td class="p-3 font-medium text-blue-300">${log.model_name || 'N/A'}</td>
-                            <td class="p-3">${log.model_type || 'N/A'}</td>
-                            <td class="p-3 text-green-400">${log.input_tokens || 0}</td>
-                            <td class="p-3 text-red-400">${log.output_tokens || 0}</td>
-                            <td class="p-3 text-gray-300">${log.balance_tokens || 0}</td>
-                        </tr>`;
-                });
-            } catch (e) { console.error(e); }
-        }
-
-        async function toggle(hw_id, newStatus) {
-            const secret = getApiKey();
-            await fetch(`${API_URL}/toggle-status`, {
-                method: 'POST',
-                headers: {'api-key': secret, 'Content-Type': 'application/json'},
-                body: JSON.stringify({hw_id: hw_id, status: newStatus})
-            });
-            loadClients();
-        }
-
-        loadClients();
-        loadAnalytics();
-        setInterval(() => { loadClients(); loadAnalytics(); }, 15000);
+        fetchClients();
     </script>
 </body>
 </html>
