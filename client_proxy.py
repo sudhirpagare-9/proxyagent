@@ -3,7 +3,12 @@ from mitmproxy import http
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.hazmat.primitives import serialization
 from urllib import request, error
+import logging
+logging.basicConfig(filename='agent.log', level=logging.INFO)
 
+def start_agent():
+    logging.info("Agent started successfully.")
+    # ... your existing logic ...
 # --- Configuration ---
 GATEWAY_URL = "https://your-server.onrender.com"
 
