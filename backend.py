@@ -1,52 +1,43 @@
-from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Header
 from supabase import create_client
 import os
-from typing import Optional
-import sys
-
-# Configuration
-required_vars = ["SUPABASE_URL", "SUPABASE_KEY", "SHARED_SECRET"]
-for var in required_vars:
-    if not os.environ.get(var):
-        sys.exit(1)
+from cryptography.hazmat.primitives.asymmetric import ed25519
+import json
 
 app = FastAPI()
 supabase = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
-SHARED_SECRET = os.environ.get("SHARED_SECRET")
 
-def validate_key(api_key: Optional[str]):
-    if api_key != SHARED_SECRET:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+# Helper: Verify Digital Signature
+def verify_signature(data: dict, signature_hex: str, public_key_hex: str):
+    try:
+        pub_key = ed25519.Ed25519PublicKey.from_public_bytes(bytes.fromhex(public_key_hex))
+        data_bytes = json.dumps(data, sort_keys=True).encode()
+        pub_key.verify(bytes.fromhex(signature_hex), data_bytes)
+        return True
+    except Exception:
+        return False
 
-@app.get("/", response_class=HTMLResponse)
-async def read_root():
-    with open("index.html", "r") as f:
-        return f.read()
-
-@app.get("/clients")
-async def get_clients(api_key: str = Header(...)):
-    validate_key(api_key)
-    response = supabase.table("clients_registry").select("*").execute()
-    return {"data": response.data}
-
-@app.get("/analytics")
-async def get_analytics(api_key: str = Header(...)):
-    validate_key(api_key)
-    response = supabase.table("ai_usage_logs").select("*").order("created_at", desc=True).limit(20).execute()
-    return {"data": response.data}
-
-@app.post("/toggle-status")
-async def toggle_status(data: dict, api_key: str = Header(...)):
-    validate_key(api_key)
-    return supabase.table("clients_registry").update({"status": data["status"]}).eq("hw_id", data["hw_id"]).execute()
+@app.post("/register")
+async def register(data: dict):
+    # Register client with their Public Key
+    return supabase.table("clients_registry").upsert({
+        "hw_id": data["hw_id"],
+        "hostname": data["hostname"],
+        "public_key": data["public_key"],
+        "status": "approved"
+    }).execute()
 
 @app.post("/update-usage")
-async def update_usage(data: dict, api_key: str = Header(...)):
-    validate_key(api_key)
-    supabase.table("clients_registry").update({
-        "model_name": data.get("model_name"),
-        "input_tokens": data.get("input_tokens"),
-        "output_tokens": data.get("output_tokens")
-    }).eq("hw_id", data["hw_id"]).execute()
-    return supabase.table("ai_usage_logs").insert(data).execute()
+async def update_usage(payload: dict):
+    hw_id = payload["data"]["hw_id"]
+    # 1. Get Public Key from DB
+    client = supabase.table("clients_registry").select("public_key").eq("hw_id", hw_id).single().execute()
+    if not client.data:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    # 2. Verify Data Integrity
+    if not verify_signature(payload["data"], payload["sig"], client.data["public_key"]):
+        raise HTTPException(status_code=403, detail="Invalid Signature")
+    
+    # 3. Save to logs
+    return supabase.table("ai_usage_logs").insert(payload["data"]).execute()
