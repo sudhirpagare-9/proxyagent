@@ -18,14 +18,12 @@
                         <tr>
                             <th class="p-3">HW ID</th>
                             <th class="p-3">Hostname</th>
-                            <th class="p-3">IP Address</th>
-                            <th class="p-3">Location</th>
                             <th class="p-3">Status</th>
                             <th class="p-3">Action</th>
                         </tr>
                     </thead>
                     <tbody id="clientBody">
-                        <tr><td colspan="6" class="p-4 text-center">Loading clients...</td></tr>
+                        <tr><td colspan="4" class="p-4 text-center">Loading clients...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -39,14 +37,12 @@
                         <tr>
                             <th class="p-3">Time</th>
                             <th class="p-3">Model</th>
-                            <th class="p-3">Type</th>
                             <th class="p-3">Input</th>
                             <th class="p-3">Output</th>
-                            <th class="p-3">Balance</th>
                         </tr>
                     </thead>
                     <tbody id="analyticsBody">
-                        <tr><td colspan="6" class="p-4 text-center">Loading traffic data...</td></tr>
+                        <tr><td colspan="4" class="p-4 text-center">Loading analytics...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -56,70 +52,61 @@
     <script>
         const API_URL = window.location.origin;
 
-        // Secure Key Retrieval
-        function getApiKey() {
+        // Simple API Key helper
+        function getSecret() {
             let key = sessionStorage.getItem('api_key');
             if (!key) {
-                key = prompt("Please enter your API Key to access the dashboard:");
+                key = prompt("Please enter your API Key (SHARED_SECRET):");
                 if (key) sessionStorage.setItem('api_key', key);
             }
             return key;
         }
 
+        // Fetch Clients
         async function loadClients() {
-            const secret = getApiKey();
+            const secret = getSecret();
             if (!secret) return;
-
             try {
                 const res = await fetch(`${API_URL}/clients`, { headers: {'api-key': secret} });
                 const result = await res.json();
                 const body = document.getElementById('clientBody');
                 body.innerHTML = '';
-                
                 result.data.forEach(c => {
-                    const statusBadge = c.status === 'approved' ? 'bg-green-600' : 'bg-yellow-600';
-                    body.innerHTML += `
-                        <tr class="border-b border-gray-700">
-                            <td class="p-3">${c.hw_id}</td>
-                            <td class="p-3">${c.hostname || 'N/A'}</td>
-                            <td class="p-3">${c.ip_address || 'N/A'}</td>
-                            <td class="p-3">${c.country || 'Unknown'} (${c.geo_location || ''})</td>
-                            <td class="p-3"><span class="${statusBadge} px-2 py-1 rounded text-xs">${c.status}</span></td>
-                            <td class="p-3">
-                                <button onclick="toggle('${c.hw_id}', '${c.status === 'approved' ? 'pending' : 'approved'}')" class="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded transition">Toggle</button>
-                            </td>
-                        </tr>`;
+                    const nextStatus = (c.status === 'approved') ? 'pending' : 'approved';
+                    body.innerHTML += `<tr class="border-b border-gray-700">
+                        <td class="p-3">${c.hw_id}</td>
+                        <td class="p-3">${c.hostname || 'N/A'}</td>
+                        <td class="p-3">${c.status}</td>
+                        <td class="p-3"><button onclick="toggle('${c.hw_id}', '${nextStatus}')" class="bg-blue-600 px-3 py-1 rounded hover:bg-blue-500">Toggle to ${nextStatus}</button></td>
+                    </tr>`;
                 });
-            } catch (e) { console.error(e); }
+            } catch (e) { console.error("Error loading clients:", e); }
         }
 
+        // Fetch Analytics
         async function loadAnalytics() {
-            const secret = getApiKey();
+            const secret = getSecret();
             if (!secret) return;
-
             try {
                 const res = await fetch(`${API_URL}/analytics`, { headers: {'api-key': secret} });
                 const result = await res.json();
                 const body = document.getElementById('analyticsBody');
                 body.innerHTML = '';
-                
                 // Show last 10 entries
                 result.data.slice(-10).reverse().forEach(log => {
-                    body.innerHTML += `
-                        <tr class="border-b border-gray-700">
-                            <td class="p-3 text-gray-400">${new Date(log.created_at).toLocaleTimeString()}</td>
-                            <td class="p-3 font-medium text-blue-300">${log.model_name || 'N/A'}</td>
-                            <td class="p-3">${log.model_type || 'N/A'}</td>
-                            <td class="p-3 text-green-400">${log.input_tokens || 0}</td>
-                            <td class="p-3 text-red-400">${log.output_tokens || 0}</td>
-                            <td class="p-3 text-gray-300">${log.balance_tokens || 0}</td>
-                        </tr>`;
+                    body.innerHTML += `<tr class="border-b border-gray-700">
+                        <td class="p-3 text-gray-400">${new Date(log.created_at).toLocaleTimeString()}</td>
+                        <td class="p-3 font-medium">${log.model_used || 'N/A'}</td>
+                        <td class="p-3 text-green-400">${log.input_tokens || 0}</td>
+                        <td class="p-3 text-red-400">${log.output_tokens || 0}</td>
+                    </tr>`;
                 });
-            } catch (e) { console.error(e); }
+            } catch (e) { console.error("Error loading analytics:", e); }
         }
 
+        // Toggle Status
         async function toggle(hw_id, newStatus) {
-            const secret = getApiKey();
+            const secret = getSecret();
             await fetch(`${API_URL}/toggle-status`, {
                 method: 'POST',
                 headers: {'api-key': secret, 'Content-Type': 'application/json'},
@@ -128,10 +115,10 @@
             loadClients();
         }
 
-        // Initialize and Refresh
+        // Initialization
         loadClients();
         loadAnalytics();
-        setInterval(() => { loadClients(); loadAnalytics(); }, 15000); // 15 sec refresh
+        setInterval(() => { loadClients(); loadAnalytics(); }, 15000);
     </script>
 </body>
 </html>

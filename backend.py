@@ -101,11 +101,12 @@ async def update_usage(data: dict, api_key: str = Header(...)):
     # response = supabase.table("ai_usage_logs").select("*").execute()
     # return {"data": response.data}
     
-# Ensure the line below has 0 indentation (starts at the very left edge)
 @app.get("/analytics")
 async def get_analytics(api_key: str = Header(...)):
-    # Everything inside the function must be indented exactly 4 spaces
-    validate_key(api_key)
-    # Fetch logs, order by created_at descending, limit to 20
+    if api_key != SHARED_SECRET: 
+        raise HTTPException(status_code=401)
+    
+    # This queries your 'ai_usage_logs' table. 
+    # Make sure this table exists in your Supabase database.
     response = supabase.table("ai_usage_logs").select("*").order("created_at", desc=True).limit(20).execute()
     return {"data": response.data}
