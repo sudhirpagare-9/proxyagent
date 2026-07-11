@@ -90,7 +90,7 @@ async def update_usage(data: dict, api_key: str = Header(...)):
 # @app.get("/analytics")
 # async def get_analytics(api_key: str = Header(...)):
     # validate_key(api_key)
-    Fetches aggregated usage data for analytics
+    #Fetches aggregated usage data for analytics
     # response = supabase.table("ai_usage_logs").select("*").execute()
     # return {"data": response.data}
     
