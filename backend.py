@@ -21,7 +21,6 @@ class RegisterData(BaseModel):
 # Routes
 @app.get("/")
 async def read_index():
-    # Ensure index.html is in the same folder as backend.py
     return FileResponse("index.html")
 
 @app.get("/api/get-clients")
