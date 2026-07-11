@@ -8,18 +8,18 @@ from pydantic import BaseModel
 
 app = FastAPI()
 
-# Configuration
+# 1. Configuration (Set these in Render Environment Variables)
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Data Model
+# 2. Data Models
 class RegisterData(BaseModel):
     hw_id: str
     hostname: str
     public_key: str
 
-# Signature Verification Helper
+# 3. Security Helper
 def verify_signature(data: dict, sig_hex: str, pub_key_hex: str):
     try:
         pub_key = ed25519.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pub_key_hex))
@@ -29,15 +29,14 @@ def verify_signature(data: dict, sig_hex: str, pub_key_hex: str):
     except Exception:
         return False
 
-# --- Routes ---
-
+# 4. Routes
 @app.get("/")
 async def read_index():
     return FileResponse("index.html")
 
 @app.get("/api/get-clients")
 async def get_clients():
-    """Secure endpoint for dashboard to fetch client data."""
+    """Secure endpoint: Dashboard fetches data here."""
     try:
         response = supabase.table("clients_registry").select("*").execute()
         return response.data
@@ -46,7 +45,6 @@ async def get_clients():
 
 @app.post("/register")
 async def register(data: RegisterData, request: Request):
-    """Registers a client as 'pending'."""
     try:
         response = supabase.table("clients_registry").upsert({
             "hw_id": data.hw_id,
@@ -61,7 +59,6 @@ async def register(data: RegisterData, request: Request):
 
 @app.get("/status/{hw_id}")
 async def get_status(hw_id: str):
-    """Client polls this to check status."""
     try:
         response = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).single().execute()
         if not response.data:
@@ -72,7 +69,6 @@ async def get_status(hw_id: str):
 
 @app.post("/update-usage")
 async def update_usage(req: dict):
-    """Verifies approval status and signature before logging data."""
     data = req.get("data")
     sig = req.get("sig")
     hw_id = data.get("hw_id")
@@ -89,4 +85,4 @@ async def update_usage(req: dict):
         supabase.table("ai_usage_logs").insert(data).execute()
         return {"status": "success"}
     except Exception:
-        raise HTTPException(status_code=500, detail="Database write error")
+        raise HTTPException(status_code=500, detail="Database error")
