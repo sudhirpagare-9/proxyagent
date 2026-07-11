@@ -3,7 +3,14 @@ from fastapi.responses import HTMLResponse
 from supabase import create_client
 import os
 from typing import Optional
+# Force a crash with a clear message if environment variables are missing
+import sys
 
+required_vars = ["SUPABASE_URL", "SUPABASE_KEY", "SHARED_SECRET"]
+for var in required_vars:
+    if not os.environ.get(var):
+        print(f"CRITICAL ERROR: Environment variable {var} is not set!")
+        sys.exit(1) # This will show the error in your Render logs
 
 app = FastAPI()
 
