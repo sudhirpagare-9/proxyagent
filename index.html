@@ -56,7 +56,6 @@
     <script>
         const API_URL = window.location.origin;
 
-        // Secure Key Retrieval
         function getApiKey() {
             let key = sessionStorage.getItem('api_key');
             if (!key) {
@@ -69,13 +68,11 @@
         async function loadClients() {
             const secret = getApiKey();
             if (!secret) return;
-
             try {
-                const res = await fetch(`${API_URL}/clients`, { headers: {'api-key': secret} });
+                const res = await fetch(`${API_URL}/clients`, { headers: {'Api-key': secret} });
                 const result = await res.json();
                 const body = document.getElementById('clientBody');
                 body.innerHTML = '';
-                
                 result.data.forEach(c => {
                     const statusBadge = c.status === 'approved' ? 'bg-green-600' : 'bg-yellow-600';
                     body.innerHTML += `
@@ -83,27 +80,22 @@
                             <td class="p-3">${c.hw_id}</td>
                             <td class="p-3">${c.hostname || 'N/A'}</td>
                             <td class="p-3">${c.ip_address || 'N/A'}</td>
-                            <td class="p-3">${c.country || 'Unknown'} (${c.geo_location || ''})</td>
+                            <td class="p-3">${c.country || 'Unknown'}</td>
                             <td class="p-3"><span class="${statusBadge} px-2 py-1 rounded text-xs">${c.status}</span></td>
-                            <td class="p-3">
-                                <button onclick="toggle('${c.hw_id}', '${c.status === 'approved' ? 'pending' : 'approved'}')" class="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded transition">Toggle</button>
-                            </td>
+                            <td class="p-3"><button onclick="toggle('${c.hw_id}', '${c.status === 'approved' ? 'pending' : 'approved'}')" class="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded text-xs">Toggle</button></td>
                         </tr>`;
                 });
-            } catch (e) { console.error("Error loading clients:", e); }
+            } catch (e) { console.error(e); }
         }
 
         async function loadAnalytics() {
             const secret = getApiKey();
             if (!secret) return;
-
             try {
-                const res = await fetch(`${API_URL}/analytics`, { headers: {'api-key': secret} });
+                const res = await fetch(`${API_URL}/analytics`, { headers: {'Api-key': secret} });
                 const result = await res.json();
                 const body = document.getElementById('analyticsBody');
                 body.innerHTML = '';
-                
-                // Show last 10 entries
                 result.data.slice(-10).reverse().forEach(log => {
                     body.innerHTML += `
                         <tr class="border-b border-gray-700">
@@ -115,23 +107,22 @@
                             <td class="p-3 text-gray-300">${log.balance_tokens || 0}</td>
                         </tr>`;
                 });
-            } catch (e) { console.error("Error loading analytics:", e); }
+            } catch (e) { console.error(e); }
         }
 
         async function toggle(hw_id, newStatus) {
             const secret = getApiKey();
             await fetch(`${API_URL}/toggle-status`, {
                 method: 'POST',
-                headers: {'api-key': secret, 'Content-Type': 'application/json'},
+                headers: {'Api-key': secret, 'Content-Type': 'application/json'},
                 body: JSON.stringify({hw_id: hw_id, status: newStatus})
             });
             loadClients();
         }
 
-        // Initialize and Refresh
         loadClients();
         loadAnalytics();
-        setInterval(() => { loadClients(); loadAnalytics(); }, 15000); // 15 sec refresh
+        setInterval(() => { loadClients(); loadAnalytics(); }, 15000);
     </script>
 </body>
 </html>

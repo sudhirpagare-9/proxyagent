@@ -2,30 +2,23 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from supabase import create_client
 import os
-import sys
 from typing import Optional
+import sys
 
-# 1. Configuration & Validation
+# Configuration
 required_vars = ["SUPABASE_URL", "SUPABASE_KEY", "SHARED_SECRET"]
 for var in required_vars:
     if not os.environ.get(var):
-        print(f"CRITICAL ERROR: Environment variable {var} is not set!")
         sys.exit(1)
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+app = FastAPI()
+supabase = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
 SHARED_SECRET = os.environ.get("SHARED_SECRET")
 
-# 2. Initialize app and supabase client
-app = FastAPI()
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# 3. Helper for Authentication
 def validate_key(api_key: Optional[str]):
     if api_key != SHARED_SECRET:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-# 4. Routes
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     with open("index.html", "r") as f:
@@ -40,7 +33,6 @@ async def get_clients(api_key: str = Header(...)):
 @app.get("/analytics")
 async def get_analytics(api_key: str = Header(...)):
     validate_key(api_key)
-    # Order by time descending, limit to 20 recent items
     response = supabase.table("ai_usage_logs").select("*").order("created_at", desc=True).limit(20).execute()
     return {"data": response.data}
 
@@ -57,13 +49,10 @@ async def toggle_status(data: dict, api_key: str = Header(...)):
 @app.post("/update-usage")
 async def update_usage(data: dict, api_key: str = Header(...)):
     validate_key(api_key)
-    
-    # 1. Update the client's last active stats in registry
+    # Update client info and log usage
     supabase.table("clients_registry").update({
         "model_name": data.get("model_name"),
         "input_tokens": data.get("input_tokens"),
         "output_tokens": data.get("output_tokens")
     }).eq("hw_id", data["hw_id"]).execute()
-    
-    # 2. Insert into usage logs for historical analytics
     return supabase.table("ai_usage_logs").insert(data).execute()
