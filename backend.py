@@ -4,6 +4,35 @@ from supabase import create_client
 import os
 from typing import Optional
 
+
+app = FastAPI()
+
+# Configuration
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+SHARED_SECRET = os.environ.get("SHARED_SECRET")
+
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+def validate_key(api_key: Optional[str]):
+    if api_key != SHARED_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+@app.get("/", response_class=HTMLResponse)
+async def read_root():
+    with open("index.html", "r") as f:
+        return f.read()
+
+@app.get("/analytics")
+async def get_analytics(api_key: str = Header(...)):
+    validate_key(api_key)
+    # Order by time descending, limit to 20 recent items
+    response = supabase.table("ai_usage_logs").select("*").order("created_at", desc=True).limit(20).execute()
+    return {"data": response.data}
+
+# ... [Keep your existing /register, /clients, /toggle-status, and /update-usage routes here]
+
+
 # 1. Initialize app
 app = FastAPI()
 
@@ -58,9 +87,16 @@ async def update_usage(data: dict, api_key: str = Header(...)):
     # 2. Insert into usage logs for analytics history
     return supabase.table("ai_usage_logs").insert(data).execute()
 
-@app.get("/analytics")
+# @app.get("/analytics")
+# async def get_analytics(api_key: str = Header(...)):
+    # validate_key(api_key)
+    Fetches aggregated usage data for analytics
+    # response = supabase.table("ai_usage_logs").select("*").execute()
+    # return {"data": response.data}
+    
+    @app.get("/analytics")
 async def get_analytics(api_key: str = Header(...)):
     validate_key(api_key)
-    # Fetches aggregated usage data for analytics
-    response = supabase.table("ai_usage_logs").select("*").execute()
+    # Fetch logs, order by created_at descending, limit to 20
+    response = supabase.table("ai_usage_logs").select("*").order("created_at", desc=True).limit(20).execute()
     return {"data": response.data}

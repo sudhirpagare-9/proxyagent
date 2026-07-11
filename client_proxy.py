@@ -1,6 +1,16 @@
 import threading, socket, uuid, requests, time, json, os, sys
 from mitmproxy import http
 
+# Load config file if it exists, otherwise fallback to env
+def load_config():
+    if os.path.exists("config.json"):
+        with open("config.json") as f: return json.load(f)
+    return {"GATEWAY_URL": os.getenv("GATEWAY_URL"), "SHARED_SECRET": os.getenv("SHARED_SECRET")}
+
+config = load_config()
+GATEWAY_URL = config.get("GATEWAY_URL")
+SHARED_SECRET = config.get("SHARED_SECRET")
+
 # ... (Existing imports)
 
 def get_client_metadata():

@@ -1,0 +1,12 @@
+import json, os
+
+def load_config():
+    if os.path.exists("config.json"):
+        with open("config.json") as f:
+            return json.load(f)
+    # Fallback to env vars if config.json doesn't exist
+    return {"GATEWAY_URL": os.getenv("GATEWAY_URL"), "SHARED_SECRET": os.getenv("SHARED_SECRET")}
+
+config = load_config()
+GATEWAY_URL = config.get("GATEWAY_URL")
+SHARED_SECRET = config.get("SHARED_SECRET")
