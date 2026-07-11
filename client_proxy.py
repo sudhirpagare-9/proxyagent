@@ -11,34 +11,41 @@ logging.basicConfig(
     format='%(asctime)s - %(message)s'
 )
 
-SERVER_URL = "https://proxyagent-dashboard.onrender.com" # Change if your URL is different
+SERVER_URL = "https://proxyagent-dashboard.onrender.com"
 
 def get_hw_id():
     return str(uuid.getnode())
 
+def register_agent():
+    """Sends registration data to the backend."""
+    data = {
+        "hw_id": get_hw_id(),
+        "hostname": platform.node(),
+        "public_key": "NA" # Update this later with real crypto keys
+    }
+    try:
+        response = requests.post(f"{SERVER_URL}/register", json=data)
+        if response.status_code == 200:
+            logging.info("Successfully registered with backend.")
+            return True
+    except Exception as e:
+        logging.error(f"Registration failed: {e}")
+    return False
+
 def main():
-    print("Agent started. Press Ctrl+C to stop.")
-    logging.info("Agent process initialized.")
+    print("Agent starting...")
+    # Perform registration once on startup
+    register_agent()
     
-    # This loop keeps the script running indefinitely
     while True:
         try:
-            # --- AGENT LOGIC ---
-            # Replace print() with your actual task logic
             print(f"Agent active. HWID: {get_hw_id()}")
-            
-            # The script will wait 30 seconds before running the next cycle
-            # This keeps the CPU usage low and prevents flooding your backend
-            time.sleep(30) 
-            
+            time.sleep(60) 
         except KeyboardInterrupt:
-            print("Stopping agent...")
-            logging.info("Agent stopped by user.")
             break
         except Exception as e:
-            print(f"Error occurred: {e}")
             logging.error(f"Error: {e}")
-            time.sleep(10) # Wait 10 seconds before retrying
+            time.sleep(10)
 
 if __name__ == "__main__":
     main()

@@ -27,6 +27,7 @@ async def read_index():
 async def get_clients():
     """Secure endpoint for the dashboard to fetch data."""
     try:
+        # Fetching data from Supabase
         response = supabase.table("clients_registry").select("*").execute()
         return response.data
     except Exception as e:
