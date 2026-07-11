@@ -3,3 +3,8 @@ fastapi
 uvicorn
 gunicorn
 supabase
+requests
+mitmproxy
+keyring
+cryptography
+pydantic
