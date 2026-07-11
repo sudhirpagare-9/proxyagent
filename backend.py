@@ -94,9 +94,9 @@ async def update_usage(data: dict, api_key: str = Header(...)):
     # response = supabase.table("ai_usage_logs").select("*").execute()
     # return {"data": response.data}
     
-@app.get("/analytics")
-async def get_analytics(api_key: str = Header(...)):
-    validate_key(api_key)
-   Fetch logs, order by created_at descending, limit to 20
-    response = supabase.table("ai_usage_logs").select("*").order("created_at", desc=True).limit(20).execute()
-    return {"data": response.data}
+ @app.get("/analytics")
+ async def get_analytics(api_key: str = Header(...)):
+     validate_key(api_key)
+    Fetch logs, order by created_at descending, limit to 20
+     response = supabase.table("ai_usage_logs").select("*").order("created_at", desc=True).limit(20).execute()
+     return {"data": response.data}
