@@ -18,13 +18,29 @@
 
     <script>
         const API_URL = window.location.origin;
-        // IMPORTANT: Replace the string below with the exact value of your MY_SHARED_SECRET
-        const SECRET = "Surrrddiiihhh167157"; 
+
+        // Function to retrieve the API key from sessionStorage or prompt the user
+        function getApiKey() {
+            let key = sessionStorage.getItem('api_key');
+            if (!key) {
+                key = prompt("Please enter your API Key to access the dashboard:");
+                if (key) {
+                    sessionStorage.setItem('api_key', key);
+                }
+            }
+            return key;
+        }
 
         async function loadClients() {
+            const secret = getApiKey();
+            if (!secret) {
+                document.getElementById('clientBody').innerHTML = '<tr><td colspan="3" class="p-4 text-red-500">Access Denied: API Key required.</td></tr>';
+                return;
+            }
+
             try {
                 const res = await fetch(`${API_URL}/clients`, { 
-                    headers: {'api-key': SECRET} 
+                    headers: {'api-key': secret} 
                 });
                 
                 if (!res.ok) throw new Error("Unauthorized");
@@ -47,14 +63,19 @@
                 });
             } catch (e) { 
                 console.error("Fetch failed:", e);
-                document.getElementById('clientBody').innerHTML = '<tr><td colspan="3" class="p-4 text-red-500">Failed to load data. Check console.</td></tr>';
+                // Clear key if it was invalid
+                sessionStorage.removeItem('api_key');
+                document.getElementById('clientBody').innerHTML = '<tr><td colspan="3" class="p-4 text-red-500">Failed to load data. Refresh page to try again.</td></tr>';
             }
         }
 
         async function toggle(hw_id, newStatus) {
+            const secret = getApiKey();
+            if (!secret) return;
+
             await fetch(`${API_URL}/toggle-status`, {
                 method: 'POST',
-                headers: {'api-key': SECRET, 'Content-Type': 'application/json'},
+                headers: {'api-key': secret, 'Content-Type': 'application/json'},
                 body: JSON.stringify({hw_id: hw_id, status: newStatus})
             });
             loadClients();
