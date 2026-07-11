@@ -75,3 +75,14 @@ class AIInterceptor:
             except: pass
 
 addons = [AIInterceptor()]
+# Add this at the very bottom of your client_proxy.py
+if __name__ == "__main__":
+    print("Agent is running...")
+    # This prevents the script from closing immediately
+    try:
+        while True:
+            # Your main logic here (e.g., checking for tasks)
+            import time
+            time.sleep(10) 
+    except KeyboardInterrupt:
+        print("Agent stopped by user.")

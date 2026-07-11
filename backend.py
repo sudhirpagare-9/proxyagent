@@ -7,33 +7,19 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from pydantic import BaseModel
 
 app = FastAPI()
-@app.get("/api/get-clients")
-async def get_clients():
-    try:
-        # The backend uses the environment variables securely
-        # The frontend never sees these keys
-        response = supabase.table("clients_registry").select("*").execute()
-        return response.data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-@app.get("/")
-async def read_index():
-    # Ensure index.html is in the same directory as backend.py
-    return FileResponse("index.html")
 
-# Keep your other existing routes below this...
-app = FastAPI()
-
-# Configuration: Ensure SUPABASE_URL and SUPABASE_KEY are in your Render Environment Variables
+# Configuration
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# Data Model
 class RegisterData(BaseModel):
     hw_id: str
     hostname: str
     public_key: str
 
+# Signature Verification Helper
 def verify_signature(data: dict, sig_hex: str, pub_key_hex: str):
     try:
         pub_key = ed25519.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pub_key_hex))
@@ -43,14 +29,26 @@ def verify_signature(data: dict, sig_hex: str, pub_key_hex: str):
     except Exception:
         return False
 
+# --- Routes ---
+
 @app.get("/")
 async def read_index():
     return FileResponse("index.html")
 
+@app.get("/api/get-clients")
+async def get_clients():
+    """Secure endpoint for dashboard to fetch client data."""
+    try:
+        response = supabase.table("clients_registry").select("*").execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/register")
 async def register(data: RegisterData, request: Request):
+    """Registers a client as 'pending'."""
     try:
-        supabase.table("clients_registry").upsert({
+        response = supabase.table("clients_registry").upsert({
             "hw_id": data.hw_id,
             "hostname": data.hostname,
             "public_key": data.public_key,
@@ -63,13 +61,18 @@ async def register(data: RegisterData, request: Request):
 
 @app.get("/status/{hw_id}")
 async def get_status(hw_id: str):
-    response = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).single().execute()
-    if not response.data:
+    """Client polls this to check status."""
+    try:
+        response = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).single().execute()
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Client not found")
+        return {"status": response.data.get("status")}
+    except Exception:
         raise HTTPException(status_code=404, detail="Client not found")
-    return {"status": response.data.get("status")}
 
 @app.post("/update-usage")
 async def update_usage(req: dict):
+    """Verifies approval status and signature before logging data."""
     data = req.get("data")
     sig = req.get("sig")
     hw_id = data.get("hw_id")
@@ -82,5 +85,8 @@ async def update_usage(req: dict):
     if not verify_signature(data, sig, client.data.get("public_key")):
         raise HTTPException(status_code=403, detail="Signature invalid")
     
-    supabase.table("ai_usage_logs").insert(data).execute()
-    return {"status": "success"}
+    try:
+        supabase.table("ai_usage_logs").insert(data).execute()
+        return {"status": "success"}
+    except Exception:
+        raise HTTPException(status_code=500, detail="Database write error")
