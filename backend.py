@@ -5,6 +5,12 @@ from supabase import create_client
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from pydantic import BaseModel
 
+from fastapi.responses import FileResponse
+
+# Add this route to serve the dashboard at the root URL
+@app.get("/")
+async def read_index():
+    return FileResponse("index.html")
 app = FastAPI()
 
 # Supabase Initialization
