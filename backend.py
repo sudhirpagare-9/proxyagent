@@ -36,11 +36,6 @@ async def get_analytics(api_key: str = Header(...)):
     response = supabase.table("ai_usage_logs").select("*").order("created_at", desc=True).limit(20).execute()
     return {"data": response.data}
 
-@app.post("/register")
-async def register(data: dict, api_key: str = Header(...)):
-    validate_key(api_key)
-    return supabase.table("clients_registry").upsert(data).execute()
-
 @app.post("/toggle-status")
 async def toggle_status(data: dict, api_key: str = Header(...)):
     validate_key(api_key)
@@ -49,7 +44,6 @@ async def toggle_status(data: dict, api_key: str = Header(...)):
 @app.post("/update-usage")
 async def update_usage(data: dict, api_key: str = Header(...)):
     validate_key(api_key)
-    # Update client info and log usage
     supabase.table("clients_registry").update({
         "model_name": data.get("model_name"),
         "input_tokens": data.get("input_tokens"),
