@@ -9,7 +9,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
-        const sb = supabase.createClient('URL', 'KEY');
+        const sb = supabase.createClient('SUPABASE_URL', 'SUPABASE_KEY');
         async function fetchClients() {
             const { data } = await sb.from('clients_registry').select('*');
             document.getElementById('clients').innerHTML = data.map(c => `
