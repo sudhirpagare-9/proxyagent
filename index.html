@@ -1,27 +1,68 @@
 <!DOCTYPE html>
-<html class="dark">
-<body class="bg-gray-900 text-white p-10">
-    <h2 class="text-2xl mb-5">Client Access Control</h2>
-    <table class="w-full bg-gray-800 rounded">
-        <thead><tr class="text-left"><th class="p-3">HW ID</th><th>Hostname</th><th>Status</th><th>Action</th></tr></thead>
-        <tbody id="clients"></tbody>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Client Access Control</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #f4f4f4; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+
+    <h1>Client Access Control</h1>
+    <table id="client-table">
+        <thead>
+            <tr>
+                <th>HW ID</th>
+                <th>Hostname</th>
+                <th>Status</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody id="client-table-body">
+            </tbody>
     </table>
 
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
-        const sb = supabase.createClient('SUPABASE_URL', 'SUPABASE_KEY');
-        async function fetchClients() {
-            const { data } = await sb.from('clients_registry').select('*');
-            document.getElementById('clients').innerHTML = data.map(c => `
-                <tr><td class="p-3">${c.hw_id}</td><td>${c.hostname}</td><td>${c.status}</td>
-                <td><button onclick="update('${c.hw_id}', '${c.status}')" class="bg-blue-600 px-3 py-1 rounded">
-                ${c.status === 'approved' ? 'Deny' : 'Approve'}</button></td></tr>`).join('');
+        async function loadClients() {
+            const tableBody = document.getElementById('client-table-body');
+            
+            try {
+                // Fetching from your own secure backend
+                const response = await fetch('/api/get-clients');
+                
+                if (!response.ok) throw new Error('Failed to fetch data');
+                
+                const clients = await response.json();
+                
+                tableBody.innerHTML = ''; // Clear existing
+                
+                clients.forEach(client => {
+                    const row = `<tr>
+                        <td>${client.hw_id}</td>
+                        <td>${client.hostname}</td>
+                        <td>${client.status}</td>
+                        <td><button onclick="updateStatus('${client.hw_id}', 'approved')">Approve</button></td>
+                    </tr>`;
+                    tableBody.innerHTML += row;
+                });
+            } catch (error) {
+                console.error("Error:", error);
+                tableBody.innerHTML = `<tr><td colspan="4" class="error">Failed to load clients.</td></tr>`;
+            }
         }
-        async function update(id, cur) {
-            await sb.from('clients_registry').update({status: cur === 'approved' ? 'pending' : 'approved'}).eq('hw_id', id);
-            fetchClients();
+
+        async function updateStatus(hw_id, status) {
+            // Future implementation for admin actions
+            alert("Update logic to be added for: " + hw_id);
         }
-        fetchClients();
+
+        // Load data when page opens
+        loadClients();
     </script>
 </body>
 </html>

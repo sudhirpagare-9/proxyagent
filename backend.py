@@ -7,6 +7,22 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from pydantic import BaseModel
 
 app = FastAPI()
+@app.get("/api/get-clients")
+async def get_clients():
+    try:
+        # The backend uses the environment variables securely
+        # The frontend never sees these keys
+        response = supabase.table("clients_registry").select("*").execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/")
+async def read_index():
+    # Ensure index.html is in the same directory as backend.py
+    return FileResponse("index.html")
+
+# Keep your other existing routes below this...
+app = FastAPI()
 
 # Configuration: Ensure SUPABASE_URL and SUPABASE_KEY are in your Render Environment Variables
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
