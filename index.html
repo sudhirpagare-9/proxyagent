@@ -19,11 +19,10 @@
     <script>
         const API_URL = window.location.origin;
 
-        // Function to retrieve the API key from sessionStorage or prompt the user
         function getApiKey() {
             let key = sessionStorage.getItem('api_key');
             if (!key) {
-                key = prompt("Please enter your API Key to access the dashboard:");
+                key = prompt("Please enter your API Key:");
                 if (key) {
                     sessionStorage.setItem('api_key', key);
                 }
@@ -34,16 +33,25 @@
         async function loadClients() {
             const secret = getApiKey();
             if (!secret) {
-                document.getElementById('clientBody').innerHTML = '<tr><td colspan="3" class="p-4 text-red-500">Access Denied: API Key required.</td></tr>';
+                document.getElementById('clientBody').innerHTML = '<tr><td colspan="3" class="p-4 text-red-500">No API Key provided.</td></tr>';
                 return;
             }
+
+            console.log("Attempting fetch with api-key:", secret); // Debugging line
 
             try {
                 const res = await fetch(`${API_URL}/clients`, { 
                     headers: {'api-key': secret} 
                 });
                 
-                if (!res.ok) throw new Error("Unauthorized");
+                if (res.status === 401) {
+                    console.error("401 Unauthorized - Key rejected by server.");
+                    alert("Unauthorized: The API Key is incorrect or not being accepted by the server.");
+                    sessionStorage.removeItem('api_key');
+                    return;
+                }
+
+                if (!res.ok) throw new Error("Fetch failed");
 
                 const result = await res.json();
                 const body = document.getElementById('clientBody');
@@ -63,21 +71,19 @@
                 });
             } catch (e) { 
                 console.error("Fetch failed:", e);
-                // Clear key if it was invalid
-                sessionStorage.removeItem('api_key');
-                document.getElementById('clientBody').innerHTML = '<tr><td colspan="3" class="p-4 text-red-500">Failed to load data. Refresh page to try again.</td></tr>';
+                document.getElementById('clientBody').innerHTML = '<tr><td colspan="3" class="p-4 text-red-500">Failed to load data. Check console (F12).</td></tr>';
             }
         }
 
         async function toggle(hw_id, newStatus) {
             const secret = getApiKey();
-            if (!secret) return;
-
-            await fetch(`${API_URL}/toggle-status`, {
+            const res = await fetch(`${API_URL}/toggle-status`, {
                 method: 'POST',
                 headers: {'api-key': secret, 'Content-Type': 'application/json'},
                 body: JSON.stringify({hw_id: hw_id, status: newStatus})
             });
+            
+            if (res.status === 401) alert("Unauthorized: Toggle failed.");
             loadClients();
         }
 
