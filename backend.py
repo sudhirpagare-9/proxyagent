@@ -7,7 +7,7 @@ from typing import Optional
 
 app = FastAPI()
 
-# Configuration
+# Configuration - Ensure these are set in your Render environment variables
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -93,13 +93,3 @@ async def get_logs(hw_id: str):
         return response.data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/status/{hw_id}")
-async def get_status(hw_id: str):
-    try:
-        response = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).single().execute()
-        if not response.data:
-            raise HTTPException(status_code=404, detail="Client not found")
-        return {"status": response.data.get("status")}
-    except Exception:
-        raise HTTPException(status_code=404, detail="Client not found")

@@ -34,17 +34,21 @@ def register_agent():
     try: requests.post(f"{SERVER_URL}/register", json=payload, timeout=10)
     except Exception as e: logging.error(f"Registration failed: {e}")
 
-def log_ai_usage(model_name, version, model_type, input_tokens, output_tokens):
+def log_ai_usage(model_name, version, model_type, input_tokens, output_tokens, balance=0):
     data = {
         "hw_id": str(uuid.getnode()),
-        "model_name": model_name, "version": version, "model_type": model_type,
-        "input_tokens": input_tokens, "output_tokens": output_tokens
+        "model_name": model_name,
+        "version": version,
+        "model_type": model_type,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "balance_tokens": balance
     }
     try: requests.post(f"{SERVER_URL}/log-ai-usage", json=data, timeout=5)
     except Exception as e: logging.error(f"Failed to log: {e}")
 
 if __name__ == "__main__":
     register_agent()
-    # Main Loop: Place your interception logic here
+    # Main Loop - Add your proxy/interception logic here
     while True:
         time.sleep(60)
