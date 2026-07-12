@@ -4,23 +4,27 @@
     <meta charset="UTF-8">
     <title>Client Dashboard</title>
     <style>
-        body { font-family: sans-serif; margin: 20px; background-color: #f4f7f6; }
+        body { font-family: sans-serif; margin: 20px; background: #f4f7f6; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; background: white; }
-        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th, td { border: 1px solid #ddd; padding: 12px; }
         th { background-color: #007bff; color: white; }
-        .btn { padding: 6px 10px; cursor: pointer; margin-right: 5px; }
+        .log-box { margin-top: 30px; padding: 15px; background: #fff; border: 1px solid #ccc; display: none; }
     </style>
 </head>
 <body>
     <h1>Client Dashboard</h1>
     <table id="clientTable">
-        <thead>
-            <tr>
-                <th>HW ID</th><th>Hostname</th><th>IP</th><th>MAC</th><th>Country</th><th>Status</th><th>Actions</th>
-            </tr>
-        </thead>
+        <thead><tr><th>HW ID</th><th>Hostname</th><th>IP</th><th>MAC</th><th>Country</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody id="clientBody"></tbody>
     </table>
+
+    <div id="logSection" class="log-box">
+        <h2 id="logTitle">AI Usage Logs</h2>
+        <table id="logTable">
+            <thead><tr><th>Model</th><th>Version</th><th>Type</th><th>Input</th><th>Output</th><th>Balance</th></tr></thead>
+            <tbody id="logBody"></tbody>
+        </table>
+    </div>
 
     <script>
         async function loadClients() {
@@ -31,22 +35,27 @@
                     <td>${c.hw_id}</td><td>${c.hostname}</td><td>${c.ip_address}</td>
                     <td>${c.mac_address}</td><td>${c.country}</td><td>${c.status}</td>
                     <td>
-                        ${c.status !== 'approved' ? `<button class="btn" onclick="approveClient('${c.hw_id}')">Approve</button>` : 'Approved'}
-                        <button class="btn" onclick="viewLogs('${c.hw_id}')">View Logs</button>
+                        <button onclick="approveClient('${c.hw_id}')">Approve</button>
+                        <button onclick="viewLogs('${c.hw_id}')">View Logs</button>
                     </td>
                 </tr>`).join('');
+        }
+
+        async function viewLogs(hwId) {
+            const res = await fetch(`/api/get-logs/${hwId}`);
+            const logs = await res.json();
+            document.getElementById('logSection').style.display = 'block';
+            document.getElementById('logTitle').innerText = `Logs for: ${hwId}`;
+            document.getElementById('logBody').innerHTML = logs.map(l => `
+                <tr><td>${l.model_name}</td><td>${l.version}</td><td>${l.model_type}</td>
+                <td>${l.input_tokens}</td><td>${l.output_tokens}</td><td>${l.balance_tokens}</td></tr>
+            `).join('');
         }
 
         async function approveClient(hwId) {
             await fetch(`/api/approve/${hwId}`, { method: 'POST' });
             loadClients();
         }
-
-        function viewLogs(hwId) {
-            // Placeholder for your existing log viewing logic
-            alert("Viewing logs for: " + hwId);
-        }
-        
         loadClients();
     </script>
 </body>

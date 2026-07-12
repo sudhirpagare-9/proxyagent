@@ -11,7 +11,9 @@ PUBLIC_KEY = "NA"
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 def get_mac_address():
-    return ':'.join(['{:02x}'.format((uuid.getnode() >> elements) & 0xff) for elements in range(0, 2 * 6, 2)][::-1])
+    try:
+        return ':'.join(['{:02x}'.format((uuid.getnode() >> elements) & 0xff) for elements in range(0, 2 * 6, 2)][::-1])
+    except: return "Unknown"
 
 def get_network_info():
     try:
@@ -31,10 +33,8 @@ def register_agent():
         "country": net_info['country'],
         "geo_location": net_info['city']
     }
-    try:
-        requests.post(f"{SERVER_URL}/register", json=payload, timeout=10)
-    except Exception as e:
-        logging.error(f"Registration failed: {e}")
+    try: requests.post(f"{SERVER_URL}/register", json=payload, timeout=10)
+    except Exception as e: logging.error(f"Registration failed: {e}")
 
 def log_ai_usage(model_name, version, model_type, input_tokens, output_tokens, balance=0):
     data = {
@@ -42,12 +42,11 @@ def log_ai_usage(model_name, version, model_type, input_tokens, output_tokens, b
         "model_name": model_name, "version": version, "model_type": model_type,
         "input_tokens": input_tokens, "output_tokens": output_tokens, "balance_tokens": balance
     }
-    try:
-        requests.post(f"{SERVER_URL}/log-ai-usage", json=data, timeout=5)
-    except Exception as e:
-        logging.error(f"Failed to log: {e}")
+    try: requests.post(f"{SERVER_URL}/log-ai-usage", json=data, timeout=5)
+    except Exception as e: logging.error(f"Failed to log: {e}")
 
 if __name__ == "__main__":
     register_agent()
     while True:
+        # Placeholder for interception logic
         time.sleep(60)

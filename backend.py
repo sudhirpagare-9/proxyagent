@@ -7,12 +7,12 @@ from typing import Optional
 
 app = FastAPI()
 
-# Configuration - Ensure these are set in your environment
+# Configuration
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Data Models
+# Models
 class RegisterData(BaseModel):
     hw_id: str
     hostname: str
@@ -31,7 +31,7 @@ class AIUsageLog(BaseModel):
     output_tokens: int
     balance_tokens: Optional[int] = 0
 
-# Routes
+# Endpoints
 @app.get("/")
 async def read_index():
     return FileResponse("index.html")
