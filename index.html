@@ -1,39 +1,28 @@
 <!DOCTYPE html>
 <html>
-<head>
-    <title>Secure Admin Dashboard</title>
-    <style>
-        body { font-family: sans-serif; padding: 20px; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { border: 1px solid #ddd; padding: 10px; }
-    </style>
-</head>
 <body>
     <h1>Client Access Control</h1>
     <table>
-        <thead><tr><th>HW ID</th><th>Country</th><th>IP</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th>HW ID</th><th>Hostname</th><th>Country</th><th>IP</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody id="clientBody"></tbody>
     </table>
 
     <script>
         async function loadClients() {
             const res = await fetch('/api/get-clients');
-            const data = await res.json();
-            document.getElementById('clientBody').innerHTML = data.map(c => `
+            const clients = await res.json();
+            document.getElementById('clientBody').innerHTML = clients.map(c => `
                 <tr>
-                    <td>${c.hw_id}</td><td>${c.country}</td><td>${c.ip_address}</td><td>${c.status}</td>
+                    <td>${c.hw_id}</td><td>${c.hostname}</td><td>${c.country}</td><td>${c.ip_address}</td><td>${c.status}</td>
                     <td>
-                        <button onclick="update('${c.hw_id}', 'approved')">Approve</button>
-                        <button onclick="update('${c.hw_id}', 'denied')">Deny</button>
+                        <button onclick="updateStatus('${c.hw_id}', 'approved')">Approve</button>
+                        <button onclick="updateStatus('${c.hw_id}', 'denied')">Deny</button>
                     </td>
                 </tr>`).join('');
         }
 
-        async function update(hwId, status) {
-            await fetch(`/api/update-status/${hwId}/${status}`, { 
-                method: 'POST',
-                headers: { 'X-API-KEY': 'YOUR_ADMIN_KEY' } 
-            });
+        async function updateStatus(hwId, status) {
+            await fetch(`/api/update-status/${hwId}/${status}`, { method: 'POST' });
             loadClients();
         }
         loadClients();
