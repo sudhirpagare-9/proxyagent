@@ -3,35 +3,62 @@
 <head>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-950 text-slate-200 p-8">
-    <div class="max-w-5xl mx-auto">
-        <h1 class="text-3xl font-bold text-white mb-6">Client Access Control</h1>
-        
-        <div class="bg-slate-900 rounded-lg border border-slate-800 p-6 shadow-xl">
-            <table class="w-full text-left">
-                <thead class="text-slate-400 uppercase text-xs">
-                    <tr><th class="pb-4">HW ID</th><th>Hostname</th><th>Status</th><th>Action</th></tr>
-                </thead>
-                <tbody id="clientBody" class="divide-y divide-slate-800"></tbody>
-            </table>
+<body class="bg-slate-950 text-slate-200 h-screen flex">
+    <aside class="w-64 border-r border-slate-800 p-6">
+        <h1 class="text-xl font-bold text-white mb-6">Connected Agents</h1>
+        <div id="clientSidebar" class="space-y-2"></div>
+    </aside>
+
+    <main class="flex-1 p-8">
+        <div id="mainPanel" class="hidden">
+            <div class="flex justify-between items-center mb-6">
+                <h2 id="clientTitle" class="text-2xl font-bold"></h2>
+                <div class="space-x-2">
+                    <button onclick="updateStatus('approved')" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded">Approve</button>
+                    <button onclick="updateStatus('denied')" class="bg-red-600 hover:bg-red-500 px-4 py-2 rounded">Deny</button>
+                </div>
+            </div>
+            
+            <div class="bg-slate-900 rounded-lg p-6 border border-slate-800">
+                <table class="w-full text-left">
+                    <thead class="text-slate-400 text-sm uppercase">
+                        <tr><th class="pb-4">Model</th><th class="pb-4">Input</th><th class="pb-4">Output</th></tr>
+                    </thead>
+                    <tbody id="logBody" class="divide-y divide-slate-800"></tbody>
+                </table>
+            </div>
         </div>
-    </div>
+    </main>
 
     <script>
+        let currentHwId = null;
+
         async function loadClients() {
             const res = await fetch('/api/get-clients');
-            const data = await res.json();
-            document.getElementById('clientBody').innerHTML = data.map(c => `
+            const clients = await res.json();
+            document.getElementById('clientSidebar').innerHTML = clients.map(c => `
+                <div onclick="selectClient('${c.hw_id}')" class="p-3 bg-slate-900 rounded cursor-pointer hover:bg-slate-800 border border-slate-800">
+                    <div class="font-bold text-white">${c.hostname}</div>
+                    <div class="text-xs text-slate-500">${c.status}</div>
+                </div>`).join('');
+        }
+
+        async function selectClient(hwId) {
+            currentHwId = hwId;
+            document.getElementById('mainPanel').classList.remove('hidden');
+            document.getElementById('clientTitle').innerText = `Client: ${hwId}`;
+            const res = await fetch(`/api/get-logs/${hwId}`);
+            const logs = await res.json();
+            document.getElementById('logBody').innerHTML = logs.map(l => `
                 <tr class="text-sm">
-                    <td class="py-4">${c.hw_id}</td>
-                    <td class="py-4">${c.hostname}</td>
-                    <td class="py-4 text-emerald-400">${c.status}</td>
-                    <td class="py-4"><button onclick="approve('${c.hw_id}')" class="bg-indigo-600 px-3 py-1 rounded">Approve</button></td>
+                    <td class="py-3">${l.model_name}</td>
+                    <td class="py-3">${l.input_tokens}</td>
+                    <td class="py-3">${l.output_tokens}</td>
                 </tr>`).join('');
         }
-        
-        async function approve(hwId) {
-            await fetch(`/api/approve/${hwId}`, { method: 'POST' });
+
+        async function updateStatus(status) {
+            await fetch(`/api/status/${currentHwId}/${status}`, { method: 'POST' });
             loadClients();
         }
         loadClients();

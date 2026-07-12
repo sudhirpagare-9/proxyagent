@@ -10,9 +10,13 @@ from dotenv import load_dotenv
 load_dotenv()
 app = FastAPI()
 
-# Init Supabase & Encryption
-supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
-fernet = Fernet(os.environ["ENCRYPTION_KEY"].encode())
+# Configuration
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY")
+
+fernet = Fernet(ENCRYPTION_KEY.encode())
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 class AIUsageLog(BaseModel):
     hw_id: str
@@ -28,18 +32,24 @@ async def read_index():
 @app.post("/log-ai-usage")
 async def log_ai_usage(request: Request):
     try:
-        # Decrypt and Parse
-        data = json.loads(fernet.decrypt(await request.body()))
+        body = await request.body()
+        data = json.loads(fernet.decrypt(body))
         log = AIUsageLog(**data)
         
-        # Upsert Registry
-        supabase.table("clients_registry").upsert(
-            {"hw_id": log.hw_id, "hostname": log.hostname, "status": "pending"},
-            on_conflict="hw_id"
-        ).execute()
+        # Upsert client
+        supabase.table("clients_registry").upsert({
+            "hw_id": log.hw_id,
+            "hostname": log.hostname,
+            "status": "pending"
+        }, on_conflict="hw_id").execute()
         
-        # Log Usage
-        supabase.table("ai_usage_logs").insert(log.dict()).execute()
+        # Insert log
+        supabase.table("ai_usage_logs").insert({
+            "hw_id": log.hw_id,
+            "model_name": log.model_name,
+            "input_tokens": log.input_tokens,
+            "output_tokens": log.output_tokens
+        }).execute()
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -50,9 +60,9 @@ async def get_clients():
 
 @app.get("/api/get-logs/{hw_id}")
 async def get_logs(hw_id: str):
-    return supabase.table("ai_usage_logs").select("*").eq("hw_id", hw_id).execute().data
+    return supabase.table("ai_usage_logs").select("*").eq("hw_id", hw_id).order("created_at", desc=True).execute().data
 
-@app.post("/api/approve/{hw_id}")
-async def approve_client(hw_id: str):
-    supabase.table("clients_registry").update({"status": "approved"}).eq("hw_id", hw_id).execute()
-    return {"status": "approved"}
+@app.post("/api/status/{hw_id}/{status}")
+async def set_client_status(hw_id: str, status: str):
+    supabase.table("clients_registry").update({"status": status}).eq("hw_id", hw_id).execute()
+    return {"status": "success"}
