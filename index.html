@@ -1,30 +1,50 @@
 <!DOCTYPE html>
 <html lang="en" class="dark">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Proxy Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = { darkMode: 'class' };
+    </script>
 </head>
-<body class="bg-slate-950 text-slate-200 h-screen flex">
-    <aside class="w-64 border-r border-slate-800 p-6">
-        <h1 class="text-xl font-bold text-white mb-6">Connected Agents</h1>
-        <div id="clientSidebar" class="space-y-2"></div>
+<body class="bg-slate-950 text-slate-200 min-h-screen flex">
+
+    <aside class="w-72 bg-slate-900 border-r border-slate-800 p-6 overflow-y-auto">
+        <h1 class="text-xl font-bold text-white mb-8">Agent Registry</h1>
+        <div id="clientSidebar" class="space-y-3">
+            </div>
     </aside>
 
     <main class="flex-1 p-8">
-        <div id="mainPanel" class="hidden">
-            <div class="flex justify-between items-center mb-6">
-                <h2 id="clientTitle" class="text-2xl font-bold"></h2>
-                <div class="space-x-2">
-                    <button onclick="updateStatus('approved')" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded">Approve</button>
-                    <button onclick="updateStatus('denied')" class="bg-red-600 hover:bg-red-500 px-4 py-2 rounded">Deny</button>
+        <div id="emptyState" class="text-center mt-20">
+            <p class="text-slate-500">Select a client from the sidebar to view intercepted traffic.</p>
+        </div>
+
+        <div id="mainPanel" class="hidden max-w-5xl">
+            <header class="flex justify-between items-center mb-8">
+                <div>
+                    <h2 id="clientTitle" class="text-3xl font-bold text-white"></h2>
+                    <p id="clientStatus" class="text-sm font-medium"></p>
                 </div>
-            </div>
-            
-            <div class="bg-slate-900 rounded-lg p-6 border border-slate-800">
+                <div class="flex space-x-3">
+                    <button onclick="updateStatus('approved')" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded text-sm font-semibold transition">Approve</button>
+                    <button onclick="updateStatus('denied')" class="bg-red-600 hover:bg-red-500 px-4 py-2 rounded text-sm font-semibold transition">Deny</button>
+                </div>
+            </header>
+
+            <div class="bg-slate-900 rounded-lg border border-slate-800 p-6 shadow-xl">
                 <table class="w-full text-left">
-                    <thead class="text-slate-400 text-sm uppercase">
-                        <tr><th class="pb-4">Model</th><th class="pb-4">Input</th><th class="pb-4">Output</th></tr>
+                    <thead class="text-slate-400 uppercase text-xs tracking-wider">
+                        <tr>
+                            <th class="pb-4">Model</th>
+                            <th class="pb-4">Input Tokens</th>
+                            <th class="pb-4">Output Tokens</th>
+                        </tr>
                     </thead>
-                    <tbody id="logBody" class="divide-y divide-slate-800"></tbody>
+                    <tbody id="logBody" class="divide-y divide-slate-800">
+                        </tbody>
                 </table>
             </div>
         </div>
@@ -34,34 +54,49 @@
         let currentHwId = null;
 
         async function loadClients() {
-            const res = await fetch('/api/get-clients');
-            const clients = await res.json();
-            document.getElementById('clientSidebar').innerHTML = clients.map(c => `
-                <div onclick="selectClient('${c.hw_id}')" class="p-3 bg-slate-900 rounded cursor-pointer hover:bg-slate-800 border border-slate-800">
-                    <div class="font-bold text-white">${c.hostname}</div>
-                    <div class="text-xs text-slate-500">${c.status}</div>
-                </div>`).join('');
+            try {
+                const res = await fetch('/api/get-clients');
+                const clients = await res.json();
+                document.getElementById('clientSidebar').innerHTML = clients.map(c => `
+                    <div onclick="selectClient('${c.hw_id}', '${c.hostname}', '${c.status}')" 
+                         class="p-4 bg-slate-950 rounded cursor-pointer hover:bg-slate-800 border border-slate-800 transition">
+                        <div class="font-semibold text-white text-sm truncate">${c.hostname}</div>
+                        <div class="text-xs text-slate-500 mt-1">${c.hw_id.substring(0,8)}... | ${c.status}</div>
+                    </div>`).join('');
+            } catch (e) {
+                console.error("Load failed:", e);
+            }
         }
 
-        async function selectClient(hwId) {
+        async function selectClient(hwId, hostname, status) {
             currentHwId = hwId;
+            document.getElementById('emptyState').classList.add('hidden');
             document.getElementById('mainPanel').classList.remove('hidden');
-            document.getElementById('clientTitle').innerText = `Client: ${hwId}`;
+            document.getElementById('clientTitle').innerText = hostname;
+            document.getElementById('clientStatus').innerText = `Status: ${status}`;
+            
+            // Fetch logs
             const res = await fetch(`/api/get-logs/${hwId}`);
             const logs = await res.json();
-            document.getElementById('logBody').innerHTML = logs.map(l => `
+            
+            document.getElementById('logBody').innerHTML = logs.length > 0 ? logs.map(l => `
                 <tr class="text-sm">
-                    <td class="py-3">${l.model_name}</td>
-                    <td class="py-3">${l.input_tokens}</td>
-                    <td class="py-3">${l.output_tokens}</td>
-                </tr>`).join('');
+                    <td class="py-4 text-slate-300">${l.model_name}</td>
+                    <td class="py-4 text-slate-400">${l.input_tokens}</td>
+                    <td class="py-4 text-slate-400">${l.output_tokens}</td>
+                </tr>`).join('') : '<tr><td colspan="3" class="py-4 text-center text-slate-600">No traffic logs found.</td></tr>';
         }
 
         async function updateStatus(status) {
+            if (!currentHwId) return;
             await fetch(`/api/status/${currentHwId}/${status}`, { method: 'POST' });
             loadClients();
+            document.getElementById('clientStatus').innerText = `Status: ${status}`;
         }
+
         loadClients();
+        // Refresh list every 30 seconds
+        setInterval(loadClients, 30000);
     </script>
 </body>
 </html>
