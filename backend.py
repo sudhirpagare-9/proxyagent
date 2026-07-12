@@ -43,7 +43,16 @@ async def get_clients():
         return response.data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+@app.post("/api/approve/{hw_id}")
+async def approve_client(hw_id: str):
+    """Updates the client status to 'approved' in Supabase."""
+    try:
+        response = supabase.table("clients_registry").update(
+            {"status": "approved"}
+        ).eq("hw_id", hw_id).execute()
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 @app.post("/register")
 async def register(data: RegisterData):
     try:

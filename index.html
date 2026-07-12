@@ -2,19 +2,23 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Client Access Control</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: white; }
         th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-        th { background-color: #f4f4f4; }
-        .error { color: red; }
+        th { background-color: #f2f2f2; }
+        .btn-approve { background-color: #28a745; color: white; border: none; padding: 8px 12px; cursor: pointer; border-radius: 4px; }
+        .btn-approve:hover { background-color: #218838; }
+        .status-approved { color: green; font-weight: bold; }
+        .status-pending { color: orange; font-weight: bold; }
     </style>
 </head>
 <body>
 
     <h1>Client Access Control</h1>
-    <table id="client-table">
+    <table id="clientTable">
         <thead>
             <tr>
                 <th>HW ID</th>
@@ -23,42 +27,50 @@
                 <th>Action</th>
             </tr>
         </thead>
-        <tbody id="client-table-body">
+        <tbody id="clientBody">
             </tbody>
     </table>
 
     <script>
         async function loadClients() {
-            const tableBody = document.getElementById('client-table-body');
-            
             try {
-                // Fetching from your own secure backend
                 const response = await fetch('/api/get-clients');
-                
-                if (!response.ok) throw new Error('Failed to fetch data');
-                
                 const clients = await response.json();
-                
-                tableBody.innerHTML = ''; // Clear existing
-                
+                const tbody = document.getElementById('clientBody');
+                tbody.innerHTML = '';
+
                 clients.forEach(client => {
-                    const row = `<tr>
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
                         <td>${client.hw_id}</td>
                         <td>${client.hostname}</td>
-                        <td>${client.status}</td>
-                        <td><button onclick="updateStatus('${client.hw_id}', 'approved')">Approve</button></td>
-                    </tr>`;
-                    tableBody.innerHTML += row;
+                        <td class="${client.status === 'approved' ? 'status-approved' : 'status-pending'}">${client.status || 'pending'}</td>
+                        <td>
+                            ${client.status !== 'approved' ? 
+                                `<button class="btn-approve" onclick="approveClient('${client.hw_id}')">Approve</button>` : 
+                                '<span>Approved</span>'}
+                        </td>
+                    `;
+                    tbody.appendChild(row);
                 });
             } catch (error) {
-                console.error("Error:", error);
-                tableBody.innerHTML = `<tr><td colspan="4" class="error">Failed to load clients.</td></tr>`;
+                console.error('Error fetching clients:', error);
             }
         }
 
-        async function updateStatus(hw_id, status) {
-            // Future implementation for admin actions
-            alert("Update logic to be added for: " + hw_id);
+        async function approveClient(hwId) {
+            try {
+                const response = await fetch(`/api/approve/${hwId}`, { method: 'POST' });
+                if (response.ok) {
+                    alert("Client approved successfully!");
+                    loadClients(); // Refresh the table
+                } else {
+                    alert("Failed to approve client.");
+                }
+            } catch (error) {
+                console.error("Error:", error);
+                alert("An error occurred.");
+            }
         }
 
         // Load data when page opens
