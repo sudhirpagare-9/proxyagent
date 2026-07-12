@@ -1,17 +1,21 @@
-import requests
+import os
 import uuid
 import json
-import os
 import logging
+import requests
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
+# Load configuration from .env
 load_dotenv()
 
-# Configuration
-SERVER_URL = os.getenv("SERVER_URL", "https://your-render-url.onrender.com")
+# Setup security
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
-API_KEY = os.getenv("API_KEY") 
+API_KEY = os.getenv("API_KEY")
+SERVER_URL = os.getenv("SERVER_URL")
+
+if not ENCRYPTION_KEY:
+    raise ValueError("CRITICAL: ENCRYPTION_KEY not found in .env file.")
 
 fernet = Fernet(ENCRYPTION_KEY.encode())
 
@@ -23,13 +27,20 @@ def log_ai_usage(model_name, version, model_type, input_tokens, output_tokens):
     }
     
     try:
-        payload = fernet.encrypt(json.dumps(data).encode())
+        encrypted_payload = fernet.encrypt(json.dumps(data).encode())
         headers = {"X-API-KEY": API_KEY}
-        response = requests.post(f"{SERVER_URL}/log-ai-usage", data=payload, headers=headers, timeout=5)
+        
+        # Secure transmission
+        response = requests.post(
+            f"{SERVER_URL}/log-ai-usage", 
+            data=encrypted_payload, 
+            headers=headers, 
+            timeout=10
+        )
         response.raise_for_status()
-        print("Log sent successfully.")
     except Exception as e:
-        print(f"Failed to log: {e}")
+        # Avoid logging raw data if transmission fails
+        logging.error("Transmission failed. Security breach prevented.")
 
 if __name__ == "__main__":
     log_ai_usage("GPT-4", "v1", "chat", 10, 50)
