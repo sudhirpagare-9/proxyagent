@@ -5,14 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Client Access Control</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: white; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; background-color: #f4f7f6; }
+        h1 { color: #333; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
         th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        .btn-approve { background-color: #28a745; color: white; border: none; padding: 8px 12px; cursor: pointer; border-radius: 4px; }
+        th { background-color: #007bff; color: white; }
+        .btn-approve { background-color: #28a745; color: white; border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; }
         .btn-approve:hover { background-color: #218838; }
-        .status-approved { color: green; font-weight: bold; }
-        .status-pending { color: orange; font-weight: bold; }
+        .status-approved { color: #28a745; font-weight: bold; }
+        .status-pending { color: #fd7e14; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -23,6 +24,9 @@
             <tr>
                 <th>HW ID</th>
                 <th>Hostname</th>
+                <th>IP Address</th>
+                <th>MAC Address</th>
+                <th>Country</th>
                 <th>Status</th>
                 <th>Action</th>
             </tr>
@@ -44,7 +48,12 @@
                     row.innerHTML = `
                         <td>${client.hw_id}</td>
                         <td>${client.hostname}</td>
-                        <td class="${client.status === 'approved' ? 'status-approved' : 'status-pending'}">${client.status || 'pending'}</td>
+                        <td>${client.ip_address || 'N/A'}</td>
+                        <td>${client.mac_address || 'N/A'}</td>
+                        <td>${client.country || 'N/A'}</td>
+                        <td class="${client.status === 'approved' ? 'status-approved' : 'status-pending'}">
+                            ${(client.status || 'pending').toUpperCase()}
+                        </td>
                         <td>
                             ${client.status !== 'approved' ? 
                                 `<button class="btn-approve" onclick="approveClient('${client.hw_id}')">Approve</button>` : 
@@ -60,20 +69,21 @@
 
         async function approveClient(hwId) {
             try {
+                // Ensure this matches the route in your backend.py
                 const response = await fetch(`/api/approve/${hwId}`, { method: 'POST' });
                 if (response.ok) {
                     alert("Client approved successfully!");
                     loadClients(); // Refresh the table
                 } else {
-                    alert("Failed to approve client.");
+                    alert("Failed to approve client. Please check the backend logs.");
                 }
             } catch (error) {
                 console.error("Error:", error);
-                alert("An error occurred.");
+                alert("An error occurred while communicating with the server.");
             }
         }
 
-        // Load data when page opens
+        // Initial load
         loadClients();
     </script>
 </body>
