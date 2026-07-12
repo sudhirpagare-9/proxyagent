@@ -68,6 +68,19 @@ async def get_clients():
 @app.get("/api/get-logs/{hw_id}")
 async def get_logs(hw_id: str):
     return supabase.table("ai_usage_logs").select("*").eq("hw_id", hw_id).execute().data
-
+    
+# Add this to your backend.py
+@app.post("/api/status/{hw_id}/{status}")
+async def set_client_status(hw_id: str, status: str):
+    try:
+        # Validate status to prevent malicious input
+        if status not in ["approved", "denied"]:
+            raise HTTPException(status_code=400, detail="Invalid status")
+            
+        supabase.table("clients_registry").update({"status": status}).eq("hw_id", hw_id).execute()
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+        
 @app.get("/")
 async def read_index(): return FileResponse("index.html")
