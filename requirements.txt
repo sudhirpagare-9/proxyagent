@@ -8,3 +8,4 @@ mitmproxy
 keyring
 cryptography
 pydantic
+python-dotenv
