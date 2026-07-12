@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Client Dashboard</title>
+    <title>Client Access Control</title>
     <style>
         body { font-family: sans-serif; margin: 20px; background: #f4f7f6; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; background: white; }
@@ -14,16 +14,16 @@
 <body>
     <h1>Client Access Control</h1>
     <table id="clientTable">
-        <thead><tr><th>HW ID</th><th>Hostname</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead>
+            <tr><th>HW ID</th><th>Hostname</th><th>IP</th><th>Status</th><th>Actions</th></tr>
+        </thead>
         <tbody id="clientBody"></tbody>
     </table>
 
     <div id="logSection" class="log-box">
         <h2 id="logTitle">AI Usage Logs</h2>
         <table id="logTable">
-            <thead>
-                <tr><th>Model</th><th>Version</th><th>Type</th><th>Input</th><th>Output</th><th>Balance</th></tr>
-            </thead>
+            <thead><tr><th>Model</th><th>Version</th><th>Input</th><th>Output</th><th>Balance</th></tr></thead>
             <tbody id="logBody"></tbody>
         </table>
     </div>
@@ -34,7 +34,8 @@
             const clients = await res.json();
             document.getElementById('clientBody').innerHTML = clients.map(c => `
                 <tr>
-                    <td>${c.hw_id}</td><td>${c.hostname}</td><td>${c.status}</td>
+                    <td>${c.hw_id}</td><td>${c.hostname}</td><td>${c.ip_address}</td>
+                    <td>${c.status}</td>
                     <td>
                         <button onclick="approveClient('${c.hw_id}')">Approve</button>
                         <button onclick="viewLogs('${c.hw_id}')">View Logs</button>
@@ -49,10 +50,9 @@
             document.getElementById('logTitle').innerText = `Logs for: ${hwId}`;
             document.getElementById('logBody').innerHTML = logs.map(l => `
                 <tr>
-                    <td>${l.model_name}</td><td>${l.version}</td><td>${l.model_type}</td>
+                    <td>${l.model_name}</td><td>${l.version}</td>
                     <td>${l.input_tokens}</td><td>${l.output_tokens}</td><td>${l.balance_tokens}</td>
-                </tr>
-            `).join('');
+                </tr>`).join('');
         }
 
         async function approveClient(hwId) {

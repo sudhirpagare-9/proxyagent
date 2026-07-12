@@ -7,7 +7,7 @@ from typing import Optional
 
 app = FastAPI()
 
-# Configuration - Ensure these are set in your Render environment variables
+# Configuration
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -38,6 +38,7 @@ async def read_index():
 
 @app.get("/api/get-clients")
 async def get_clients():
+    """Fetches all client registry records."""
     try:
         response = supabase.table("clients_registry").select("*").execute()
         return response.data
@@ -46,6 +47,7 @@ async def get_clients():
 
 @app.post("/register")
 async def register(data: RegisterData, request: Request):
+    """Registers or updates client info."""
     try:
         response = supabase.table("clients_registry").upsert({
             "hw_id": data.hw_id,
@@ -64,6 +66,7 @@ async def register(data: RegisterData, request: Request):
 
 @app.post("/api/approve/{hw_id}")
 async def approve_client(hw_id: str):
+    """Updates client status to 'approved'."""
     try:
         response = supabase.table("clients_registry").update({"status": "approved"}).eq("hw_id", hw_id).execute()
         return {"status": "success"}
@@ -72,6 +75,7 @@ async def approve_client(hw_id: str):
 
 @app.post("/log-ai-usage")
 async def log_ai_usage(data: AIUsageLog):
+    """Logs full AI usage details into the ai_usage_logs table."""
     try:
         response = supabase.table("ai_usage_logs").insert({
             "hw_id": data.hw_id,
@@ -88,8 +92,19 @@ async def log_ai_usage(data: AIUsageLog):
 
 @app.get("/api/get-logs/{hw_id}")
 async def get_logs(hw_id: str):
+    """Fetches AI usage logs for a specific client."""
     try:
         response = supabase.table("ai_usage_logs").select("*").eq("hw_id", hw_id).order("created_at", desc=True).execute()
         return response.data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/status/{hw_id}")
+async def get_status(hw_id: str):
+    try:
+        response = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).single().execute()
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Client not found")
+        return {"status": response.data.get("status")}
+    except Exception:
+        raise HTTPException(status_code=404, detail="Client not found")

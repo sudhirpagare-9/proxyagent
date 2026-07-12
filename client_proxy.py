@@ -18,7 +18,7 @@ def get_network_info():
         public_ip = requests.get('https://api.ipify.org', timeout=5).text
         geo_data = requests.get(f'https://ipapi.co/{public_ip}/json/', timeout=5).json()
         return {"ip": public_ip, "country": geo_data.get("country_name", "Unknown"), "city": geo_data.get("city", "Unknown")}
-    except: return {"ip": "Unknown", "country": "Unknown", "city": "Unknown"}
+    except: return {"ip": "0.0.0.0", "country": "Unknown", "city": "Unknown"}
 
 def register_agent():
     net_info = get_network_info()
@@ -31,8 +31,11 @@ def register_agent():
         "country": net_info['country'],
         "geo_location": net_info['city']
     }
-    try: requests.post(f"{SERVER_URL}/register", json=payload, timeout=10)
-    except Exception as e: logging.error(f"Registration failed: {e}")
+    try:
+        response = requests.post(f"{SERVER_URL}/register", json=payload, timeout=10)
+        logging.info("Registration successful" if response.status_code == 200 else f"Reg failed: {response.status_code}")
+    except Exception as e:
+        logging.error(f"Connection error: {e}")
 
 def log_ai_usage(model_name, version, model_type, input_tokens, output_tokens, balance=0):
     data = {
@@ -44,11 +47,13 @@ def log_ai_usage(model_name, version, model_type, input_tokens, output_tokens, b
         "output_tokens": output_tokens,
         "balance_tokens": balance
     }
-    try: requests.post(f"{SERVER_URL}/log-ai-usage", json=data, timeout=5)
-    except Exception as e: logging.error(f"Failed to log: {e}")
+    try:
+        requests.post(f"{SERVER_URL}/log-ai-usage", json=data, timeout=5)
+    except Exception as e:
+        logging.error(f"Failed to log usage: {e}")
 
 if __name__ == "__main__":
     register_agent()
-    # Main Loop - Add your proxy/interception logic here
     while True:
+        # INSERT PROXY INTERCEPTION LOGIC HERE
         time.sleep(60)
