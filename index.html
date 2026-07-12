@@ -1,79 +1,39 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agent Admin Console</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-100 h-screen flex">
-
-    <div class="w-1/4 bg-white border-r border-gray-200 overflow-y-auto">
-        <div class="p-4 border-b border-gray-200">
-            <h2 class="text-xl font-bold text-gray-800">Connected Agents</h2>
-        </div>
-        <div id="clientList" class="divide-y divide-gray-100">
-            </div>
-    </div>
-
-    <div class="flex-1 p-8 overflow-y-auto" id="mainView">
-        <div id="emptyState" class="text-center mt-20 text-gray-500">
-            Select a client from the sidebar to view detailed intercept traffic.
-        </div>
-        <div id="detailView" class="hidden">
-            <div class="flex justify-between items-center mb-6">
-                <h2 id="clientTitle" class="text-2xl font-bold text-gray-900"></h2>
-                <div class="space-x-2">
-                    <button onclick="setStatus('approved')" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">Approve</button>
-                    <button onclick="setStatus('denied')" class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">Deny</button>
-                </div>
-            </div>
-            
-            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-                <h3 class="text-lg font-semibold mb-4 text-gray-700">Proxy Intercept Logs</h3>
-                <table class="w-full text-left">
-                    <thead class="text-gray-400 text-sm uppercase">
-                        <tr><th class="pb-3">Model</th><th class="pb-3">Input</th><th class="pb-3">Output</th></tr>
-                    </thead>
-                    <tbody id="logBody" class="text-gray-700 divide-y divide-gray-100"></tbody>
-                </table>
-            </div>
+<body class="bg-slate-950 text-slate-200 p-8">
+    <div class="max-w-5xl mx-auto">
+        <h1 class="text-3xl font-bold text-white mb-6">Client Access Control</h1>
+        
+        <div class="bg-slate-900 rounded-lg border border-slate-800 p-6 shadow-xl">
+            <table class="w-full text-left">
+                <thead class="text-slate-400 uppercase text-xs">
+                    <tr><th class="pb-4">HW ID</th><th>Hostname</th><th>Status</th><th>Action</th></tr>
+                </thead>
+                <tbody id="clientBody" class="divide-y divide-slate-800"></tbody>
+            </table>
         </div>
     </div>
 
     <script>
-        let currentHwId = null;
-
         async function loadClients() {
             const res = await fetch('/api/get-clients');
-            const clients = await res.json();
-            document.getElementById('clientList').innerHTML = clients.map(c => `
-                <div onclick="selectClient('${c.hw_id}')" class="p-4 cursor-pointer hover:bg-blue-50 transition border-l-4 border-transparent hover:border-blue-500">
-                    <p class="font-medium text-gray-900">${c.hostname}</p>
-                    <p class="text-xs text-gray-500">${c.hw_id}</p>
-                    <span class="text-[10px] uppercase font-bold ${c.status === 'approved' ? 'text-green-500' : 'text-amber-500'}">${c.status}</span>
-                </div>
-            `).join('');
+            const data = await res.json();
+            document.getElementById('clientBody').innerHTML = data.map(c => `
+                <tr class="text-sm">
+                    <td class="py-4">${c.hw_id}</td>
+                    <td class="py-4">${c.hostname}</td>
+                    <td class="py-4 text-emerald-400">${c.status}</td>
+                    <td class="py-4"><button onclick="approve('${c.hw_id}')" class="bg-indigo-600 px-3 py-1 rounded">Approve</button></td>
+                </tr>`).join('');
         }
-
-        async function selectClient(hwId) {
-            currentHwId = hwId;
-            document.getElementById('emptyState').classList.add('hidden');
-            document.getElementById('detailView').classList.remove('hidden');
-            document.getElementById('clientTitle').innerText = `Client: ${hwId}`;
-            
-            const res = await fetch(`/api/get-logs/${hwId}`);
-            const logs = await res.json();
-            document.getElementById('logBody').innerHTML = logs.map(l => `
-                <tr><td class="py-3">${l.model_name}</td><td class="py-3">${l.input_tokens}</td><td class="py-3">${l.output_tokens}</td></tr>
-            `).join('');
-        }
-
-        async function setStatus(status) {
-            await fetch(`/api/status/${currentHwId}/${status}`, { method: 'POST' });
+        
+        async function approve(hwId) {
+            await fetch(`/api/approve/${hwId}`, { method: 'POST' });
             loadClients();
         }
-
         loadClients();
     </script>
 </body>
