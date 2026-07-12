@@ -38,7 +38,6 @@ async def read_index():
 
 @app.get("/api/get-clients")
 async def get_clients():
-    """Fetches all client registry records."""
     try:
         response = supabase.table("clients_registry").select("*").execute()
         return response.data
@@ -47,7 +46,6 @@ async def get_clients():
 
 @app.post("/register")
 async def register(data: RegisterData, request: Request):
-    """Registers or updates a client with full network/geo details."""
     try:
         response = supabase.table("clients_registry").upsert({
             "hw_id": data.hw_id,
@@ -66,18 +64,14 @@ async def register(data: RegisterData, request: Request):
 
 @app.post("/api/approve/{hw_id}")
 async def approve_client(hw_id: str):
-    """Updates client status to 'approved'."""
     try:
-        response = supabase.table("clients_registry").update(
-            {"status": "approved"}
-        ).eq("hw_id", hw_id).execute()
+        response = supabase.table("clients_registry").update({"status": "approved"}).eq("hw_id", hw_id).execute()
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/log-ai-usage")
 async def log_ai_usage(data: AIUsageLog):
-    """Logs AI usage details into the ai_usage_logs table."""
     try:
         response = supabase.table("ai_usage_logs").insert({
             "hw_id": data.hw_id,
@@ -94,20 +88,14 @@ async def log_ai_usage(data: AIUsageLog):
 
 @app.get("/api/get-logs/{hw_id}")
 async def get_logs(hw_id: str):
-    """Fetches AI usage logs for a specific client."""
     try:
-        response = supabase.table("ai_usage_logs")\
-            .select("*")\
-            .eq("hw_id", hw_id)\
-            .order("created_at", desc=True)\
-            .execute()
+        response = supabase.table("ai_usage_logs").select("*").eq("hw_id", hw_id).order("created_at", desc=True).execute()
         return response.data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/status/{hw_id}")
 async def get_status(hw_id: str):
-    """Checks the approval status of a specific client."""
     try:
         response = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).single().execute()
         if not response.data:
