@@ -1,16 +1,66 @@
 <!DOCTYPE html>
-<html>
-<head><title>Secure Dashboard</title></head>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Secure System Dashboard</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; margin: 40px; background: #f4f7f6; }
+        table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #2c3e50; color: white; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        h1 { color: #2c3e50; }
+    </style>
+</head>
 <body>
     <h1>System Status</h1>
-    <div id="clientBody"></div>
+    <table>
+        <thead>
+            <tr>
+                <th>HW ID</th>
+                <th>Hostname</th>
+                <th>Status</th>
+                <th>IP Address</th>
+            </tr>
+        </thead>
+        <tbody id="clientBody">
+            <tr><td colspan="4">Loading data...</td></tr>
+        </tbody>
+    </table>
+
     <script>
-        async function loadData() {
-            const res = await fetch('/api/get-clients');
-            const data = await res.json();
-            document.getElementById('clientBody').innerHTML = JSON.stringify(data);
+        async function loadClients() {
+            try {
+                const res = await fetch('/api/get-clients');
+                if (!res.ok) throw new Error('Failed to fetch');
+                const clients = await res.json();
+                
+                const tbody = document.getElementById('clientBody');
+                
+                if (clients.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4">No clients registered.</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = clients.map(c => `
+                    <tr>
+                        <td>${c.hw_id || 'N/A'}</td>
+                        <td>${c.hostname || 'Unknown'}</td>
+                        <td>${c.status || 'Pending'}</td>
+                        <td>${c.ip_address || 'N/A'}</td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                console.error("Error loading dashboard:", error);
+                document.getElementById('clientBody').innerHTML = '<tr><td colspan="4">Error loading data.</td></tr>';
+            }
         }
-        loadData();
+        
+        // Load data on page start
+        loadClients();
+        
+        // Optional: Refresh data every 30 seconds
+        setInterval(loadClients, 30000);
     </script>
 </body>
 </html>
