@@ -1,27 +1,22 @@
 import os
+import json
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from supabase import create_client
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from typing import Optional
+from cryptography.fernet import Fernet
 
 app = FastAPI()
 
 # Configuration
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY")
+fernet = Fernet(ENCRYPTION_KEY.encode())
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Models
-class RegisterData(BaseModel):
-    hw_id: str
-    hostname: str
-    public_key: str
-    ip_address: Optional[str] = None
-    mac_address: Optional[str] = None
-    country: Optional[str] = None
-    geo_location: Optional[str] = None
-
 class AIUsageLog(BaseModel):
     hw_id: str
     model_name: str
@@ -31,49 +26,23 @@ class AIUsageLog(BaseModel):
     output_tokens: int
     balance_tokens: Optional[int] = 0
 
-# Endpoints
-@app.get("/")
-async def read_index():
-    return FileResponse("index.html")
-
-@app.get("/api/get-clients")
-async def get_clients():
-    try:
-        response = supabase.table("clients_registry").select("*").execute()
-        return response.data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/register")
-async def register(data: RegisterData, request: Request):
-    try:
-        response = supabase.table("clients_registry").upsert({
-            "hw_id": data.hw_id,
-            "hostname": data.hostname,
-            "public_key": data.public_key,
-            "ip_address": data.ip_address,
-            "mac_address": data.mac_address,
-            "country": data.country,
-            "geo_location": data.geo_location,
-            "status": "pending",
-            "last_ip": request.client.host
-        }).execute()
-        return {"status": "registered"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/approve/{hw_id}")
-async def approve_client(hw_id: str):
-    try:
-        response = supabase.table("clients_registry").update({"status": "approved"}).eq("hw_id", hw_id).execute()
-        return {"status": "success"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# Security Helper
+def decrypt_payload(encrypted_blob: bytes):
+    decrypted_data = fernet.decrypt(encrypted_blob)
+    return json.loads(decrypted_data)
 
 @app.post("/log-ai-usage")
-async def log_ai_usage(data: AIUsageLog):
+async def log_ai_usage(request: Request):
     try:
-        response = supabase.table("ai_usage_logs").insert({
+        # Get raw encrypted body
+        body = await request.body()
+        data_dict = decrypt_payload(body)
+        
+        # Validate against model
+        data = AIUsageLog(**data_dict)
+        
+        # Insert into database
+        supabase.table("ai_usage_logs").insert({
             "hw_id": data.hw_id,
             "model_name": data.model_name,
             "version": data.version,
@@ -82,14 +51,27 @@ async def log_ai_usage(data: AIUsageLog):
             "output_tokens": data.output_tokens,
             "balance_tokens": data.balance_tokens
         }).execute()
-        return {"status": "logged"}
+        return {"status": "success"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=400, detail="Decryption or validation failed")
+
+# Standard Routes
+@app.get("/")
+async def read_index(): return FileResponse("index.html")
+
+@app.get("/api/get-clients")
+async def get_clients():
+    try: return supabase.table("clients_registry").select("*").execute().data
+    except Exception: return []
 
 @app.get("/api/get-logs/{hw_id}")
 async def get_logs(hw_id: str):
+    try: return supabase.table("ai_usage_logs").select("*").eq("hw_id", hw_id).order("created_at", desc=True).execute().data
+    except Exception: return []
+
+@app.post("/api/approve/{hw_id}")
+async def approve_client(hw_id: str):
     try:
-        response = supabase.table("ai_usage_logs").select("*").eq("hw_id", hw_id).order("created_at", desc=True).execute()
-        return response.data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        supabase.table("clients_registry").update({"status": "approved"}).eq("hw_id", hw_id).execute()
+        return {"status": "success"}
+    except Exception: raise HTTPException(status_code=500)
