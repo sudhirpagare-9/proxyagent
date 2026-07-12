@@ -16,11 +16,11 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 class RegisterData(BaseModel):
     hw_id: str
     hostname: str
-    mac_address: str
-    ip_address: str
     public_key: str
-    country: str
-    geo_location: str
+    ip_address: Optional[str] = None
+    mac_address: Optional[str] = None
+    country: Optional[str] = None
+    geo_location: Optional[str] = None
 
 class AIUsageLog(BaseModel):
     hw_id: str
@@ -38,35 +38,40 @@ async def read_index():
 
 @app.get("/api/get-clients")
 async def get_clients():
+    """Fetches all client registry records."""
     try:
         response = supabase.table("clients_registry").select("*").execute()
         return response.data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/register")
+async def register(data: RegisterData, request: Request):
+    """Registers or updates a client with full network/geo details."""
+    try:
+        response = supabase.table("clients_registry").upsert({
+            "hw_id": data.hw_id,
+            "hostname": data.hostname,
+            "public_key": data.public_key,
+            "ip_address": data.ip_address,
+            "mac_address": data.mac_address,
+            "country": data.country,
+            "geo_location": data.geo_location,
+            "status": "pending",
+            "last_ip": request.client.host
+        }).execute()
+        return {"status": "registered"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/approve/{hw_id}")
 async def approve_client(hw_id: str):
-    """Updates the client status to 'approved' in Supabase."""
+    """Updates client status to 'approved'."""
     try:
         response = supabase.table("clients_registry").update(
             {"status": "approved"}
         ).eq("hw_id", hw_id).execute()
         return {"status": "success"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-@app.post("/register")
-async def register(data: RegisterData):
-    try:
-        response = supabase.table("clients_registry").upsert({
-            "hw_id": data.hw_id,
-            "hostname": data.hostname,
-            "mac_address": data.mac_address,
-            "ip_address": data.ip_address,
-            "public_key": data.public_key,
-            "country": data.country,
-            "geo_location": data.geo_location,
-            "status": "ACTIVE"
-        }).execute()
-        return {"status": "registered"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -86,3 +91,27 @@ async def log_ai_usage(data: AIUsageLog):
         return {"status": "logged"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/get-logs/{hw_id}")
+async def get_logs(hw_id: str):
+    """Fetches AI usage logs for a specific client."""
+    try:
+        response = supabase.table("ai_usage_logs")\
+            .select("*")\
+            .eq("hw_id", hw_id)\
+            .order("created_at", desc=True)\
+            .execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/status/{hw_id}")
+async def get_status(hw_id: str):
+    """Checks the approval status of a specific client."""
+    try:
+        response = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).single().execute()
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Client not found")
+        return {"status": response.data.get("status")}
+    except Exception:
+        raise HTTPException(status_code=404, detail="Client not found")
