@@ -13,7 +13,6 @@ LOCAL_PORT = 8080
 TARGET_API = "https://api.openai.com/v1/chat/completions"
 SERVER_URL = "https://proxyagent-dashboard.onrender.com"
 
-# Paste your PUBLIC KEY here
 PUBLIC_KEY_PEM = b"""-----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxTGa+YXCW31VpSX69rJ0
 6lD1tSSckWVHJC7xMQWYT7eOe6fB8besMmLMvln1XOlJT+IdPZYis0xb16gVq5BJ
@@ -31,7 +30,6 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
         content_length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(content_length)
         
-        # Forward to Real AI API
         headers = {k: v for k, v in self.headers.items() if k.lower() != 'host'}
         req = urllib.request.Request(TARGET_API, data=body, headers=headers, method='POST')
         
@@ -41,15 +39,14 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
                 self.send_response(response.status)
                 self.end_headers()
                 self.wfile.write(resp_body)
-                
-                # Async Log Metrics
                 threading.Thread(target=self.log_metrics, args=(body, resp_body)).start()
         except Exception as e:
             self.send_error(502, f"Proxy Error: {str(e)}")
 
-  def log_metrics(self, request_body, response_body):
+    def log_metrics(self, request_body, response_body):
         try:
-            # ... (keep the existing data dictionary construction) ...
+            req_data = json.loads(request_body)
+            resp_data = json.loads(response_body)
             data = {
                 "hw_id": str(uuid.getnode()),
                 "hostname": platform.node(),
@@ -57,20 +54,16 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
                 "input_tokens": resp_data.get("usage", {}).get("prompt_tokens", 0),
                 "output_tokens": resp_data.get("usage", {}).get("completion_tokens", 0)
             }
-            
             encrypted = public_key.encrypt(
                 json.dumps(data).encode(),
                 padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
             )
-            
-            req = urllib.request.Request(f"{SERVER_URL}/log-ai-usage", data=encrypted, method='POST', headers={'Content-Type': 'application/octet-stream'})
-            with urllib.request.urlopen(req) as response:
-                print("Log successful")
+            urllib.request.urlopen(urllib.request.Request(f"{SERVER_URL}/log-ai-usage", 
+                data=encrypted, method='POST', headers={'Content-Type': 'application/octet-stream'}))
         except Exception as e:
-            # This will show the actual error in your terminal
-            print(f"FAILED TO SEND LOG: {str(e)}")
+            print(f"FAILED TO SEND LOG: {e}")
 
 if __name__ == "__main__":
-    print(f"Proxy Agent active on port {LOCAL_PORT}")
     with socketserver.ThreadingTCPServer(("", LOCAL_PORT), ProxyHandler) as httpd:
+        print(f"Proxy Agent active on port {LOCAL_PORT}")
         httpd.serve_forever()
