@@ -42,8 +42,7 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
                 threading.Thread(target=self.log_metrics, args=(body, resp_body)).start()
         except Exception as e:
             self.send_error(502, f"Proxy Error: {str(e)}")
-
-    def log_metrics(self, request_body, response_body):
+def log_metrics(self, request_body, response_body):
         try:
             req_data = json.loads(request_body)
             resp_data = json.loads(response_body)
@@ -62,15 +61,14 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             )
             
             req = urllib.request.Request(f"{SERVER_URL}/log-ai-usage", 
-                                       data=encrypted, 
-                                       method='POST', 
-                                       headers={'Content-Type': 'application/octet-stream'})
-            with urllib.request.urlopen(req) as res:
-                print("Log submitted successfully.")
+                data=encrypted, method='POST', headers={'Content-Type': 'application/octet-stream'})
+            
+            with urllib.request.urlopen(req) as response:
+                print("Log successful")
                 
         except Exception as e:
-            # THIS WILL NOW SHOW YOU THE ACTUAL ERROR
-            print(f"CRITICAL LOG FAILURE: {str(e)}")
+            # THIS WILL NOW SHOW THE ERROR IN YOUR CONSOLE
+            print(f"FAILED TO SEND LOG: {str(e)}")
 
 if __name__ == "__main__":
     print(f"Proxy Agent active on port {LOCAL_PORT}")
