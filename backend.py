@@ -15,16 +15,18 @@ app = FastAPI()
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
 def get_private_key():
-    # Render Secret Files are mounted at /etc/secrets/private_key.pem
+    # Looks for file in Render secret path or local directory
     key_path = os.environ.get("PRIVATE_KEY_PATH", "/etc/secrets/private_key.pem")
     
-    # If file doesn't exist (local dev), fall back to current directory
+    # Fallback to local if running in dev mode
     if not os.path.exists(key_path):
         key_path = "private_key.pem"
         
     try:
         with open(key_path, "rb") as key_file:
-            return serialization.load_pem_private_key(key_file.read(), password=None)
+            key_data = key_file.read()
+            # If your key requires a password, replace None with b'your_password'
+            return serialization.load_pem_private_key(key_data, password=None)
     except Exception as e:
         raise RuntimeError(f"CRITICAL: Failed to load key from {key_path}. Error: {e}")
 
