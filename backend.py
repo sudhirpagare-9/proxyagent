@@ -14,12 +14,12 @@ app = FastAPI()
 # Initialize Supabase
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
-# Use File-based loading to avoid variable corruption
 def get_private_key():
-    # Render Secret Files are usually mounted at /etc/secrets/
+    # Render Secret Files are mounted at /etc/secrets/private_key.pem
     key_path = os.environ.get("PRIVATE_KEY_PATH", "/etc/secrets/private_key.pem")
+    
+    # If file doesn't exist (local dev), fall back to current directory
     if not os.path.exists(key_path):
-        # Fallback for local testing
         key_path = "private_key.pem"
         
     try:
