@@ -9,19 +9,25 @@ from dotenv import load_dotenv
 load_dotenv()
 app = FastAPI()
 
+# Initialize Supabase
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
 def get_private_key():
-    # Render mounts secret files at this path
-    key_path = "/etc/secrets/private_key.pem"
+    # 1. Use the path defined in your Render Environment Variables
+    # The default for Render Secret Files is /etc/secrets/filename
+    key_path = os.environ.get("PRIVATE_KEY_PATH", "/etc/secrets/private_key.pem")
     
-    # If we are on your local computer, look here
+    # 2. Fallback for local testing if you run this on your PC
     if not os.path.exists(key_path):
         key_path = "private_key.pem"
         
-    with open(key_path, "rb") as key_file:
-        # Load the raw PEM data
-        return serialization.load_pem_private_key(key_file.read(), password=None)
+    try:
+        with open(key_path, "rb") as key_file:
+            # DIRECT LOADING: No base64 decoding. 
+            # This loads the file content directly as PEM.
+            return serialization.load_pem_private_key(key_file.read(), password=None)
+    except Exception as e:
+        raise RuntimeError(f"CRITICAL: Failed to load key from {key_path}. Error: {e}")
 
 # Initialize key once on startup
 private_key = get_private_key()
