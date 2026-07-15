@@ -9,31 +9,38 @@ from dotenv import load_dotenv
 load_dotenv()
 app = FastAPI()
 
-# Initialize Supabase
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
+# --- PRIVATE KEY LOADING ---
 def get_private_key():
-    # 1. Use the path defined in your Render Environment Variables
-    # The default for Render Secret Files is /etc/secrets/filename
-    key_path = os.environ.get("PRIVATE_KEY_PATH", "/etc/secrets/private_key.pem")
+    # Render mounts Secret Files here
+    key_path = "/etc/secrets/private_key.pem"
     
-    # 2. Fallback for local testing if you run this on your PC
+    # Local fallback
     if not os.path.exists(key_path):
         key_path = "private_key.pem"
         
     try:
-        with open(key_path, "rb") as key_file:
-            # DIRECT LOADING: No base64 decoding. 
-            # This loads the file content directly as PEM.
-            return serialization.load_pem_private_key(key_file.read(), password=None)
+        with open(key_path, "rb") as f:
+            # Load raw PEM data directly
+            return serialization.load_pem_private_key(f.read(), password=None)
     except Exception as e:
-        raise RuntimeError(f"CRITICAL: Failed to load key from {key_path}. Error: {e}")
+        print(f"CRITICAL: Failed to load key: {e}")
+        return None
 
-# Initialize key once on startup
 private_key = get_private_key()
+
+# --- ROUTES ---
+
+@app.get("/")
+def read_root():
+    # This prevents the 404 error
+    return {"status": "online", "message": "Proxy Agent API is running"}
 
 @app.post("/log-ai-usage")
 async def log_ai_usage(request: Request):
+    if not private_key:
+        raise HTTPException(status_code=500, detail="Private key not loaded")
     try:
         encrypted_blob = await request.body()
         decrypted_data = private_key.decrypt(
