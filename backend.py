@@ -1,11 +1,11 @@
 import os
 import json
-import base64
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from supabase import create_client
-from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import hashes
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -14,13 +14,19 @@ app = FastAPI()
 # Initialize Supabase
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
-# RSA Key Loading
+# Use File-based loading to avoid variable corruption
 def get_private_key():
-    raw_b64 = os.environ.get("PRIVATE_KEY")
-    if not raw_b64: raise RuntimeError("PRIVATE_KEY missing")
-    clean_b64 = raw_b64.strip().replace("\\", "").replace("\n", "").replace("\r", "")
-    pem_bytes = base64.b64decode(clean_b64)
-    return serialization.load_pem_private_key(pem_bytes, password=None)
+    # Render Secret Files are usually mounted at /etc/secrets/
+    key_path = os.environ.get("PRIVATE_KEY_PATH", "/etc/secrets/private_key.pem")
+    if not os.path.exists(key_path):
+        # Fallback for local testing
+        key_path = "private_key.pem"
+        
+    try:
+        with open(key_path, "rb") as key_file:
+            return serialization.load_pem_private_key(key_file.read(), password=None)
+    except Exception as e:
+        raise RuntimeError(f"CRITICAL: Failed to load key from {key_path}. Error: {e}")
 
 private_key = get_private_key()
 
@@ -34,7 +40,11 @@ async def log_ai_usage(request: Request):
         encrypted_blob = await request.body()
         decrypted_data = private_key.decrypt(
             encrypted_blob,
-            padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
         )
         data = json.loads(decrypted_data)
         supabase.table("ai_usage_logs").insert({
@@ -54,11 +64,8 @@ async def get_clients():
 
 @app.post("/api/status/{hw_id}/{status}")
 async def set_client_status(hw_id: str, status: str):
-    try:
-        supabase.table("clients_registry").update({"status": status}).eq("hw_id", hw_id).execute()
-        return {"status": "success"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    supabase.table("clients_registry").update({"status": status}).eq("hw_id", hw_id).execute()
+    return {"status": "success"}
 
 @app.get("/api/get-logs/{hw_id}")
 async def get_logs(hw_id: str):
