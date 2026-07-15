@@ -100,3 +100,10 @@ async def set_client_status(hw_id: str, status: str):
 @app.get("/api/get-logs/{hw_id}")
 async def get_logs(hw_id: str):
     return supabase.table("ai_usage_logs").select("*").eq("hw_id", hw_id).order("created_at", desc=True).execute().data
+# Add this to your existing backend.py
+
+@app.post("/api/approve-client/{hw_id}")
+async def approve_client(hw_id: str):
+    # Updates the status of the client to 'approved' in Supabase
+    supabase.table("clients_registry").update({"status": "approved"}).eq("hw_id", hw_id).execute()
+    return {"status": "success"}
