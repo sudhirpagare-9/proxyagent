@@ -47,6 +47,7 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
         try:
             req_data = json.loads(request_body)
             resp_data = json.loads(response_body)
+            
             data = {
                 "hw_id": str(uuid.getnode()),
                 "hostname": platform.node(),
@@ -54,16 +55,24 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
                 "input_tokens": resp_data.get("usage", {}).get("prompt_tokens", 0),
                 "output_tokens": resp_data.get("usage", {}).get("completion_tokens", 0)
             }
+            
             encrypted = public_key.encrypt(
                 json.dumps(data).encode(),
                 padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
             )
-            urllib.request.urlopen(urllib.request.Request(f"{SERVER_URL}/log-ai-usage", 
-                data=encrypted, method='POST', headers={'Content-Type': 'application/octet-stream'}))
+            
+            req = urllib.request.Request(f"{SERVER_URL}/log-ai-usage", 
+                                       data=encrypted, 
+                                       method='POST', 
+                                       headers={'Content-Type': 'application/octet-stream'})
+            with urllib.request.urlopen(req) as res:
+                print("Log submitted successfully.")
+                
         except Exception as e:
-            print(f"FAILED TO SEND LOG: {e}")
+            # THIS WILL NOW SHOW YOU THE ACTUAL ERROR
+            print(f"CRITICAL LOG FAILURE: {str(e)}")
 
 if __name__ == "__main__":
+    print(f"Proxy Agent active on port {LOCAL_PORT}")
     with socketserver.ThreadingTCPServer(("", LOCAL_PORT), ProxyHandler) as httpd:
-        print(f"Proxy Agent active on port {LOCAL_PORT}")
         httpd.serve_forever()

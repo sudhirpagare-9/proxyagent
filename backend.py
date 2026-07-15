@@ -1,6 +1,7 @@
 import os
 import json
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import HTMLResponse
 from supabase import create_client
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -12,15 +13,25 @@ app = FastAPI()
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
 def get_private_key():
-    # Ensure private_key.pem is in the same directory as this file
+    # Looks for key in Render secrets path, defaults to local folder
+    key_path = "/etc/secrets/private_key.pem"
+    if not os.path.exists(key_path): key_path = "private_key.pem"
     try:
-        with open("private_key.pem", "rb") as f:
+        with open(key_path, "rb") as f:
             return serialization.load_pem_private_key(f.read(), password=None)
     except Exception as e:
-        print(f"Error loading private key: {e}")
+        print(f"Key Error: {e}")
         return None
 
 private_key = get_private_key()
+
+@app.get("/", response_class=HTMLResponse)
+async def serve():
+    try:
+        with open("index.html", "r") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        return {"detail": "index.html not found"}
 
 @app.post("/log-ai-usage")
 async def log_usage(request: Request):
@@ -29,7 +40,7 @@ async def log_usage(request: Request):
     try:
         raw_body = await request.body()
         
-        # Decrypt payload
+        # 1. Decrypt
         decrypted_bytes = private_key.decrypt(
             raw_body,
             padding.OAEP(
@@ -38,20 +49,18 @@ async def log_usage(request: Request):
                 label=None
             )
         )
-        log_entry = json.loads(decrypted_bytes)
+        data = json.loads(decrypted_bytes)
         
-        # Insert into Supabase
-        # Ensure your table 'ai_usage_logs' has columns: hw_id, model_name, input_tokens, output_tokens
-        supabase.table("ai_usage_logs").insert(log_entry).execute()
-        
+        # 2. Insert to Supabase
+        # Ensure column names in your DB match these keys exactly
+        response = supabase.table("ai_usage_logs").insert(data).execute()
         return {"status": "success"}
     except Exception as e:
-        print(f"CRITICAL ERROR: {str(e)}")
+        print(f"INSERTION FAILED: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/get-clients")
-async def get_clients(): 
-    return supabase.table("clients_registry").select("*").execute().data
+async def get_clients(): return supabase.table("clients_registry").select("*").execute().data
 
 @app.get("/api/get-logs/{hw_id}")
 async def get_logs(hw_id: str):
