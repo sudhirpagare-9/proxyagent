@@ -14,7 +14,6 @@ supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
 # RSA Private Key Setup
 def get_private_key():
-    # Ensure this file exists on your Render server in the root or /etc/secrets/
     key_path = "/etc/secrets/private_key.pem"
     if not os.path.exists(key_path): key_path = "private_key.pem"
     try:
@@ -49,14 +48,26 @@ async def log_usage(request: Request):
         )
         log_entry = json.loads(decrypted_bytes)
         
-        # 2. Insert into Supabase
-        supabase.table("ai_usage_logs").insert(log_entry).execute()
+        # 2. Clean/Sanitize for Supabase Schema
+        # Remove 'hostname' as it is not in the 'ai_usage_logs' table
+        if 'hostname' in log_entry:
+            del log_entry['hostname']
+            
+        # Add default values for required columns missing from client payload
+        log_entry.setdefault("version", "1.0")
+        log_entry.setdefault("model_type", "chat")
+        log_entry.setdefault("balance_tokens", 0)
+        
+        # 3. Insert into Supabase
+        response = supabase.table("ai_usage_logs").insert(log_entry).execute()
         
         return {"status": "success"}
     except Exception as e:
-        print(f"CRITICAL ERROR in log-ai-usage: {str(e)}") 
+        # Print the specific error to the Render log console
+        print(f"CRITICAL INSERTION ERROR: {str(e)}") 
         raise HTTPException(status_code=400, detail=str(e))
 
+# API Endpoints
 @app.get("/api/get-clients")
 async def get_clients(): return supabase.table("clients_registry").select("*").execute().data
 
