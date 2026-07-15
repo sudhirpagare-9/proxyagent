@@ -1,55 +1,51 @@
 import os
 import json
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse
 from supabase import create_client
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from dotenv import load_dotenv
 
-# Load environment variables
+# 1. Initialization
 load_dotenv()
-
 app = FastAPI()
 
-# Initialize Supabase
-supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
+# Ensure Supabase variables are set
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- SECURITY: PRIVATE KEY LOADING ---
+# 2. RSA Private Key Loading (Render Secret File)
 def get_private_key():
-    # Looks for Render Secret File path
+    # Render mounts Secret Files here automatically
     key_path = "/etc/secrets/private_key.pem"
-    
-    # Fallback to local file for testing
     if not os.path.exists(key_path):
-        key_path = "private_key.pem"
-        
+        key_path = "private_key.pem" # Local dev fallback
+    
     try:
-        with open(key_path, "rb") as key_file:
-            # Loads raw PEM file
-            return serialization.load_pem_private_key(key_file.read(), password=None)
+        with open(key_path, "rb") as f:
+            return serialization.load_pem_private_key(f.read(), password=None)
     except Exception as e:
-        print(f"CRITICAL: Failed to load key: {e}")
+        print(f"CRITICAL: Could not load PEM key: {e}")
         return None
 
 private_key = get_private_key()
 
-# --- ROUTES ---
+# 3. Routes
 
-# 1. Serve Dashboard
+# Serve the Dashboard UI
 @app.get("/", response_class=HTMLResponse)
 async def serve_dashboard():
-    try:
-        with open("index.html", "r") as f:
-            return HTMLResponse(content=f.read())
-    except FileNotFoundError:
-        return HTMLResponse(content="<h1>Dashboard file (index.html) not found</h1>", status_code=404)
+    with open("index.html", "r") as f:
+        return HTMLResponse(content=f.read())
 
-# 2. Log AI Usage (Encrypted)
+# Receive Encrypted AI Usage Data
 @app.post("/log-ai-usage")
 async def log_ai_usage(request: Request):
     if not private_key:
         raise HTTPException(status_code=500, detail="Private key not initialized")
+    
     try:
         encrypted_blob = await request.body()
         decrypted_data = private_key.decrypt(
@@ -62,14 +58,16 @@ async def log_ai_usage(request: Request):
         )
         data = json.loads(decrypted_data)
         
-        # Upsert client info (Update if exists, insert if new)
+        # Upsert Client Registry (Updates host/ip/status)
         supabase.table("clients_registry").upsert({
             "hw_id": data["hw_id"],
             "hostname": data.get("hostname", "Unknown"),
-            "status": "online"
+            "ip_address": data.get("ip_address"),
+            "country": data.get("country", "Unknown"),
+            "status": "pending" # Default new clients to pending
         }).execute()
         
-        # Insert log
+        # Insert Usage Log
         supabase.table("ai_usage_logs").insert({
             "hw_id": data["hw_id"],
             "model_name": data["model_name"],
@@ -85,25 +83,18 @@ async def log_ai_usage(request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-# 3. API: Fetch All Clients
+# API: Get all clients for Sidebar
 @app.get("/api/get-clients")
 async def get_clients():
     return supabase.table("clients_registry").select("*").execute().data
 
-# 4. API: Update Status
-@app.post("/api/status/{hw_id}/{status}")
-async def set_client_status(hw_id: str, status: str):
-    supabase.table("clients_registry").update({"status": status}).eq("hw_id", hw_id).execute()
+# API: Approve Client
+@app.post("/api/approve-client/{hw_id}")
+async def approve_client(hw_id: str):
+    supabase.table("clients_registry").update({"status": "approved"}).eq("hw_id", hw_id).execute()
     return {"status": "success"}
 
-# 5. API: Fetch Logs
+# API: Get logs for a specific client
 @app.get("/api/get-logs/{hw_id}")
 async def get_logs(hw_id: str):
     return supabase.table("ai_usage_logs").select("*").eq("hw_id", hw_id).order("created_at", desc=True).execute().data
-# Add this to your existing backend.py
-
-@app.post("/api/approve-client/{hw_id}")
-async def approve_client(hw_id: str):
-    # Updates the status of the client to 'approved' in Supabase
-    supabase.table("clients_registry").update({"status": "approved"}).eq("hw_id", hw_id).execute()
-    return {"status": "success"}
