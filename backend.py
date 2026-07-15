@@ -1,40 +1,30 @@
 import os
 import json
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
 from supabase import create_client
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.hazmat.primitives import hashes
 from dotenv import load_dotenv
 
 load_dotenv()
 app = FastAPI()
 
-# Initialize Supabase
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
 def get_private_key():
-    # Looks for file in Render secret path or local directory
-    key_path = os.environ.get("PRIVATE_KEY_PATH", "/etc/secrets/private_key.pem")
+    # Render mounts secret files at this path
+    key_path = "/etc/secrets/private_key.pem"
     
-    # Fallback to local if running in dev mode
+    # If we are on your local computer, look here
     if not os.path.exists(key_path):
         key_path = "private_key.pem"
         
-    try:
-        with open(key_path, "rb") as key_file:
-            key_data = key_file.read()
-            # If your key requires a password, replace None with b'your_password'
-            return serialization.load_pem_private_key(key_data, password=None)
-    except Exception as e:
-        raise RuntimeError(f"CRITICAL: Failed to load key from {key_path}. Error: {e}")
+    with open(key_path, "rb") as key_file:
+        # Load the raw PEM data
+        return serialization.load_pem_private_key(key_file.read(), password=None)
 
+# Initialize key once on startup
 private_key = get_private_key()
-
-@app.get("/")
-async def read_index():
-    return FileResponse("index.html")
 
 @app.post("/log-ai-usage")
 async def log_ai_usage(request: Request):
