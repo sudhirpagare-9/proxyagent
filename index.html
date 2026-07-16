@@ -33,8 +33,7 @@
             </table>
         </div>
     </div>
-
-    <script>
+<script>
         async function loadClients() {
             const res = await fetch('/api/clients');
             const data = await res.json();
@@ -47,11 +46,11 @@
         }
 
         async function selectClient(hwid, host, ip, status) {
-			document.getElementById('details-card').classList.remove('hidden');
+            document.getElementById('details-card').classList.remove('hidden');
             document.getElementById('d-hostname').innerText = host;
             document.getElementById('d-hwid').innerText = hwid;
             document.getElementById('d-ip').innerText = ip;
-         	  
+              
             const badge = document.getElementById('d-status');
             badge.innerText = status.toUpperCase();
             badge.className = status === 'approved' ? 'bg-green-100 text-green-700 px-2 py-1 rounded text-xs' : 'bg-red-100 text-red-700 px-2 py-1 rounded text-xs';
@@ -60,37 +59,37 @@
                 <button class="bg-blue-600 text-white px-3 py-1 rounded" onclick="updateStatus('${hwid}', 'approved')">Approve</button>
                 <button class="bg-gray-200 text-slate-600 px-3 py-1 rounded" onclick="updateStatus('${hwid}', 'denied')">Deny</button>`;
 
-           try {
-        const response = await fetch(`/api/logs/${hwid}`);
-        if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-        
-        const logs = await response.json();
-        
-        if (logs.length === 0) {
-            document.getElementById('log-body').innerHTML = '<tr><td colspan="4" class="p-4 text-center text-gray-400">No logs found</td></tr>';
-        } else {
-            document.getElementById('log-body').innerHTML = logs.map(l => `
-                <tr>
-                    <td class="p-4">${l.model_name || 'N/A'}</td>
-                    <td class="p-4">${l.input_tokens || 0}</td>
-                    <td class="p-4">${l.output_tokens || 0}</td>
-                    <td class="p-4">${new Date(l.created_at).toLocaleTimeString()}</td>
-                </tr>
-            `).join('');
-        }
-    } catch (e) {
-        console.error("Fetch Error:", e);
-        document.getElementById('log-body').innerHTML = `<tr><td colspan="4" class="p-4 text-red-500">Error loading logs: ${e.message}</td></tr>`;
-    }
-}
+            try {
+                const response = await fetch(`/api/logs/${hwid}`);
+                if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+                const logs = await response.json();
+                
+                if (logs.length === 0) {
+                    document.getElementById('log-body').innerHTML = '<tr><td colspan="6" class="p-4 text-center text-gray-400">No logs found</td></tr>';
+                } else {
+                    document.getElementById('log-body').innerHTML = logs.map(l => `
+                        <tr>
+                            <td class="p-4">${l.model_name || 'N/A'}</td>
+                            <td class="p-4">${l.input_tokens || 0}</td>
+                            <td class="p-4">${l.output_tokens || 0}</td>
+                            <td class="p-4">N/A</td>
+                            <td class="p-4">N/A</td>
+                            <td class="p-4">${new Date(l.created_at).toLocaleTimeString()}</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (e) {
+                console.error("Fetch Error:", e);
+                document.getElementById('log-body').innerHTML = `<tr><td colspan="6" class="p-4 text-red-500">Error: ${e.message}</td></tr>`;
+            }
+        } // <--- Added missing brace here
+
         async function updateStatus(hwid, status) {
             await fetch(`/api/status/${hwid}/${status}`, {method: 'POST'});
             loadClients();
-            selectClient(hwid, document.getElementById('d-hostname').innerText, document.getElementById('d-ip').innerText, status);
         }
 
         loadClients();
-		
     </script>
 </body>
 </html>
