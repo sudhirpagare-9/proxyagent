@@ -1,5 +1,4 @@
-import os, json
-import logging
+import os, json, logging, base64
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse
 from supabase import create_client
@@ -13,25 +12,53 @@ app = FastAPI()
 # Supabase Setup
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
-load_dotenv()
-app = FastAPI()
-supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
-
 logging.basicConfig(level=logging.INFO)
+
+
+# Decryption Logic
+def get_private_key():
+    b64_key = os.environ.get("PRIVATE_KEY_B64")
+    return serialization.load_pem_private_key(base64.b64decode(b64_key), password=None)
+
+private_key = get_private_key()
 
 @app.post("/log-ai-usage")
 async def log_usage(request: Request):
-    raw_body = await request.body()
-    logging.info(f"[BACKEND-TRACE] Received body: {raw_body}")
-    
+    # 1. Decrypt incoming payload
+    encrypted_body = await request.body()
     try:
-        data = json.loads(raw_body)
-        result = supabase.table("ai_usage_logs").insert(data).execute()
-        logging.info(f"[BACKEND-TRACE] Supabase Insert Result: {result.data}")
+        decrypted_data = private_key.decrypt(
+            encrypted_body,
+            padding.OAEP(
+                mgf=padding.MGF1(hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        data = json.loads(decrypted_data)
+        
+        # 2. Strict Validation (Secure by Design)
+        # Ensure we only log allowed fields
+        log_entry = {
+            "hw_id": data.get("hw_id"),
+            "model_name": str(data.get("model_name")),
+            "version": str(data.get("version")),
+            "model_type": str(data.get("model_type")),
+            "input_tokens": int(data.get("input_tokens", 0)),
+            "output_tokens": int(data.get("output_tokens", 0)),
+            "balance_tokens": str(data.get("balance_tokens")),
+            "created_at": str(data.get("created_at")),
+            "subscription_name": str(data.get("subscription_name"))
+        }
+        
+        # 3. Insert to Supabase
+        supabase.table("ai_usage_logs").insert(log_entry).execute()
         return {"status": "ok"}
     except Exception as e:
-        logging.error(f"[BACKEND-TRACE] ERROR: {str(e)}")
-        return {"status": "error", "message": str(e)}
+        logging.error(f"Security Alert: Failed decryption/insertion: {e}")
+        return {"status": "error"}
+
+# ... existing endpoints (get_clients, get_logs) remain the same
 # Key Management
 def get_private_key():
     key_data = os.environ.get("PRIVATE_KEY")
