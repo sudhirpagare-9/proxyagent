@@ -87,9 +87,7 @@
         async function updateStatus(hwid, status) {
             await fetch(`/api/status/${hwid}/${status}`, {method: 'POST'});
             loadClients();
-        }
 
-        loadClients();
     </script>
 </body>
 </html>
