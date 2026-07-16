@@ -1,10 +1,9 @@
-import http.server, socketserver, urllib.request, json, uuid, platform, hashlib, requests
+import http.server, socketserver, urllib.request, json, uuid, platform
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import serialization, hashes
 
-# --- CONFIGURATION ---
-TARGET_API = "https://api.openai.com/v1/chat/completions"
-SERVER_URL = "https://proxyagent-dashboard.onrender.com"
+# Configuration
+SERVER_URL = "https://your-render-app-url.com" # Replace with your Render URL
 PUBLIC_KEY_PEM = b"""-----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxTGa+YXCW31VpSX69rJ0
 6lD1tSSckWVHJC7xMQWYT7eOe6fB8besMmLMvln1XOlJT+IdPZYis0xb16gVq5BJ
@@ -15,51 +14,40 @@ XJ3zgMAioGI9df09HK+ZcZFUHMvjwezCvfA0zvucdvUSVUzXdZqqmarnd+bVt1pn
 vwIDAQAB
 -----END PUBLIC KEY-----"""
 public_key = serialization.load_pem_public_key(PUBLIC_KEY_PEM)
+import http.server, socketserver, urllib.request, json, uuid, platform, sys
 
-def secure_hash(data: str):
-    return hashlib.sha256(data.encode()).hexdigest()[:16]
+# --- DEBUGGER: FLOW TRACER ---
+def trace(step, message):
+    print(f"\n[PROXY-TRACE] STEP {step}: {message}", file=sys.stderr)
 
 class ProxyHandler(http.server.BaseHTTPRequestHandler):
-    def do_POST(self):
-        # 1. Forward traffic to Target API
-        content_length = int(self.headers['Content-Length'])
-        body = self.rfile.read(content_length)
-        
-        try:
-            response = requests.post(TARGET_API, data=body, headers={'Authorization': self.headers.get('Authorization'), 'Content-Type': 'application/json'})
-            self.send_response(response.status_code)
-            self.end_headers()
-            self.wfile.write(response.content)
-            
-            # 2. Log Metrics in background
-            self.log_metrics(body.decode(), response.text)
-        except Exception as e:
-            print(f"Forwarding Error: {e}")
+    def do_CONNECT(self):
+        trace(1, "CONNECT request received (HTTPS Tunnel).")
+        self.send_response(200, 'Connection Established')
+        self.end_headers()
 
-    def log_metrics(self, request_body, response_body):
+    def do_POST(self):
+        trace(2, "POST request detected. Forwarding...")
+        # Simulate log capture
+        self.log_metrics("GPT-4", 10, 20)
+        self.send_response(200)
+        self.end_headers()
+
+    def log_metrics(self, model, input_t, output_t):
+        trace(3, "Preparing to send log to server...")
         try:
-            req_data = json.loads(request_body)
-            resp_data = json.loads(response_body)
-            
-            payload = {
-                "hw_id": secure_hash(str(uuid.getnode())), # Pseudonymized HW ID
-                "hostname": platform.node(),
-                "mac_address": secure_hash("local-mac"),
-                "ip_address": secure_hash("local-ip"),
-                "model_name": req_data.get("model", "unknown"),
-                "input_tokens": resp_data.get("usage", {}).get("prompt_tokens", 0),
-                "output_tokens": resp_data.get("usage", {}).get("completion_tokens", 0),
-                "status": "pending"
-            }
-            
-            encrypted = public_key.encrypt(json.dumps(payload).encode(), 
-                padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
-            
-            requests.post(f"{SERVER_URL}/log-ai-usage", data=encrypted, headers={'Content-Type': 'application/octet-stream'})
+            data = {"hw_id": str(uuid.getnode()), "model_name": model, "input_tokens": input_t, "output_tokens": output_t}
+            trace(4, f"Payload: {data}")
+            # Ensure your URL is correct
+            req = urllib.request.Request("https://your-app.onrender.com/log-ai-usage", 
+                                       data=json.dumps(data).encode(), 
+                                       headers={'Content-Type': 'application/json'})
+            with urllib.request.urlopen(req) as response:
+                trace(5, f"Server responded with: {response.status}")
         except Exception as e:
-            print(f"Logging Error: {e}")
+            trace(6, f"ERROR: Failed to send data: {e}")
 
 if __name__ == "__main__":
+    print("Proxy started on 8080. Traffic will show below:")
     with socketserver.ThreadingTCPServer(("", 8080), ProxyHandler) as httpd:
-        print("Proxy operational. Configure system proxy to 127.0.0.1:8080")
         httpd.serve_forever()

@@ -12,6 +12,25 @@ app = FastAPI()
 # Supabase Setup
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
+load_dotenv()
+app = FastAPI()
+supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
+
+logging.basicConfig(level=logging.INFO)
+
+@app.post("/log-ai-usage")
+async def log_usage(request: Request):
+    raw_body = await request.body()
+    logging.info(f"[BACKEND-TRACE] Received body: {raw_body}")
+    
+    try:
+        data = json.loads(raw_body)
+        result = supabase.table("ai_usage_logs").insert(data).execute()
+        logging.info(f"[BACKEND-TRACE] Supabase Insert Result: {result.data}")
+        return {"status": "ok"}
+    except Exception as e:
+        logging.error(f"[BACKEND-TRACE] ERROR: {str(e)}")
+        return {"status": "error", "message": str(e)}
 # Key Management
 def get_private_key():
     key_data = os.environ.get("PRIVATE_KEY")
@@ -29,18 +48,6 @@ private_key = get_private_key()
 async def serve_index():
     with open("index.html", "r") as f: return HTMLResponse(f.read())
 
-@app.post("/log-ai-usage")
-async def log_usage(request: Request):
-    if not private_key: raise HTTPException(status_code=500, detail="Key missing")
-    raw_body = await request.body()
-    try:
-        decrypted = private_key.decrypt(raw_body, padding.OAEP(
-            mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
-        data = json.loads(decrypted)
-        supabase.table("ai_usage_logs").insert(data).execute()
-        return {"status": "ok"}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/clients")
 async def get_clients(): 
