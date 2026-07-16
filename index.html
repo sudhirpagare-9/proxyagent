@@ -3,39 +3,81 @@
 <head>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-100 p-8">
-    <div class="max-w-6xl mx-auto">
-        <h1 class="text-2xl font-bold mb-6">Client Security Dashboard</h1>
-        <div id="client-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+<body class="bg-slate-50 h-screen flex">
+    <div class="w-80 bg-white border-r flex flex-col h-full">
+        <div class="p-4 border-b font-bold text-slate-700 text-lg">Client Registry</div>
+        <div id="client-list" class="flex-1 overflow-y-auto p-2 space-y-2">
+            </div>
+    </div>
+
+    <div class="flex-1 flex flex-col p-6 overflow-hidden">
+        <div id="details-card" class="bg-white p-6 rounded-lg border shadow-sm mb-6 hidden">
+            <h2 id="d-hostname" class="text-2xl font-bold mb-4">Select a Client</h2>
+            <div class="grid grid-cols-4 gap-4 text-sm mb-6">
+                <div><p class="text-gray-400">HW ID</p><p id="d-hwid">-</p></div>
+                <div><p class="text-gray-400">IP</p><p id="d-ip">-</p></div>
+                <div><p class="text-gray-400">Status</p><span id="d-status" class="px-2 py-1 rounded text-xs font-bold"></span></div>
+                <div id="btn-container" class="flex gap-2"></div>
+            </div>
+        </div>
+
+        <div class="flex-1 bg-white rounded-lg border shadow-sm overflow-hidden flex flex-col">
+            <table class="w-full text-sm text-left">
+                <thead class="bg-slate-50 border-b text-slate-600 uppercase text-xs">
+                    <tr>
+                        <th class="p-4">Model</th><th class="p-4">Input</th>
+                        <th class="p-4">Output</th><th class="p-4">Balance</th><th class="p-4">Time</th>
+                    </tr>
+                </thead>
+                <tbody id="log-body" class="divide-y text-slate-700"></tbody>
+            </table>
+        </div>
     </div>
 
     <script>
-        async function fetchClients() {
+        async function loadClients() {
             const res = await fetch('/api/clients');
             const data = await res.json();
-            document.getElementById('client-grid').innerHTML = data.map(c => `
-                <div class="bg-white p-6 rounded-lg shadow border">
-                    <div class="flex justify-between">
-                        <h3 class="font-bold">${c.hostname}</h3>
-                        <span class="px-2 py-1 rounded text-xs ${c.status === 'approved' ? 'bg-green-100' : 'bg-red-100'}">${c.status}</span>
-                    </div>
-                    <div class="text-sm text-gray-500 mt-2 space-y-1">
-                        <p>ID: ${c.hw_id.substring(0,8)}...</p>
-                        <p>MAC: ${c.mac_address}</p>
-                        <p>IP: ${c.ip_address}</p>
-                    </div>
-                    <div class="mt-4 flex gap-2">
-                        <button onclick="update('${c.hw_id}', 'approved')" class="bg-blue-600 text-white px-3 py-1 rounded text-sm">Approve</button>
-                        <button onclick="update('${c.hw_id}', 'denied')" class="bg-gray-200 text-gray-700 px-3 py-1 rounded text-sm">Deny</button>
-                    </div>
-                </div>
-            `).join('');
+            document.getElementById('client-list').innerHTML = data.map(c => `
+                <div onclick="selectClient('${c.hw_id}', '${c.hostname}', '${c.ip_address}', '${c.status}')" 
+                     class="p-3 border rounded cursor-pointer hover:bg-slate-50">
+                    <div class="font-bold text-sm">${c.hostname}</div>
+                    <div class="text-xs text-slate-400">${c.hw_id.substring(0,8)}...</div>
+                </div>`).join('');
         }
-        async function update(id, status) {
-            await fetch(`/api/update-status/${id}/${status}`, {method: 'POST'});
-            location.reload();
+
+        async function selectClient(hwid, host, ip, status) {
+            document.getElementById('details-card').classList.remove('hidden');
+            document.getElementById('d-hostname').innerText = host;
+            document.getElementById('d-hwid').innerText = hwid;
+            document.getElementById('d-ip').innerText = ip;
+            
+            const badge = document.getElementById('d-status');
+            badge.innerText = status.toUpperCase();
+            badge.className = status === 'approved' ? 'bg-green-100 text-green-700 px-2 py-1 rounded text-xs' : 'bg-red-100 text-red-700 px-2 py-1 rounded text-xs';
+
+            document.getElementById('btn-container').innerHTML = `
+                <button class="bg-blue-600 text-white px-3 py-1 rounded" onclick="updateStatus('${hwid}', 'approved')">Approve</button>
+                <button class="bg-gray-200 text-slate-600 px-3 py-1 rounded" onclick="updateStatus('${hwid}', 'denied')">Deny</button>`;
+
+            const logs = await (await fetch(`/api/logs/${hwid}`)).json();
+            document.getElementById('log-body').innerHTML = logs.map(l => `
+                <tr>
+                    <td class="p-4 font-mono text-xs">${l.model_name || '-'}</td>
+                    <td class="p-4">${l.input_tokens || 0}</td>
+                    <td class="p-4">${l.output_tokens || 0}</td>
+                    <td class="p-4">${l.balance || 0}</td>
+                    <td class="p-4 text-xs text-slate-500">${new Date(l.created_at).toLocaleTimeString()}</td>
+                </tr>`).join('');
         }
-        fetchClients();
+
+        async function updateStatus(hwid, status) {
+            await fetch(`/api/status/${hwid}/${status}`, {method: 'POST'});
+            loadClients();
+            selectClient(hwid, document.getElementById('d-hostname').innerText, document.getElementById('d-ip').innerText, status);
+        }
+
+        loadClients();
     </script>
 </body>
 </html>
