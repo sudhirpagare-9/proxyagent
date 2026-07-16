@@ -3,25 +3,16 @@
 <head>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-100 min-h-screen p-6">
+<body class="bg-gray-100 p-6">
     <div class="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-6">
         <div class="col-span-1 bg-white rounded-xl shadow p-4">
-            <h2 class="font-bold text-gray-700 mb-4 border-b pb-2">Clients</h2>
+            <h2 class="font-bold mb-4">Clients</h2>
             <div id="client-list" class="space-y-2"></div>
         </div>
         <div class="col-span-3">
-            <div id="details-card" class="bg-white rounded-xl shadow p-6 mb-6 hidden">
-                <div class="flex justify-between items-center">
-                    <h2 id="host-name" class="text-2xl font-bold">Client</h2>
-                    <div id="status-badge" class="px-3 py-1 rounded-full text-sm font-bold"></div>
-                </div>
-                <div class="mt-4 flex gap-4" id="controls"></div>
-            </div>
             <div class="bg-white rounded-xl shadow overflow-hidden">
-                <table class="w-full text-sm text-left">
-                    <thead class="bg-gray-50 text-gray-600 uppercase">
-                        <tr><th class="p-4">Model</th><th class="p-4">Input</th><th class="p-4">Output</th><th class="p-4">Time</th></tr>
-                    </thead>
+                <table class="w-full">
+                    <thead class="bg-gray-50"><tr><th class="p-4">Model</th><th class="p-4">Input</th><th class="p-4">Output</th></tr></thead>
                     <tbody id="log-body" class="divide-y"></tbody>
                 </table>
             </div>
@@ -29,30 +20,19 @@
     </div>
     <script>
         async function loadClients() {
-            const data = await (await fetch('/api/clients')).json();
+            const res = await fetch('/api/clients');
+            const data = await res.json();
             document.getElementById('client-list').innerHTML = data.map(c => `
-                <div class="p-3 border rounded cursor-pointer hover:bg-gray-50" onclick="selectClient('${c.hw_id}', '${c.hostname}', '${c.status}')">
-                    <p class="font-medium">${c.hostname}</p>
-                    <p class="text-xs text-gray-400">${c.hw_id.substring(0,8)}...</p>
+                <div class="p-2 border rounded cursor-pointer hover:bg-gray-50" onclick="loadLogs('${c.hw_id}')">
+                    ${c.hostname}
                 </div>`).join('');
         }
-        async function selectClient(hwid, host, status) {
-            document.getElementById('details-card').classList.remove('hidden');
-            document.getElementById('host-name').innerText = host;
-            const b = document.getElementById('status-badge');
-            b.innerText = status;
-            b.className = status === 'approved' ? 'bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm' : 'bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-sm';
-            
-            document.getElementById('controls').innerHTML = `<button onclick="updateStatus('${hwid}', '${status === 'approved' ? 'rejected' : 'approved'}')" class="bg-blue-600 text-white px-4 py-2 rounded">Toggle Approval</button>`;
-            
-            const logs = await (await fetch(`/api/logs/${hwid}`)).json();
+        async function loadLogs(hwid) {
+            const res = await fetch(`/api/logs/${hwid}`);
+            const logs = await res.json();
             document.getElementById('log-body').innerHTML = logs.map(l => `
-                <tr><td class="p-4">${l.model_name}</td><td class="p-4">${l.input_tokens}</td><td class="p-4">${l.output_tokens}</td><td class="p-4">${new Date(l.created_at).toLocaleTimeString()}</td></tr>
+                <tr><td class="p-4">${l.model_name}</td><td class="p-4">${l.input_tokens}</td><td class="p-4">${l.output_tokens}</td></tr>
             `).join('');
-        }
-        async function updateStatus(hwid, status) {
-            await fetch(`/api/status/${hwid}/${status}`, {method: 'POST'});
-            location.reload();
         }
         loadClients();
     </script>

@@ -12,25 +12,28 @@ app = FastAPI()
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
 # --- Helper: Private Key ---
-def get_private_key():
-    key_path = "/etc/secrets/private_key.pem"
-    if not os.path.exists(key_path): key_path = "private_key.pem"
+def load_private_key():
+    key_path = "private_key.pem" # Ensure this file is uploaded to your server/Render root
+    if not os.path.exists(key_path): return None
     try:
         with open(key_path, "rb") as f:
             return serialization.load_pem_private_key(f.read(), password=None)
     except: return None
 
-private_key = get_private_key()
+private_key = load_private_key()
 
 # --- Routes ---
 @app.get("/", response_class=HTMLResponse)
-async def serve():
-    with open("index.html", "r") as f:
-        return HTMLResponse(content=f.read())
+async def serve_index():
+    try:
+        with open("index.html", "r") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="index.html not found")
 
 @app.post("/log-ai-usage")
 async def log_usage(request: Request):
-    if not private_key: raise HTTPException(status_code=500, detail="Key missing")
+    if not private_key: raise HTTPException(status_code=500, detail="Private key missing on server")
     try:
         raw_body = await request.body()
         data = json.loads(private_key.decrypt(raw_body, padding.OAEP(
@@ -38,11 +41,11 @@ async def log_usage(request: Request):
         supabase.table("ai_usage_logs").insert(data).execute()
         return {"status": "success"}
     except Exception as e:
-        print(f"ERROR: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/clients")
-async def get_clients(): return supabase.table("clients_registry").select("*").execute().data
+async def get_clients(): 
+    return supabase.table("clients_registry").select("*").execute().data
 
 @app.get("/api/logs/{hw_id}")
 async def get_logs(hw_id: str):
