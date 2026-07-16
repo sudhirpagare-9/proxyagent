@@ -6,8 +6,7 @@
 <body class="bg-slate-50 h-screen flex">
     <div class="w-80 bg-white border-r flex flex-col h-full">
         <div class="p-4 border-b font-bold text-slate-700 text-lg">Client Registry</div>
-        <div id="client-list" class="flex-1 overflow-y-auto p-2 space-y-2">
-            </div>
+        <div id="client-list" class="flex-1 overflow-y-auto p-2 space-y-2"></div>
     </div>
 
     <div class="flex-1 flex flex-col p-6 overflow-hidden">
@@ -19,21 +18,18 @@
                 <div><p class="text-gray-400">Status</p><span id="d-status" class="px-2 py-1 rounded text-xs font-bold"></span></div>
                 <div id="btn-container" class="flex gap-2"></div>
             </div>
-        </div>
-
-        <div class="flex-1 bg-white rounded-lg border shadow-sm overflow-hidden flex flex-col">
-            <table class="w-full text-sm text-left">
-                <thead class="bg-slate-50 border-b text-slate-600 uppercase text-xs">
-                    <tr>
-                        <th class="p-4">Model</th><th class="p-4">Input</th>
-                        <th class="p-4">Output</th><th class="p-4">Balance</th><th class="p-4">Subscription</th><th class="p-4">Time</th>
-                    </tr>
-                </thead>
-                <tbody id="log-body" class="divide-y text-slate-700"></tbody>
-            </table>
+            <div class="overflow-hidden border rounded-lg">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 border-b">
+                        <tr><th class="p-4">Model</th><th class="p-4">Input</th><th class="p-4">Output</th><th class="p-4">Time</th></tr>
+                    </thead>
+                    <tbody id="log-body"></tbody>
+                </table>
+            </div>
         </div>
     </div>
-<script>
+
+    <script>
         async function loadClients() {
             const res = await fetch('/api/clients');
             const data = await res.json();
@@ -61,34 +57,31 @@
 
             try {
                 const response = await fetch(`/api/logs/${hwid}`);
-                if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
                 const logs = await response.json();
                 
                 if (logs.length === 0) {
-                    document.getElementById('log-body').innerHTML = '<tr><td colspan="6" class="p-4 text-center text-gray-400">No logs found</td></tr>';
+                    document.getElementById('log-body').innerHTML = '<tr><td colspan="4" class="p-4 text-center text-gray-400">No logs found</td></tr>';
                 } else {
                     document.getElementById('log-body').innerHTML = logs.map(l => `
                         <tr>
                             <td class="p-4">${l.model_name || 'N/A'}</td>
                             <td class="p-4">${l.input_tokens || 0}</td>
                             <td class="p-4">${l.output_tokens || 0}</td>
-                            <td class="p-4">N/A</td>
-                            <td class="p-4">N/A</td>
                             <td class="p-4">${new Date(l.created_at).toLocaleTimeString()}</td>
                         </tr>
                     `).join('');
                 }
             } catch (e) {
                 console.error("Fetch Error:", e);
-                document.getElementById('log-body').innerHTML = `<tr><td colspan="6" class="p-4 text-red-500">Error: ${e.message}</td></tr>`;
             }
-        } // <--- Added missing brace here
+        } // This closing brace fixes the SyntaxError
 
         async function updateStatus(hwid, status) {
             await fetch(`/api/status/${hwid}/${status}`, {method: 'POST'});
             loadClients();
+        }
 
+        loadClients();
     </script>
 </body>
 </html>
-
