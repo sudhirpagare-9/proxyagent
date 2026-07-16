@@ -67,8 +67,8 @@ def log_metrics(self, request_body, response_body):
                 print("Log successful")
                 
         except Exception as e:
-            # THIS WILL NOW SHOW THE ERROR IN YOUR CONSOLE
-            print(f"FAILED TO SEND LOG: {str(e)}")
+            # This is essential! It will now print the error in your terminal.
+            print(f"FAILED TO SEND LOG: {e}")
 
 if __name__ == "__main__":
     print(f"Proxy Agent active on port {LOCAL_PORT}")
