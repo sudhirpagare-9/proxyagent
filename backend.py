@@ -38,11 +38,18 @@ async def log_usage(request: Request):
     if not private_key: raise HTTPException(status_code=500, detail="Key error")
     try:
         raw_body = await request.body()
-        data = json.loads(private_key.decrypt(raw_body, padding.OAEP(
-            mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None)))
+        decrypted = private_key.decrypt(raw_body, padding.OAEP(
+            mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
+        data = json.loads(decrypted)
+        
+        # DEBUG: Print to console
+        print(f"DEBUG: Data decrypted successfully: {data}")
+        
         supabase.table("ai_usage_logs").insert(data).execute()
         return {"status": "ok"}
     except Exception as e:
+        # DEBUG: Print exact error
+        print(f"CRITICAL ERROR: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/clients")
