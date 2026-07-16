@@ -53,3 +53,7 @@ async def log_usage(request: Request):
 async def get_logs(hw_id: str):
     return supabase.table("ai_usage_logs").select("*").eq("hw_id", hw_id).order("created_at", desc=True).execute().data
     
+# Replace the old approve endpoint with this flexible status updater
+@app.post("/api/update-status/{hw_id}/{status}")
+async def update_status(hw_id: str, status: str):
+    return supabase.table("clients_registry").update({"status": status}).eq("hw_id", hw_id).execute() 

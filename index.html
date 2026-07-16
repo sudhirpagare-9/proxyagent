@@ -1,26 +1,31 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>AI Proxy Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-100 h-screen flex">
-
-    <div class="w-1/4 bg-white border-r h-full overflow-y-auto p-4">
-        <h2 class="text-xl font-bold mb-4">Clients</h2>
-        <div id="client-list" class="space-y-2"></div>
+<body class="bg-slate-50 h-screen flex">
+    <div class="w-72 bg-white border-r flex flex-col h-full">
+        <div class="p-4 border-b font-bold text-slate-700">Client Registry</div>
+        <div id="client-list" class="flex-1 overflow-y-auto p-2 space-y-2"></div>
     </div>
 
-    <div class="flex-1 p-6 overflow-hidden flex flex-col">
-        <h2 class="text-2xl font-bold mb-4" id="log-title">Select a Client</h2>
-        
-        <div class="bg-white rounded-lg shadow border flex-1 overflow-hidden flex flex-col">
-            <div class="overflow-y-auto max-h-[70vh]">
-                <table class="w-full text-left border-collapse">
-                    <thead class="bg-gray-50 sticky top-0 border-b">
+    <div class="flex-1 flex flex-col p-6 overflow-hidden">
+        <div class="bg-white p-5 rounded-lg border shadow-sm mb-6">
+            <h2 id="title" class="text-xl font-bold mb-4">Select a Client</h2>
+            <div class="grid grid-cols-4 gap-4 text-sm">
+                <div><p class="text-gray-400">HW ID</p><p id="d-hwid">-</p></div>
+                <div><p class="text-gray-400">IP</p><p id="d-ip">-</p></div>
+                <div><p class="text-gray-400">Status</p><span id="d-status" class="px-2 py-1 rounded text-xs font-bold">-</span></div>
+                <div id="btn-container" class="flex gap-2"></div>
+            </div>
+        </div>
+
+        <div class="flex-1 bg-white rounded-lg border shadow-sm overflow-hidden flex flex-col">
+            <div class="overflow-y-auto flex-1">
+                <table class="w-full text-left">
+                    <thead class="bg-slate-50 sticky top-0 border-b">
                         <tr>
-                            <th class="p-3">Model</th><th>Ver</th><th>Level</th><th>In</th><th>Out</th><th>Balance</th><th>Time</th>
+                            <th class="p-3">Model</th><th>Ver</th><th>Level</th><th>In</th><th>Out</th><th>Bal</th><th>Time</th>
                         </tr>
                     </thead>
                     <tbody id="log-body" class="text-sm"></tbody>
@@ -30,51 +35,51 @@
     </div>
 
     <script>
-        let selectedHwId = null;
-
-        // Fetch Clients
         async function loadClients() {
-            const res = await fetch('/api/get-clients');
-            const data = await res.json();
-            const list = document.getElementById('client-list');
-            list.innerHTML = data.map(c => `
-                <div class="p-3 border rounded cursor-pointer hover:bg-blue-50 ${c.status === 'approved' ? 'border-l-4 border-l-green-500' : 'border-l-4 border-l-yellow-500'}" 
-                     onclick="selectClient('${c.hw_id}')">
-                    <div class="font-bold">${c.hostname}</div>
-                    <div class="text-xs text-gray-500">${c.hw_id}</div>
-                    ${c.status !== 'approved' ? `<button onclick="event.stopPropagation(); approve('${c.hw_id}')" class="mt-2 text-xs bg-green-500 text-white px-2 py-1 rounded">Approve</button>` : ''}
-                </div>
-            `).join('');
+            try {
+                const data = await (await fetch('/api/get-clients')).json();
+                document.getElementById('client-list').innerHTML = data.map(c => `
+                    <div class="p-3 border rounded cursor-pointer hover:bg-slate-50 ${c.status === 'approved' ? 'border-green-500' : ''}" 
+                         onclick="selectClient('${c.hw_id}', '${c.hostname}', '${c.ip_address}', '${c.status}')">
+                        <div class="font-bold">${c.hostname}</div>
+                        <div class="text-xs text-slate-400">${c.hw_id}</div>
+                    </div>`).join('');
+            } catch (e) { console.error("Failed to load clients", e); }
         }
 
-        // Handle Approval
-        async function approve(hw_id) {
-            await fetch(`/api/approve-client/${hw_id}`, { method: 'POST' });
+        async function selectClient(hwid, host, ip, status) {
+            document.getElementById('title').innerText = host;
+            document.getElementById('d-hwid').innerText = hwid;
+            document.getElementById('d-ip').innerText = ip;
+            
+            const statusEl = document.getElementById('d-status');
+            statusEl.innerText = status.toUpperCase();
+            statusEl.className = status === 'approved' ? 'px-2 py-1 rounded text-xs font-bold bg-green-100 text-green-700' : 'px-2 py-1 rounded text-xs font-bold bg-yellow-100 text-yellow-700';
+
+            const btnContainer = document.getElementById('btn-container');
+            btnContainer.innerHTML = status === 'approved' ? 
+                `<button class="bg-red-600 text-white px-3 py-1 rounded" onclick="updateStatus('${hwid}', 'rejected')">Reject</button>` :
+                `<button class="bg-green-600 text-white px-3 py-1 rounded" onclick="updateStatus('${hwid}', 'approved')">Approve</button>`;
+            
+            try {
+                const logs = await (await fetch(`/api/get-logs/${hwid}`)).json();
+                document.getElementById('log-body').innerHTML = logs.map(l => `
+                    <tr class="border-b">
+                        <td class="p-3">${l.model_name}</td><td>-</td><td>-</td>
+                        <td>${l.input_tokens}</td><td>${l.output_tokens}</td><td>${l.balance || 0}</td>
+                        <td>${new Date(l.created_at).toLocaleTimeString()}</td>
+                    </tr>`).join('');
+            } catch (e) { console.error("Failed to load logs", e); }
+        }
+
+        async function updateStatus(hwid, newStatus) {
+            await fetch(`/api/update-status/${hwid}/${newStatus}`, {method:'POST'});
             loadClients();
+            // Refresh detail view
+            selectClient(hwid, document.getElementById('title').innerText, document.getElementById('d-ip').innerText, newStatus);
         }
-
-        // Handle Selection
-        async function selectClient(hw_id) {
-            selectedHwId = hw_id;
-            document.getElementById('log-title').innerText = `Traffic Logs: ${hw_id}`;
-            const res = await fetch(`/api/get-logs/${hw_id}`);
-            const logs = await res.json();
-            const body = document.getElementById('log-body');
-            body.innerHTML = logs.map(l => `
-                <tr class="border-b hover:bg-gray-50">
-                    <td class="p-3">${l.model_name}</td>
-                    <td>${l.version_name || '-'}</td>
-                    <td>${l.thinking_level || '-'}</td>
-                    <td>${l.input_tokens}</td>
-                    <td>${l.output_tokens}</td>
-                    <td>${l.balance || 0}</td>
-                    <td>${new Date(l.created_at).toLocaleTimeString()}</td>
-                </tr>
-            `).join('');
-        }
-
+        
         loadClients();
-        setInterval(loadClients, 5000);
     </script>
 </body>
 </html>
