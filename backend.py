@@ -40,12 +40,13 @@ async def log_usage(request: Request):
         data = json.loads(decrypted_bytes)
         
         # Insert into Supabase
-        # Ensure the keys in 'data' match your table column names exactly
+        # Ensure your table columns match these keys
         supabase.table("ai_usage_logs").insert(data).execute()
         
         return {"status": "success"}
     except Exception as e:
-        print(f"CRITICAL ERROR in log-ai-usage: {str(e)}") 
+        # This will now print the error to your Render logs
+        print(f"CRITICAL ERROR: {str(e)}") 
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/get-logs/{hw_id}")
