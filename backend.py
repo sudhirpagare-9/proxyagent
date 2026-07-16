@@ -28,7 +28,7 @@ async def log_usage(request: Request):
     try:
         raw_body = await request.body()
         
-        # 1. Decrypt the payload
+        # Decrypt the payload
         decrypted_bytes = private_key.decrypt(
             raw_body,
             padding.OAEP(
@@ -39,13 +39,13 @@ async def log_usage(request: Request):
         )
         data = json.loads(decrypted_bytes)
         
-        # 2. Insert into Supabase
-        # Ensure the keys in 'data' match your table column names
+        # Insert into Supabase
+        # Ensure the keys in 'data' match your table column names exactly
         supabase.table("ai_usage_logs").insert(data).execute()
         
         return {"status": "success"}
     except Exception as e:
-        print(f"CRITICAL ERROR: {str(e)}") 
+        print(f"CRITICAL ERROR in log-ai-usage: {str(e)}") 
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/get-logs/{hw_id}")

@@ -67,7 +67,7 @@ def log_metrics(self, request_body, response_body):
                 print("Log successful")
                 
         except Exception as e:
-            # This is essential! It will now print the error in your terminal.
+            # This prints the actual error to your terminal instead of swallowing it
             print(f"FAILED TO SEND LOG: {e}")
 
 if __name__ == "__main__":
