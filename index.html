@@ -1,11 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
-<head><script src="https://cdn.tailwindcss.com"></script></head>
+<head>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
 <body class="bg-slate-50 h-screen flex">
     <div class="w-80 bg-white border-r flex flex-col h-full">
         <div class="p-4 border-b font-bold text-slate-700 text-lg">Client Registry</div>
         <div id="client-list" class="flex-1 overflow-y-auto p-2 space-y-2"></div>
     </div>
+
     <div class="flex-1 flex flex-col p-6 overflow-hidden">
         <div id="details-card" class="bg-white p-6 rounded-lg border shadow-sm mb-6 hidden">
             <h2 id="d-hostname" class="text-2xl font-bold mb-4">Select a Client</h2>
@@ -25,6 +28,7 @@
             </div>
         </div>
     </div>
+
     <script>
         async function loadClients() {
             try {
@@ -36,22 +40,32 @@
                         <div class="font-bold text-sm">${c.hostname}</div>
                         <div class="text-xs text-slate-400">${c.hw_id.substring(0,8)}...</div>
                     </div>`).join('');
-            } catch (e) { console.error("Error loading clients:", e); }
+            } catch (err) { console.error("Error loading clients:", err); }
         }
+
         async function selectClient(hwid, host, ip, status) {
             document.getElementById('details-card').classList.remove('hidden');
             document.getElementById('d-hostname').innerText = host;
             document.getElementById('d-hwid').innerText = hwid;
             document.getElementById('d-ip').innerText = ip;
+            
             const badge = document.getElementById('d-status');
             badge.innerText = status.toUpperCase();
-            badge.className = status === 'approved' ? 'bg-green-100 text-green-700 px-2 py-1 rounded text-xs' : 'bg-red-100 text-red-700 px-2 py-1 rounded text-xs';
-            document.getElementById('btn-container').innerHTML = `<button class="bg-blue-600 text-white px-3 py-1 rounded" onclick="updateStatus('${hwid}', 'approved')">Approve</button>`;
+            badge.className = status === 'approved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
             
-            const logsRes = await fetch(`/api/logs/${hwid}`);
-            const logs = await logsRes.json();
-            document.getElementById('log-body').innerHTML = logs.length === 0 ? '<tr><td colspan="4" class="p-4 text-center text-gray-400">No logs found</td></tr>' : logs.map(l => `<tr><td class="p-4">${l.model_name || 'N/A'}</td><td class="p-4">${l.input_tokens || 0}</td><td class="p-4">${l.output_tokens || 0}</td><td class="p-4">${new Date(l.created_at).toLocaleTimeString()}</td></tr>`).join('');
+            document.getElementById('btn-container').innerHTML = `
+                <button class="bg-blue-600 text-white px-3 py-1 rounded" onclick="updateStatus('${hwid}', 'approved')">Approve</button>
+                <button class="bg-gray-200 text-slate-600 px-3 py-1 rounded" onclick="updateStatus('${hwid}', 'denied')">Deny</button>`;
+
+            try {
+                const logsRes = await fetch(`/api/logs/${hwid}`);
+                const logs = await logsRes.json();
+                document.getElementById('log-body').innerHTML = logs.length === 0 ? '<tr><td colspan="4" class="p-4 text-center text-gray-400">No logs found</td></tr>' : logs.map(l => `
+                    <tr><td class="p-4">${l.model_name}</td><td class="p-4">${l.input_tokens}</td><td class="p-4">${l.output_tokens}</td><td class="p-4">${new Date(l.created_at).toLocaleTimeString()}</td></tr>
+                `).join('');
+            } catch (err) { console.error("Error:", err); }
         }
+
         async function updateStatus(hwid, status) {
             await fetch(`/api/status/${hwid}/${status}`, {method: 'POST'});
             loadClients();

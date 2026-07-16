@@ -8,22 +8,28 @@ from cryptography.hazmat.primitives.asymmetric import padding
 app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 
-# 1. Initialize Supabase with the SERVICE_ROLE_KEY to bypass RLS issues
+# Initialize Supabase
+# NOTE: Ensure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set in your Render Env Vars
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_ROLE_KEY"])
 
-# 2. Secure Key Loading (Render Secret File)
 def get_private_key():
+    """Load key from Render secret file or fallback to Environment Variable."""
     secret_path = "/etc/secrets/private_key.pem"
-    try:
-        with open(secret_path, "rb") as f:
-            return serialization.load_pem_private_key(f.read(), password=None)
-    except Exception as e:
-        logging.error(f"Critical: Failed to load key from {secret_path}: {e}")
-        return None
+    if os.path.exists(secret_path):
+        try:
+            with open(secret_path, "rb") as f:
+                return serialization.load_pem_private_key(f.read(), password=None)
+        except Exception as e:
+            logging.error(f"Failed to load key from {secret_path}: {e}")
+    
+    # Fallback to env var
+    key_data = os.environ.get("PRIVATE_KEY")
+    if key_data:
+        return serialization.load_pem_private_key(key_data.encode(), password=None)
+    return None
 
 private_key = get_private_key()
 
-# 3. Endpoints
 @app.get("/", response_class=HTMLResponse)
 async def serve_index():
     with open("index.html", "r") as f:
@@ -47,21 +53,20 @@ async def log_usage(request: Request):
         data = json.loads(decrypted_data)
         
         # Insert into Supabase
-        # Ensure 'ai_usage_logs' table exists in your Supabase project
-        supabase.table("ai_usage_logs").insert({
+        log_entry = {
             "hw_id": str(data.get("hw_id")),
             "model_name": str(data.get("model_name", "unknown")),
             "input_tokens": int(data.get("input_tokens", 0)),
             "output_tokens": int(data.get("output_tokens", 0))
-        }).execute()
-        
+        }
+        supabase.table("ai_usage_logs").insert(log_entry).execute()
         return {"status": "ok"}
     except Exception as e:
         logging.error(f"Decryption/Log failure: {e}")
         return {"status": "error"}
 
 @app.get("/api/clients")
-async def get_clients():
+async def get_clients(): 
     return supabase.table("clients_registry").select("*").execute().data
 
 @app.get("/api/logs/{hw_id}")
