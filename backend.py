@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO)
 
 # Decryption Logic
 def get_private_key():
-    b64_key = os.environ.get("PRIVATE_KEY_B64")
+    b64_key = os.environ.get("PRIVATE_KEY")
     return serialization.load_pem_private_key(base64.b64decode(b64_key), password=None)
 
 private_key = get_private_key()
