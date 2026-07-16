@@ -82,6 +82,7 @@
         console.error("Fetch Error:", e);
         document.getElementById('log-body').innerHTML = `<tr><td colspan="4" class="p-4 text-red-500">Error loading logs: ${e.message}</td></tr>`;
     }
+}
         async function updateStatus(hwid, status) {
             await fetch(`/api/status/${hwid}/${status}`, {method: 'POST'});
             loadClients();
