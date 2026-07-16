@@ -3,38 +3,39 @@
 <head>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-100 p-6">
-    <div class="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div class="col-span-1 bg-white rounded-xl shadow p-4">
-            <h2 class="font-bold mb-4">Clients</h2>
-            <div id="client-list" class="space-y-2"></div>
-        </div>
-        <div class="col-span-3">
-            <div class="bg-white rounded-xl shadow overflow-hidden">
-                <table class="w-full">
-                    <thead class="bg-gray-50"><tr><th class="p-4">Model</th><th class="p-4">Input</th><th class="p-4">Output</th></tr></thead>
-                    <tbody id="log-body" class="divide-y"></tbody>
-                </table>
-            </div>
-        </div>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-6xl mx-auto">
+        <h1 class="text-2xl font-bold mb-6">Client Security Dashboard</h1>
+        <div id="client-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
     </div>
+
     <script>
-        async function loadClients() {
+        async function fetchClients() {
             const res = await fetch('/api/clients');
             const data = await res.json();
-            document.getElementById('client-list').innerHTML = data.map(c => `
-                <div class="p-2 border rounded cursor-pointer hover:bg-gray-50" onclick="loadLogs('${c.hw_id}')">
-                    ${c.hostname}
-                </div>`).join('');
-        }
-        async function loadLogs(hwid) {
-            const res = await fetch(`/api/logs/${hwid}`);
-            const logs = await res.json();
-            document.getElementById('log-body').innerHTML = logs.map(l => `
-                <tr><td class="p-4">${l.model_name}</td><td class="p-4">${l.input_tokens}</td><td class="p-4">${l.output_tokens}</td></tr>
+            document.getElementById('client-grid').innerHTML = data.map(c => `
+                <div class="bg-white p-6 rounded-lg shadow border">
+                    <div class="flex justify-between">
+                        <h3 class="font-bold">${c.hostname}</h3>
+                        <span class="px-2 py-1 rounded text-xs ${c.status === 'approved' ? 'bg-green-100' : 'bg-red-100'}">${c.status}</span>
+                    </div>
+                    <div class="text-sm text-gray-500 mt-2 space-y-1">
+                        <p>ID: ${c.hw_id.substring(0,8)}...</p>
+                        <p>MAC: ${c.mac_address}</p>
+                        <p>IP: ${c.ip_address}</p>
+                    </div>
+                    <div class="mt-4 flex gap-2">
+                        <button onclick="update('${c.hw_id}', 'approved')" class="bg-blue-600 text-white px-3 py-1 rounded text-sm">Approve</button>
+                        <button onclick="update('${c.hw_id}', 'denied')" class="bg-gray-200 text-gray-700 px-3 py-1 rounded text-sm">Deny</button>
+                    </div>
+                </div>
             `).join('');
         }
-        loadClients();
+        async function update(id, status) {
+            await fetch(`/api/update-status/${id}/${status}`, {method: 'POST'});
+            location.reload();
+        }
+        fetchClients();
     </script>
 </body>
 </html>

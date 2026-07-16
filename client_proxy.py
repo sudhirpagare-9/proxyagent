@@ -1,10 +1,8 @@
-import http.server, socketserver, urllib.request, json, threading, uuid, platform
+import http.server, socketserver, urllib.request, json, uuid, platform, hashlib, requests
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import serialization, hashes
 
-# --- CONFIGURATION ---
 SERVER_URL = "https://proxyagent-dashboard.onrender.com"
-# PASTE YOUR FULL KEY BELOW. ENSURE NO "..." AND NO EXTRA SPACES
 PUBLIC_KEY_PEM = b"""-----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxTGa+YXCW31VpSX69rJ0
 6lD1tSSckWVHJC7xMQWYT7eOe6fB8besMmLMvln1XOlJT+IdPZYis0xb16gVq5BJ
@@ -14,36 +12,31 @@ bj/ueTd7/NU2WdbGW4fvXHvz1EsyX7SxAIizn1tYPkrHRkhJXDmy6rOJUKDgBPbK
 XJ3zgMAioGI9df09HK+ZcZFUHMvjwezCvfA0zvucdvUSVUzXdZqqmarnd+bVt1pn
 vwIDAQAB
 -----END PUBLIC KEY-----"""
-
 public_key = serialization.load_pem_public_key(PUBLIC_KEY_PEM)
 
+def secure_hash(data: str):
+    """Compliance: Pseudonymization of sensitive fields."""
+    return hashlib.sha256(data.encode()).hexdigest()[:16]
+
 class ProxyHandler(http.server.BaseHTTPRequestHandler):
-    def log_metrics(self, request_body, response_body):
+    def log_metrics(self, request_body):
         try:
-            req_data = json.loads(request_body)
-            resp_data = json.loads(response_body)
+            # Gather & Mask Data
+            mac = secure_hash(str(uuid.getnode()))
+            ip = secure_hash(requests.get('https://api.ipify.org').text) # Approximate
+            
             payload = {
-                "hw_id": str(uuid.getnode()),
+                "hw_id": str(uuid.uuid4()), # Generated UUID, not real hardware ID
                 "hostname": platform.node(),
-                "model_name": req_data.get("model", "unknown"),
-                "input_tokens": resp_data.get("usage", {}).get("prompt_tokens", 0),
-                "output_tokens": resp_data.get("usage", {}).get("completion_tokens", 0)
+                "mac_address": mac,
+                "ip_address": ip,
+                "status": "pending",
+                "country": "US" # In production, use a GeoIP library
             }
-            encrypted = public_key.encrypt(
-                json.dumps(payload).encode(),
-                padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
-            )
-            req = urllib.request.Request(f"{SERVER_URL}/log-ai-usage", data=encrypted, method='POST', headers={'Content-Type': 'application/octet-stream'})
-            urllib.request.urlopen(req)
-        except Exception as e:
-            print(f"Metrics Log Error: {e}")
-
-    def do_POST(self):
-        # Implementation to forward traffic to OpenAI and log metrics
-        # (Add your standard forward logic here)
-        pass
-
-if __name__ == "__main__":
-    print("Starting Proxy on port 8080...")
-    with socketserver.ThreadingTCPServer(("", 8080), ProxyHandler) as httpd:
-        httpd.serve_forever()
+            
+            encrypted = public_key.encrypt(json.dumps(payload).encode(), 
+                padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
+            
+            urllib.request.urlopen(urllib.request.Request(f"{SERVER_URL}/log-ai-usage", 
+                                  data=encrypted, method='POST'))
+        except Exception as e: print(f"Compliance Log Error: {e}")
