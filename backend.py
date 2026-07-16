@@ -88,3 +88,64 @@ async def get_logs(hw_id: str):
 @app.post("/api/status/{hw_id}/{status}")
 async def update_status(hw_id: str, status: str):
     return supabase.table("clients_registry").update({"status": status}).eq("hw_id", hw_id).execute()
+    
+import os, json, logging
+from fastapi import FastAPI, Request
+from supabase import create_client
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+
+app = FastAPI()
+
+# Initialize Supabase
+supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
+logging.basicConfig(level=logging.INFO)
+
+# Secure Key Loading
+def get_private_key():
+    # Priority 1: Check if Env Var is set (for local dev)
+    key_data = os.environ.get("PRIVATE_KEY")
+    if key_data:
+        return serialization.load_pem_private_key(key_data.encode(), password=None)
+    
+    # Priority 2: Check Render's mounted secret file path
+    secret_path = "/etc/secrets/private_key.pem"
+    if os.path.exists(secret_path):
+        try:
+            with open(secret_path, "rb") as f:
+                return serialization.load_pem_private_key(f.read(), password=None)
+        except Exception as e:
+            logging.error(f"Failed to load key from {secret_path}: {e}")
+            return None
+    return None
+
+private_key = get_private_key()
+
+@app.post("/log-ai-usage")
+async def log_usage(request: Request):
+    if not private_key:
+        return {"status": "error", "message": "Key not loaded"}
+
+    encrypted_body = await request.body()
+    try:
+        # Decrypt
+        decrypted_data = private_key.decrypt(
+            encrypted_body,
+            padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
+        )
+        data = json.loads(decrypted_data)
+        
+        # GDPR / Data Minimization: Only store specific fields
+        # This prevents accidental PII storage
+        log_entry = {
+            "hw_id": str(data.get("hw_id")),
+            "model_name": str(data.get("model_name", "unknown")),
+            "input_tokens": int(data.get("input_tokens", 0)),
+            "output_tokens": int(data.get("output_tokens", 0))
+        }
+        
+        supabase.table("ai_usage_logs").insert(log_entry).execute()
+        return {"status": "ok"}
+    except Exception as e:
+        logging.error(f"Decryption/Log failure: {e}")
+        return {"status": "error"}
