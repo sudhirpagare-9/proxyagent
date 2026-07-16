@@ -8,33 +8,35 @@ from dotenv import load_dotenv
 
 load_dotenv()
 app = FastAPI()
-supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Supabase Setup
+supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
+
+# Key Management
 def get_private_key():
-    # Priority: Env Var (Render) -> Local File (Local Dev)
     key_data = os.environ.get("PRIVATE_KEY")
     if key_data:
         return serialization.load_pem_private_key(key_data.encode(), password=None)
     try:
-        with open(os.path.join(BASE_DIR, "private_key.pem"), "rb") as f:
+        with open("private_key.pem", "rb") as f:
             return serialization.load_pem_private_key(f.read(), password=None)
     except: return None
 
 private_key = get_private_key()
 
+# -- Endpoints --
 @app.get("/", response_class=HTMLResponse)
 async def serve_index():
-    with open(os.path.join(BASE_DIR, "index.html"), "r") as f: 
-        return HTMLResponse(f.read())
+    with open("index.html", "r") as f: return HTMLResponse(f.read())
 
 @app.post("/log-ai-usage")
 async def log_usage(request: Request):
-    if not private_key: raise HTTPException(status_code=500, detail="Key error")
+    if not private_key: raise HTTPException(status_code=500, detail="Key missing")
+    raw_body = await request.body()
     try:
-        raw_body = await request.body()
-        data = json.loads(private_key.decrypt(raw_body, padding.OAEP(
-            mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None)))
+        decrypted = private_key.decrypt(raw_body, padding.OAEP(
+            mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
+        data = json.loads(decrypted)
         supabase.table("ai_usage_logs").insert(data).execute()
         return {"status": "ok"}
     except Exception as e:
