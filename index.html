@@ -6,36 +6,33 @@
 <body class="bg-gray-900 text-gray-200 min-h-screen p-6">
     <h1 class="text-3xl font-bold mb-6 border-b border-gray-700 pb-4">Security Operations Center</h1>
     
-    <!-- Section 1: Client Registry -->
-    <section class="mb-8">
+    <!-- Section 1: Client Machine Registry -->
+    <section class="mb-10">
         <h2 class="text-xl font-semibold mb-4 text-blue-400">1. Client Machine Registry</h2>
         <div class="bg-gray-800 rounded-lg p-4 overflow-x-auto border border-gray-700">
             <table class="w-full text-sm text-left">
                 <thead class="text-gray-400 border-b border-gray-700">
-                    <tr><th class="p-2">HW ID</th><th class="p-2">Hostname</th><th class="p-2">IP</th><th class="p-2">Status</th></tr>
+                    <tr><th class="p-2">hw_id</th><th class="p-2">Hostname</th><th class="p-2">Status</th></tr>
                 </thead>
                 <tbody id="client-body"></tbody>
             </table>
         </div>
     </section>
 
-    <!-- Section 2: Intercepted Traffic -->
-    <section class="mb-8">
+    <!-- Section 2: Traffic Logs (Aligned to ai_usage_logs schema) -->
+    <section>
         <h2 class="text-xl font-semibold mb-4 text-green-400">2. Proxy Intercepted Traffic</h2>
         <div class="bg-gray-800 rounded-lg p-4 overflow-x-auto border border-gray-700">
             <table class="w-full text-sm text-left">
                 <thead class="text-gray-400 border-b border-gray-700">
-                    <tr><th class="p-2">Model</th><th class="p-2">Tokens</th><th class="p-2">Balance</th></tr>
+                    <tr>
+                        <th class="p-2">hw_id<</th><th class="p-2">Model</th>
+                        <th class="p-2">Version</th><th class="p-2">Tokens (In/Out)</th>
+                    </tr>
                 </thead>
                 <tbody id="log-body"></tbody>
             </table>
         </div>
-    </section>
-
-    <!-- Section 3: Workflow/Debug Status -->
-    <section>
-        <h2 class="text-xl font-semibold mb-4 text-purple-400">3. Workflow Debug Status</h2>
-        <div id="debug-box" class="bg-gray-950 border border-purple-900 rounded p-4 font-mono text-xs text-purple-300"></div>
     </section>
 
     <script>
@@ -43,27 +40,22 @@
             const res = await fetch('/api/get-data');
             const data = await res.json();
             
-            // Section 1 Rendering
+            // Section 1: Client Registry
             document.getElementById('client-body').innerHTML = (data.clients || []).map(c => `
                 <tr class="border-b border-gray-700">
                     <td class="p-2">${c.hw_id || '-'}</td>
                     <td class="p-2">${c.hostname || '-'}</td>
-                    <td class="p-2">${c.ip_address || '-'}</td>
                     <td class="p-2 font-bold ${c.status === 'APPROVED' ? 'text-green-500' : 'text-red-500'}">${c.status || 'PENDING'}</td>
                 </tr>`).join('');
 
-            // Section 2 Rendering
-            document.getElementById('log-body').innerHTML = (data.clients || []).map(l => `
+            // Section 2: Traffic Logs (Using your ai_usage_logs columns)
+            document.getElementById('log-body').innerHTML = (data.logs || []).map(l => `
                 <tr class="border-b border-gray-700">
+                    <td class="p-2">${l.hw_id || '-'}</td>
                     <td class="p-2">${l.model_name || '-'}</td>
-                    <td class="p-2">${l.input_tokens || 0}</td>
-                    <td class="p-2">${l.balance_tokens || 0}</td>
+                    <td class="p-2">${l.version || '-'}</td>
+                    <td class="p-2">${l.input_tokens || 0} / ${l.output_tokens || 0}</td>
                 </tr>`).join('');
-
-            // Section 3 Rendering (Debug)
-            document.getElementById('debug-box').innerHTML = (data.debug || []).map(log => 
-                `<div>[${log.time}] ${log.msg}</div>`
-            ).join('');
         }
         setInterval(fetchData, 3000);
         fetchData();
