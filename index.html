@@ -6,66 +6,67 @@
 <body class="bg-gray-900 text-gray-200 min-h-screen p-6">
     <h1 class="text-3xl font-bold mb-6 border-b border-gray-700 pb-4">Security Operations Center</h1>
     
-    <section class="mb-10">
+    <!-- Section 1: Client Registry -->
+    <section class="mb-8">
         <h2 class="text-xl font-semibold mb-4 text-blue-400">1. Client Machine Registry</h2>
         <div class="bg-gray-800 rounded-lg p-4 overflow-x-auto border border-gray-700">
             <table class="w-full text-sm text-left">
                 <thead class="text-gray-400 border-b border-gray-700">
-                    <tr>
-                        <th class="p-2">HW ID</th><th class="p-2">Hostname</th>
-                        <th class="p-2">IP</th><th class="p-2">Status</th><th class="p-2">Action</th>
-                    </tr>
+                    <tr><th class="p-2">HW ID</th><th class="p-2">Hostname</th><th class="p-2">IP</th><th class="p-2">Status</th></tr>
                 </thead>
                 <tbody id="client-body"></tbody>
             </table>
         </div>
     </section>
 
+    <!-- Section 2: Intercepted Traffic -->
+    <section class="mb-8">
+        <h2 class="text-xl font-semibold mb-4 text-green-400">2. Proxy Intercepted Traffic</h2>
+        <div class="bg-gray-800 rounded-lg p-4 overflow-x-auto border border-gray-700">
+            <table class="w-full text-sm text-left">
+                <thead class="text-gray-400 border-b border-gray-700">
+                    <tr><th class="p-2">Model</th><th class="p-2">Tokens</th><th class="p-2">Balance</th></tr>
+                </thead>
+                <tbody id="log-body"></tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- Section 3: Workflow/Debug Status -->
+    <section>
+        <h2 class="text-xl font-semibold mb-4 text-purple-400">3. Workflow Debug Status</h2>
+        <div id="debug-box" class="bg-gray-950 border border-purple-900 rounded p-4 font-mono text-xs text-purple-300"></div>
+    </section>
+
     <script>
-        async function updateStatus(hw_id, status) {
-            await fetch(`/api/update-status/${hw_id}`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({status: status})
-            });
-            fetchData();
-        }
-
         async function fetchData() {
-            try {
-                const res = await fetch('/api/get-data');
-                const data = await res.json();
-                
-                const tbody = document.getElementById('client-body');
+            const res = await fetch('/api/get-data');
+            const data = await res.json();
+            
+            // Section 1 Rendering
+            document.getElementById('client-body').innerHTML = (data.clients || []).map(c => `
+                <tr class="border-b border-gray-700">
+                    <td class="p-2">${c.hw_id || '-'}</td>
+                    <td class="p-2">${c.hostname || '-'}</td>
+                    <td class="p-2">${c.ip_address || '-'}</td>
+                    <td class="p-2 font-bold ${c.status === 'APPROVED' ? 'text-green-500' : 'text-red-500'}">${c.status || 'PENDING'}</td>
+                </tr>`).join('');
 
-                if (!data.clients || data.clients.length === 0) {
-                    tbody.innerHTML = `<tr>
-                        <td colspan="5" class="p-8 text-center text-gray-500">
-                            <div class="animate-pulse">Waiting for proxy traffic...</div>
-                            <p class="text-xs mt-2">The system will automatically register clients upon first traffic intercept.</p>
-                        </td>
-                    </tr>`;
-                    return;
-                }
+            // Section 2 Rendering
+            document.getElementById('log-body').innerHTML = (data.clients || []).map(l => `
+                <tr class="border-b border-gray-700">
+                    <td class="p-2">${l.model_name || '-'}</td>
+                    <td class="p-2">${l.input_tokens || 0}</td>
+                    <td class="p-2">${l.balance_tokens || 0}</td>
+                </tr>`).join('');
 
-                tbody.innerHTML = data.clients.map(c => `
-                    <tr class="border-b border-gray-700">
-                        <td class="p-2">${c.hw_id || 'N/A'}</td>
-                        <td class="p-2">${c.hostname || 'N/A'}</td>
-                        <td class="p-2">${c.ip_address || 'N/A'}</td>
-                        <td class="p-2 font-bold ${c.status === 'APPROVED' ? 'text-green-500' : 'text-red-500'}">${c.status || 'PENDING'}</td>
-                        <td class="p-2 space-x-2">
-                            <button onclick="updateStatus('${c.hw_id}', 'APPROVED')" class="bg-green-700 px-3 py-1 rounded text-xs">Approve</button>
-                            <button onclick="updateStatus('${c.hw_id}', 'DENIED')" class="bg-red-700 px-3 py-1 rounded text-xs">Deny</button>
-                        </td>
-                    </tr>`).join('');
-            } catch (err) {
-                console.error("Error:", err);
-            }
+            // Section 3 Rendering (Debug)
+            document.getElementById('debug-box').innerHTML = (data.debug || []).map(log => 
+                `<div>[${log.time}] ${log.msg}</div>`
+            ).join('');
         }
-        // Refresh every 5 seconds to show new registrations automatically
+        setInterval(fetchData, 3000);
         fetchData();
-        setInterval(fetchData, 5000);
     </script>
 </body>
 </html>
