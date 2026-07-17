@@ -1,60 +1,33 @@
 <!DOCTYPE html>
 <html class="dark">
-<head>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-zinc-950 text-zinc-300 min-h-screen p-8">
-    <h1 class="text-3xl font-bold mb-8 border-b border-zinc-800 pb-4 text-white">SOC Dashboard</h1>
-    
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <!-- Section: Registry -->
-        <section class="bg-zinc-900 border border-zinc-800 rounded-lg p-6">
-            <h2 class="text-white font-semibold mb-4 border-b border-zinc-800 pb-2">Client Registry</h2>
+<head><script src="https://cdn.tailwindcss.com"></script></head>
+<body class="bg-zinc-950 text-zinc-300 p-8">
+    <h1 class="text-2xl font-bold mb-6 text-white">Security Operations Center</h1>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <section class="bg-zinc-900 border border-zinc-800 rounded p-4">
+            <h2 class="text-white font-bold mb-4">Client Registry</h2>
             <table class="w-full text-xs text-left">
-                <thead><tr class="text-zinc-500 uppercase"><th>HW ID</th><th>Status</th><th>Action</th></tr></thead>
+                <thead class="text-zinc-500 uppercase"><tr><th>HW ID</th><th>MAC</th><th>Status</th><th>Action</th></tr></thead>
                 <tbody id="client-body"></tbody>
             </table>
         </section>
-
-        <!-- Section: Traffic -->
-        <section class="bg-zinc-900 border border-zinc-800 rounded-lg p-6">
-            <h2 class="text-white font-semibold mb-4 border-b border-zinc-800 pb-2">Intercepted AI Traffic</h2>
+        <section class="bg-zinc-900 border border-zinc-800 rounded p-4">
+            <h2 class="text-white font-bold mb-4">AI Usage Logs</h2>
             <table class="w-full text-xs text-left">
-                <thead><tr class="text-zinc-500 uppercase"><th>HW ID</th><th>Details</th></tr></thead>
+                <thead class="text-zinc-500 uppercase"><tr><th>HW ID</th><th>Model</th><th>Input/Output</th><th>Balance</th></tr></thead>
                 <tbody id="log-body"></tbody>
             </table>
         </section>
     </div>
-
     <script>
-        async function updateStatus(hw_id, status) {
-            await fetch(`/api/update-status/${hw_id}`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({status})
-            });
-            fetchData();
-        }
-
-        async function fetchData() {
+        async function updateStatus(id, s) { await fetch(`/api/update-status/${id}`, {method: 'POST', body: JSON.stringify({status: s})}); location.reload(); }
+        async function load() {
             const res = await fetch('/api/dashboard-data');
             const data = await res.json();
-            
-            document.getElementById('client-body').innerHTML = (data.clients || []).map(c => `
-                <tr class="border-b border-zinc-800">
-                    <td class="p-2">${c.hw_id}</td>
-                    <td class="p-2 font-bold ${c.status === 'APPROVED' ? 'text-emerald-500' : 'text-rose-500'}">${c.status}</td>
-                    <td class="p-2 space-x-2">
-                        <button onclick="updateStatus('${c.hw_id}', 'APPROVED')" class="bg-emerald-900 text-emerald-100 px-2 rounded">Approve</button>
-                        <button onclick="updateStatus('${c.hw_id}', 'DENIED')" class="bg-rose-900 text-rose-100 px-2 rounded">Deny</button>
-                    </td>
-                </tr>`).join('');
-
-            document.getElementById('log-body').innerHTML = (data.logs || []).map(l => `
-                <tr class="border-b border-zinc-800"><td class="p-2">${l.hw_id}</td><td class="p-2">Traffic Authenticated</td></tr>`).join('');
+            document.getElementById('client-body').innerHTML = data.clients.map(c => `<tr><td class="p-2">${c.hw_id}</td><td class="p-2">${c.mac_address}</td><td class="p-2 ${c.status==='APPROVED'?'text-emerald-500':'text-rose-500'}">${c.status}</td><td class="p-2"><button onclick="updateStatus('${c.hw_id}', 'APPROVED')" class="bg-emerald-800 px-1 rounded">Approve</button></td></tr>`).join('');
+            document.getElementById('log-body').innerHTML = data.logs.map(l => `<tr><td class="p-2">${l.hw_id}</td><td class="p-2">${l.model_name}</td><td class="p-2">${l.input_tokens}/${l.output_tokens}</td><td class="p-2">$${l.balance}</td></tr>`).join('');
         }
-        setInterval(fetchData, 3000);
-        fetchData();
+        load();
     </script>
 </body>
 </html>
