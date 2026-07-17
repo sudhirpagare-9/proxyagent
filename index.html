@@ -21,20 +21,6 @@
         </div>
     </section>
 
-    <section>
-        <h2 class="text-xl font-semibold mb-4 text-green-400">2. Proxy Intercepted Traffic</h2>
-        <div class="bg-gray-800 rounded-lg p-4 overflow-x-auto border border-gray-700">
-            <table class="w-full text-sm text-left">
-                <thead class="text-gray-400 border-b border-gray-700">
-                    <tr>
-                        <th class="p-2">HW ID</th><th class="p-2">Model</th><th class="p-2">Tokens (In/Out)</th><th class="p-2">Balance</th>
-                    </tr>
-                </thead>
-                <tbody id="log-body"></tbody>
-            </table>
-        </div>
-    </section>
-
     <script>
         async function updateStatus(hw_id, status) {
             await fetch(`/api/update-status/${hw_id}`, {
@@ -42,42 +28,44 @@
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({status: status})
             });
-            location.reload(); 
+            fetchData();
         }
 
         async function fetchData() {
-            const res = await fetch('/api/get-data');
-            const data = await res.json();
-            
-            const tbody1 = document.getElementById('client-body');
-            const tbody2 = document.getElementById('log-body');
+            try {
+                const res = await fetch('/api/get-data');
+                const data = await res.json();
+                
+                const tbody = document.getElementById('client-body');
 
-            if (!data.clients || data.clients.length === 0) {
-                tbody1.innerHTML = '<tr><td colspan="5" class="p-4 text-center">No data in database.</td></tr>';
-                return;
+                if (!data.clients || data.clients.length === 0) {
+                    tbody.innerHTML = `<tr>
+                        <td colspan="5" class="p-8 text-center text-gray-500">
+                            <div class="animate-pulse">Waiting for proxy traffic...</div>
+                            <p class="text-xs mt-2">The system will automatically register clients upon first traffic intercept.</p>
+                        </td>
+                    </tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = data.clients.map(c => `
+                    <tr class="border-b border-gray-700">
+                        <td class="p-2">${c.hw_id || 'N/A'}</td>
+                        <td class="p-2">${c.hostname || 'N/A'}</td>
+                        <td class="p-2">${c.ip_address || 'N/A'}</td>
+                        <td class="p-2 font-bold ${c.status === 'APPROVED' ? 'text-green-500' : 'text-red-500'}">${c.status || 'PENDING'}</td>
+                        <td class="p-2 space-x-2">
+                            <button onclick="updateStatus('${c.hw_id}', 'APPROVED')" class="bg-green-700 px-3 py-1 rounded text-xs">Approve</button>
+                            <button onclick="updateStatus('${c.hw_id}', 'DENIED')" class="bg-red-700 px-3 py-1 rounded text-xs">Deny</button>
+                        </td>
+                    </tr>`).join('');
+            } catch (err) {
+                console.error("Error:", err);
             }
-
-            tbody1.innerHTML = data.clients.map(c => `
-                <tr class="border-b border-gray-700">
-                    <td class="p-2">${c.hw_id || '-'}</td>
-                    <td class="p-2">${c.hostname || '-'}</td>
-                    <td class="p-2">${c.ip_address || '-'}</td>
-                    <td class="p-2 font-bold ${c.status === 'APPROVED' ? 'text-green-500' : 'text-red-500'}">${c.status || 'PENDING'}</td>
-                    <td class="p-2 space-x-2">
-                        <button onclick="updateStatus('${c.hw_id}', 'APPROVED')" class="bg-green-700 px-3 py-1 rounded text-xs">Approve</button>
-                        <button onclick="updateStatus('${c.hw_id}', 'DENIED')" class="bg-red-700 px-3 py-1 rounded text-xs">Deny</button>
-                    </td>
-                </tr>`).join('');
-
-            tbody2.innerHTML = data.clients.map(l => `
-                <tr class="border-b border-gray-700">
-                    <td class="p-2">${l.hw_id || '-'}</td>
-                    <td class="p-2">${l.model_used || '-'}</td>
-                    <td class="p-2">${l.input_tokens || 0} / ${l.output_tokens || 0}</td>
-                    <td class="p-2">${l.balance_tokens || 0}</td>
-                </tr>`).join('');
         }
+        // Refresh every 5 seconds to show new registrations automatically
         fetchData();
+        setInterval(fetchData, 5000);
     </script>
 </body>
 </html>
