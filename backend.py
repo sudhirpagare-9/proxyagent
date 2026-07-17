@@ -43,7 +43,7 @@ async def update_status(hw_id: str, request: Request):
     """Updates client status to Approved/Denied."""
     body = await request.json()
     new_status = body.get("status")
-    supabase.table("client_devices").update({"status": new_status}).eq("HW_id", hw_id).execute()
+    supabase.table("client_devices").update({"status": new_status}).eq("hw_id", hw_id).execute()
     return {"status": "success"}
 
 @app.post("/log-ai-usage")
@@ -57,7 +57,7 @@ async def log_usage(request: Request):
         )
         data = json.loads(decrypted_data)
         log_entry = {
-            "HW_id": str(data.get("hw_id")),
+            "hw_id": str(data.get("hw_id")),
             "hostname": str(data.get("hostname")),
             "model_name": str(data.get("model_name")),
             "input_tokens": int(data.get("input_tokens", 0)),
