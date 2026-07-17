@@ -3,30 +3,33 @@
 <head>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-900 text-gray-100 min-h-screen p-8">
-    <h1 class="text-3xl font-bold mb-8 border-b border-gray-700 pb-4">Security Operations Center</h1>
+<body class="bg-gray-900 text-gray-200 min-h-screen p-6">
+    <h1 class="text-3xl font-bold mb-6 border-b border-gray-700 pb-4">Security Operations Center</h1>
     
-    <!-- Section 1: Client Registry -->
-    <section class="mb-12">
+    <section class="mb-10">
         <h2 class="text-xl font-semibold mb-4 text-blue-400">1. Client Machine Registry</h2>
-        <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
-            <table class="w-full text-left">
-                <thead><tr class="text-gray-400 border-b border-gray-700">
-                    <th class="p-3">hw_id</th><th class="p-3">Hostname</th><th class="p-3">IP</th><th class="p-3">Status</th><th class="p-3">Action</th>
-                </tr></thead>
+        <div class="bg-gray-800 rounded-lg p-4 overflow-x-auto border border-gray-700">
+            <table class="w-full text-sm text-left">
+                <thead class="text-gray-400 border-b border-gray-700">
+                    <tr>
+                        <th class="p-2">HW ID</th><th class="p-2">Hostname</th>
+                        <th class="p-2">IP</th><th class="p-2">Status</th><th class="p-2">Action</th>
+                    </tr>
+                </thead>
                 <tbody id="client-body"></tbody>
             </table>
         </div>
     </section>
 
-    <!-- Section 2: Traffic Logs -->
     <section>
         <h2 class="text-xl font-semibold mb-4 text-green-400">2. Proxy Intercepted Traffic</h2>
-        <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
-            <table class="w-full text-left">
-                <thead><tr class="text-gray-400 border-b border-gray-700">
-                    <th class="p-3">Time</th><th class="p-3">Hostname</th><th class="p-3">Model</th><th class="p-3">Tokens (In/Out)</th>
-                </tr></thead>
+        <div class="bg-gray-800 rounded-lg p-4 overflow-x-auto border border-gray-700">
+            <table class="w-full text-sm text-left">
+                <thead class="text-gray-400 border-b border-gray-700">
+                    <tr>
+                        <th class="p-2">HW ID</th><th class="p-2">Model</th><th class="p-2">Tokens (In/Out)</th><th class="p-2">Balance</th>
+                    </tr>
+                </thead>
                 <tbody id="log-body"></tbody>
             </table>
         </div>
@@ -39,35 +42,40 @@
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({status: status})
             });
-            fetchData(); // Refresh UI
+            location.reload(); 
         }
 
         async function fetchData() {
-            try {
-                const res = await fetch('/api/get-data');
-                if (!res.ok) throw new Error("Network error");
-                const data = await res.json();
-                
-                document.getElementById('client-body').innerHTML = (data.clients || []).map(c => `
-                    <tr class="border-b border-gray-700">
-                        <td class="p-3">${c.hw_id_id}</td>
-                        <td class="p-3">${c.hostname}</td>
-                        <td class="p-3">${c.ip_address}</td>
-                        <td class="p-3 font-bold ${c.status === 'Approved' ? 'text-green-500' : 'text-red-500'}">${c.status}</td>
-                        <td class="p-3 space-x-2">
-                            <button onclick="updateStatus('${c.hw_id}', 'Approved')" class="bg-green-600 px-3 py-1 rounded text-xs">Approve</button>
-                            <button onclick="updateStatus('${c.hw_id}', 'Denied')" class="bg-red-600 px-3 py-1 rounded text-xs">Deny</button>
-                        </td>
-                    </tr>`).join('');
-                
-                document.getElementById('log-body').innerHTML = (data.logs || []).map(l => `
-                    <tr class="border-b border-gray-700">
-                        <td class="p-3 text-xs">${new Date(l.created_at).toLocaleTimeString()}</td>
-                        <td class="p-3">${l.hostname}</td>
-                        <td class="p-3">${l.model_name}</td>
-                        <td class="p-3">${l.input_tokens} / ${l.output_tokens}</td>
-                    </tr>`).join('');
-            } catch (err) { console.error("Error fetching data:", err); }
+            const res = await fetch('/api/get-data');
+            const data = await res.json();
+            
+            const tbody1 = document.getElementById('client-body');
+            const tbody2 = document.getElementById('log-body');
+
+            if (!data.clients || data.clients.length === 0) {
+                tbody1.innerHTML = '<tr><td colspan="5" class="p-4 text-center">No data in database.</td></tr>';
+                return;
+            }
+
+            tbody1.innerHTML = data.clients.map(c => `
+                <tr class="border-b border-gray-700">
+                    <td class="p-2">${c.hw_id || '-'}</td>
+                    <td class="p-2">${c.hostname || '-'}</td>
+                    <td class="p-2">${c.ip_address || '-'}</td>
+                    <td class="p-2 font-bold ${c.status === 'APPROVED' ? 'text-green-500' : 'text-red-500'}">${c.status || 'PENDING'}</td>
+                    <td class="p-2 space-x-2">
+                        <button onclick="updateStatus('${c.hw_id}', 'APPROVED')" class="bg-green-700 px-3 py-1 rounded text-xs">Approve</button>
+                        <button onclick="updateStatus('${c.hw_id}', 'DENIED')" class="bg-red-700 px-3 py-1 rounded text-xs">Deny</button>
+                    </td>
+                </tr>`).join('');
+
+            tbody2.innerHTML = data.clients.map(l => `
+                <tr class="border-b border-gray-700">
+                    <td class="p-2">${l.hw_id || '-'}</td>
+                    <td class="p-2">${l.model_used || '-'}</td>
+                    <td class="p-2">${l.input_tokens || 0} / ${l.output_tokens || 0}</td>
+                    <td class="p-2">${l.balance_tokens || 0}</td>
+                </tr>`).join('');
         }
         fetchData();
     </script>
