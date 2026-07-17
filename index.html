@@ -3,59 +3,55 @@
 <head>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-900 text-gray-200 min-h-screen p-6">
-    <h1 class="text-3xl font-bold mb-6 border-b border-gray-700 pb-4">Security Operations Center</h1>
+<body class="bg-zinc-950 text-zinc-300 min-h-screen p-8">
+    <h1 class="text-3xl font-bold mb-8 border-b border-zinc-800 pb-4 text-white">SOC Dashboard</h1>
     
-    <!-- Section 1: Client Machine Registry -->
-    <section class="mb-10">
-        <h2 class="text-xl font-semibold mb-4 text-blue-400">1. Client Machine Registry</h2>
-        <div class="bg-gray-800 rounded-lg p-4 overflow-x-auto border border-gray-700">
-            <table class="w-full text-sm text-left">
-                <thead class="text-gray-400 border-b border-gray-700">
-                    <tr><th class="p-2">hw_id</th><th class="p-2">Hostname</th><th class="p-2">Status</th></tr>
-                </thead>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <!-- Section: Registry -->
+        <section class="bg-zinc-900 border border-zinc-800 rounded-lg p-6">
+            <h2 class="text-white font-semibold mb-4 border-b border-zinc-800 pb-2">Client Registry</h2>
+            <table class="w-full text-xs text-left">
+                <thead><tr class="text-zinc-500 uppercase"><th>HW ID</th><th>Status</th><th>Action</th></tr></thead>
                 <tbody id="client-body"></tbody>
             </table>
-        </div>
-    </section>
+        </section>
 
-    <!-- Section 2: Traffic Logs (Aligned to ai_usage_logs schema) -->
-    <section>
-        <h2 class="text-xl font-semibold mb-4 text-green-400">2. Proxy Intercepted Traffic</h2>
-        <div class="bg-gray-800 rounded-lg p-4 overflow-x-auto border border-gray-700">
-            <table class="w-full text-sm text-left">
-                <thead class="text-gray-400 border-b border-gray-700">
-                    <tr>
-                        <th class="p-2">hw_id<</th><th class="p-2">Model</th>
-                        <th class="p-2">Version</th><th class="p-2">Tokens (In/Out)</th>
-                    </tr>
-                </thead>
+        <!-- Section: Traffic -->
+        <section class="bg-zinc-900 border border-zinc-800 rounded-lg p-6">
+            <h2 class="text-white font-semibold mb-4 border-b border-zinc-800 pb-2">Intercepted AI Traffic</h2>
+            <table class="w-full text-xs text-left">
+                <thead><tr class="text-zinc-500 uppercase"><th>HW ID</th><th>Details</th></tr></thead>
                 <tbody id="log-body"></tbody>
             </table>
-        </div>
-    </section>
+        </section>
+    </div>
 
     <script>
+        async function updateStatus(hw_id, status) {
+            await fetch(`/api/update-status/${hw_id}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({status})
+            });
+            fetchData();
+        }
+
         async function fetchData() {
-            const res = await fetch('/api/get-data');
+            const res = await fetch('/api/dashboard-data');
             const data = await res.json();
             
-            // Section 1: Client Registry
             document.getElementById('client-body').innerHTML = (data.clients || []).map(c => `
-                <tr class="border-b border-gray-700">
-                    <td class="p-2">${c.hw_id || '-'}</td>
-                    <td class="p-2">${c.hostname || '-'}</td>
-                    <td class="p-2 font-bold ${c.status === 'APPROVED' ? 'text-green-500' : 'text-red-500'}">${c.status || 'PENDING'}</td>
+                <tr class="border-b border-zinc-800">
+                    <td class="p-2">${c.hw_id}</td>
+                    <td class="p-2 font-bold ${c.status === 'APPROVED' ? 'text-emerald-500' : 'text-rose-500'}">${c.status}</td>
+                    <td class="p-2 space-x-2">
+                        <button onclick="updateStatus('${c.hw_id}', 'APPROVED')" class="bg-emerald-900 text-emerald-100 px-2 rounded">Approve</button>
+                        <button onclick="updateStatus('${c.hw_id}', 'DENIED')" class="bg-rose-900 text-rose-100 px-2 rounded">Deny</button>
+                    </td>
                 </tr>`).join('');
 
-            // Section 2: Traffic Logs (Using your ai_usage_logs columns)
             document.getElementById('log-body').innerHTML = (data.logs || []).map(l => `
-                <tr class="border-b border-gray-700">
-                    <td class="p-2">${l.hw_id || '-'}</td>
-                    <td class="p-2">${l.model_name || '-'}</td>
-                    <td class="p-2">${l.version || '-'}</td>
-                    <td class="p-2">${l.input_tokens || 0} / ${l.output_tokens || 0}</td>
-                </tr>`).join('');
+                <tr class="border-b border-zinc-800"><td class="p-2">${l.hw_id}</td><td class="p-2">Traffic Authenticated</td></tr>`).join('');
         }
         setInterval(fetchData, 3000);
         fetchData();
