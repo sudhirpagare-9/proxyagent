@@ -1,76 +1,66 @@
 <!DOCTYPE html>
-<html lang="en">
+<html class="dark">
 <head>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>tailwind.config = { darkMode: 'class' };</script>
 </head>
-<body class="bg-slate-50 h-screen flex">
-    <div class="w-80 bg-white border-r flex flex-col h-full">
-        <div class="p-4 border-b font-bold text-slate-700 text-lg">Client Registry</div>
-        <div id="client-list" class="flex-1 overflow-y-auto p-2 space-y-2"></div>
-    </div>
-
-    <div class="flex-1 flex flex-col p-6 overflow-hidden">
-        <div id="details-card" class="bg-white p-6 rounded-lg border shadow-sm mb-6 hidden">
-            <h2 id="d-hostname" class="text-2xl font-bold mb-4">Select a Client</h2>
-            <div class="grid grid-cols-4 gap-4 text-sm mb-6">
-                <div><p class="text-gray-400">HW ID</p><p id="d-hwid">-</p></div>
-                <div><p class="text-gray-400">IP</p><p id="d-ip">-</p></div>
-                <div><p class="text-gray-400">Status</p><span id="d-status" class="px-2 py-1 rounded text-xs font-bold"></span></div>
-                <div id="btn-container" class="flex gap-2"></div>
-            </div>
-            <div class="overflow-hidden border rounded-lg">
-                <table class="w-full text-sm">
-                    <thead class="bg-gray-50 border-b">
-                        <tr><th class="p-4">Model</th><th class="p-4">Input</th><th class="p-4">Output</th><th class="p-4">Time</th></tr>
-                    </thead>
-                    <tbody id="log-body"></tbody>
-                </table>
-            </div>
+<body class="bg-gray-900 text-gray-100 min-h-screen p-8">
+    <h1 class="text-3xl font-bold mb-8">Security Operations Center</h1>
+    
+    <!-- Section 1: Client Devices -->
+    <section class="mb-12">
+        <h2 class="text-xl font-semibold mb-4 text-blue-400">1. Client Machine Registry</h2>
+        <div class="overflow-x-auto bg-gray-800 rounded-lg p-4">
+            <table class="w-full text-sm">
+                <thead class="text-gray-400 border-b border-gray-700">
+                    <tr><th class="p-3">HW ID</th><th class="p-3">Hostname</th><th class="p-3">IP</th><th class="p-3">Status</th><th class="p-3">Action</th></tr>
+                </thead>
+                <tbody id="client-body"></tbody>
+            </table>
         </div>
-    </div>
+    </section>
+
+    <!-- Section 2: AI Traffic Logs -->
+    <section>
+        <h2 class="text-xl font-semibold mb-4 text-green-400">2. Proxy Intercepted Traffic</h2>
+        <div class="overflow-x-auto bg-gray-800 rounded-lg p-4">
+            <table class="w-full text-sm">
+                <thead class="text-gray-400 border-b border-gray-700">
+                    <tr><th class="p-3">Time</th><th class="p-3">Hostname</th><th class="p-3">Model</th><th class="p-3">Tokens (In/Out)</th><th class="p-3">Sub</th></tr>
+                </thead>
+                <tbody id="log-body"></tbody>
+            </table>
+        </div>
+    </section>
 
     <script>
-        async function loadClients() {
-            try {
-                const res = await fetch('/api/clients');
-                const data = await res.json();
-                document.getElementById('client-list').innerHTML = data.map(c => `
-                    <div onclick="selectClient('${c.hw_id}', '${c.hostname}', '${c.ip_address}', '${c.status}')" 
-                         class="p-3 border rounded cursor-pointer hover:bg-slate-50">
-                        <div class="font-bold text-sm">${c.hostname}</div>
-                        <div class="text-xs text-slate-400">${c.hw_id.substring(0,8)}...</div>
-                    </div>`).join('');
-            } catch (err) { console.error("Error loading clients:", err); }
-        }
-
-        async function selectClient(hwid, host, ip, status) {
-            document.getElementById('details-card').classList.remove('hidden');
-            document.getElementById('d-hostname').innerText = host;
-            document.getElementById('d-hwid').innerText = hwid;
-            document.getElementById('d-ip').innerText = ip;
+        async function fetchData() {
+            const res = await fetch('/api/get-data');
+            const data = await res.json();
             
-            const badge = document.getElementById('d-status');
-            badge.innerText = status.toUpperCase();
-            badge.className = status === 'approved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
+            // Populate Clients
+            document.getElementById('client-body').innerHTML = data.clients.map(c => `
+                <tr class="border-b border-gray-700">
+                    <td class="p-3">${c.hw_id}</td>
+                    <td class="p-3">${c.hostname}</td>
+                    <td class="p-3">${c.ip_address}</td>
+                    <td class="p-3"><span class="${c.status === 'approved' ? 'text-green-500' : 'text-red-500'}">${c.status}</span></td>
+                    <td class="p-3">
+                        <button onclick="updateStatus('${c.hw_id}', 'approved')" class="bg-green-600 px-2 py-1 rounded text-xs">Approve</button>
+                    </td>
+                </tr>`).join('');
             
-            document.getElementById('btn-container').innerHTML = `
-                <button class="bg-blue-600 text-white px-3 py-1 rounded" onclick="updateStatus('${hwid}', 'approved')">Approve</button>
-                <button class="bg-gray-200 text-slate-600 px-3 py-1 rounded" onclick="updateStatus('${hwid}', 'denied')">Deny</button>`;
-
-            try {
-                const logsRes = await fetch(`/api/logs/${hwid}`);
-                const logs = await logsRes.json();
-                document.getElementById('log-body').innerHTML = logs.length === 0 ? '<tr><td colspan="4" class="p-4 text-center text-gray-400">No logs found</td></tr>' : logs.map(l => `
-                    <tr><td class="p-4">${l.model_name}</td><td class="p-4">${l.input_tokens}</td><td class="p-4">${l.output_tokens}</td><td class="p-4">${new Date(l.created_at).toLocaleTimeString()}</td></tr>
-                `).join('');
-            } catch (err) { console.error("Error:", err); }
+            // Populate Logs
+            document.getElementById('log-body').innerHTML = data.logs.map(l => `
+                <tr class="border-b border-gray-700">
+                    <td class="p-3 text-xs">${new Date(l.created_at).toLocaleTimeString()}</td>
+                    <td class="p-3">${l.hostname}</td>
+                    <td class="p-3">${l.model_name}</td>
+                    <td class="p-3">${l.input_tokens} / ${l.output_tokens}</td>
+                    <td class="p-3">${l.subscription_name}</td>
+                </tr>`).join('');
         }
-
-        async function updateStatus(hwid, status) {
-            await fetch(`/api/status/${hwid}/${status}`, {method: 'POST'});
-            loadClients();
-        }
-        loadClients();
+        fetchData();
     </script>
 </body>
 </html>
