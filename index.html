@@ -50,13 +50,13 @@
                 
                 document.getElementById('client-body').innerHTML = (data.clients || []).map(c => `
                     <tr class="border-b border-gray-700">
-                        <td class="p-3">${c.HW_id}</td>
+                        <td class="p-3">${c.hw_id_id}</td>
                         <td class="p-3">${c.hostname}</td>
                         <td class="p-3">${c.ip_address}</td>
                         <td class="p-3 font-bold ${c.status === 'Approved' ? 'text-green-500' : 'text-red-500'}">${c.status}</td>
                         <td class="p-3 space-x-2">
-                            <button onclick="updateStatus('${c.HW_id}', 'Approved')" class="bg-green-600 px-3 py-1 rounded text-xs">Approve</button>
-                            <button onclick="updateStatus('${c.HW_id}', 'Denied')" class="bg-red-600 px-3 py-1 rounded text-xs">Deny</button>
+                            <button onclick="updateStatus('${c.hw_id}', 'Approved')" class="bg-green-600 px-3 py-1 rounded text-xs">Approve</button>
+                            <button onclick="updateStatus('${c.hw_id}', 'Denied')" class="bg-red-600 px-3 py-1 rounded text-xs">Deny</button>
                         </td>
                     </tr>`).join('');
                 
