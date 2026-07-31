@@ -1,0 +1,10 @@
+# Environment & Secret files
+.env
+*.pem
+new_private_key.pem
+public_key.pem
+.device_credentials
+
+# Python cache files
+__pycache__/
+*.py[cod]

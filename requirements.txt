@@ -1,3 +1,8 @@
-flask
-supabase
+fastapi
+uvicorn
 gunicorn
+supabase
+requests
+cryptography
+pydantic
+python-dotenv

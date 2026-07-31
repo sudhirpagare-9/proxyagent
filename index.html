@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Operations Center</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-zinc-950 text-zinc-300 p-6 min-h-screen">
+    <header class="flex justify-between items-center mb-6 pb-4 border-b border-zinc-800">
+        <div>
+            <h1 class="text-2xl font-bold text-white tracking-wide">Security Operations Center</h1>
+            <p class="text-xs text-zinc-500 mt-1">Asymmetric RSA-2048 Encrypted Traffic Monitor</p>
+        </div>
+        <div class="flex items-center space-x-3">
+            <span id="status-indicator" class="flex items-center text-xs text-emerald-500 bg-emerald-950/50 border border-emerald-800/50 px-3 py-1 rounded-full">
+                <span class="w-2 h-2 mr-2 bg-emerald-500 rounded-full animate-pulse"></span> Live Syncing
+            </span>
+            <button onclick="load()" class="bg-zinc-800 hover:bg-zinc-700 text-xs px-3 py-1.5 rounded transition text-zinc-300">
+                Refresh Now
+            </button>
+        </div>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Client Registry -->
+        <section class="bg-zinc-900/80 p-5 rounded-lg shadow-lg border border-zinc-800">
+            <h2 class="text-white text-base font-semibold mb-4 flex items-center">
+                <span>Client Registry</span>
+            </h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs text-left border-collapse">
+                    <thead>
+                        <tr class="text-zinc-500 border-b border-zinc-800 uppercase tracking-wider">
+                            <th class="p-2.5">HW ID / Host</th>
+                            <th class="p-2.5">Status</th>
+                            <th class="p-2.5">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="client-body" class="divide-y divide-zinc-800/50">
+                        <tr><td colspan="3" class="p-4 text-center text-zinc-500">Loading client registry...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        
+        <!-- AI Usage Logs -->
+        <section class="bg-zinc-900/80 p-5 rounded-lg shadow-lg border border-zinc-800">
+            <h2 class="text-white text-base font-semibold mb-4 flex items-center">
+                <span>AI Encrypted Usage Logs</span>
+            </h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs text-left border-collapse">
+                    <thead>
+                        <tr class="text-zinc-500 border-b border-zinc-800 uppercase tracking-wider">
+                            <th class="p-2.5">HW ID</th>
+                            <th class="p-2.5">Model</th>
+                            <th class="p-2.5">Prompt / Completion Tokens</th>
+                        </tr>
+                    </thead>
+                    <tbody id="log-body" class="divide-y divide-zinc-800/50">
+                        <tr><td colspan="3" class="p-4 text-center text-zinc-500">Loading traffic logs...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        async function updateStatus(hwId, status) {
+            try {
+                await fetch(`/api/update-status/${hwId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: status })
+                });
+                load();
+            } catch (err) {
+                console.error("Failed to update status:", err);
+            }
+        }
+
+        async function load() {
+            const statusElem = document.getElementById('status-indicator');
+            try {
+                const res = await fetch('/api/dashboard-data');
+                if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+                
+                const data = await res.json();
+                
+                // Update Clients Table
+                const clientBody = document.getElementById('client-body');
+                if (data.clients && data.clients.length > 0) {
+                    clientBody.innerHTML = data.clients.map(c => `
+                        <tr class="hover:bg-zinc-800/30 transition">
+                            <td class="p-2.5 font-mono text-zinc-200">${c.hw_id}</td>
+                            <td class="p-2.5 font-semibold">
+                                <span class="px-2 py-0.5 rounded text-[10px] ${
+                                    c.status === 'APPROVED' 
+                                    ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' 
+                                    : 'bg-amber-950 text-amber-400 border border-amber-800'
+                                }">
+                                    ${c.status}
+                                </span>
+                            </td>
+                            <td class="p-2.5">
+                                ${c.status !== 'APPROVED' 
+                                    ? `<button onclick="updateStatus('${c.hw_id}', 'APPROVED')" class="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded text-[11px] transition">Approve</button>`
+                                    : `<span class="text-zinc-600 text-[11px]">Active</span>`
+                                }
+                            </td>
+                        </tr>`).join('');
+                } else {
+                    clientBody.innerHTML = '<tr><td colspan="3" class="p-4 text-center text-zinc-500">No registered clients found.</td></tr>';
+                }
+
+                // Update Logs Table
+                const logBody = document.getElementById('log-body');
+                if (data.logs && data.logs.length > 0) {
+                    logBody.innerHTML = data.logs.map(l => `
+                        <tr class="hover:bg-zinc-800/30 transition">
+                            <td class="p-2.5 font-mono text-zinc-300">${l.hw_id}</td>
+                            <td class="p-2.5 text-zinc-400 font-medium">${l.model_name || 'unknown'}</td>
+                            <td class="p-2.5 font-mono text-zinc-300">${l.input_tokens || 0} / ${l.output_tokens || 0}</td>
+                        </tr>`).join('');
+                } else {
+                    logBody.innerHTML = '<tr><td colspan="3" class="p-4 text-center text-zinc-500">No traffic logs received yet.</td></tr>';
+                }
+
+                statusElem.className = "flex items-center text-xs text-emerald-500 bg-emerald-950/50 border border-emerald-800/50 px-3 py-1 rounded-full";
+                statusElem.innerHTML = `<span class="w-2 h-2 mr-2 bg-emerald-500 rounded-full animate-pulse"></span> Live Syncing`;
+
+            } catch (err) {
+                console.error("Dashboard fetch error:", err);
+                statusElem.className = "flex items-center text-xs text-rose-500 bg-rose-950/50 border border-rose-800/50 px-3 py-1 rounded-full";
+                statusElem.innerHTML = `<span class="w-2 h-2 mr-2 bg-rose-500 rounded-full"></span> Disconnected`;
+            }
+        }
+
+        load();
+        setInterval(load, 5000); // Auto-refresh every 5 seconds
+    </script>
+</body>
+</html>
