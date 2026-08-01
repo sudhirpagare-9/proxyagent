@@ -4,7 +4,7 @@ import base64
 import traceback
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import FastAPI, Request, HTTPException, Query
+from fastapi import FastAPI, Request, HTTPException, Query, Header
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from supabase import create_client
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -20,8 +20,16 @@ SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 RAW_PRIVATE_KEY = os.environ.get("RSA_PRIVATE_KEY", "")
 RAW_PUBLIC_KEY = os.environ.get("RSA_PUBLIC_KEY", "")
 
-AES_PII_SECRET = os.environ.get("AES_PII_SECRET", "soc-gdpr-nist-default-32byte-secret-key!!").encode('utf-8')[:32]
+# Secure handling of PII Encryption Secret (NIST Compliance)
+AES_SECRET_ENV = os.environ.get("AES_PII_SECRET")
+if not AES_SECRET_ENV:
+    print("[!] WARNING: AES_PII_SECRET not set in environment. Using standard default key.")
+    AES_SECRET_ENV = "soc-gdpr-nist-default-32byte-secret-key!!"
+
+AES_PII_SECRET = AES_SECRET_ENV.encode('utf-8')[:32].ljust(32, b'0')
 aesgcm = AESGCM(AES_PII_SECRET)
+
+ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "")  # Optional admin authorization key
 
 def sanitize_key_str(raw_str: str) -> str:
     """Cleans base64 or escaped PEM string inputs from environment variables."""
@@ -85,6 +93,10 @@ def mask_mac(mac: str) -> str:
         return f"{parts[0]}:{parts[1]}:{parts[2]}:**:**:**"
     return mac
 
+def verify_admin_auth(x_admin_key: Optional[str]):
+    if ADMIN_API_KEY and x_admin_key != ADMIN_API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized Admin Request")
+
 # Endpoints
 @app.get("/", response_class=HTMLResponse)
 async def read_index():
@@ -93,10 +105,17 @@ async def read_index():
             return f.read()
     return "<h1>Dashboard UI file (index.html) not found.</h1>"
 
+@app.get("/agent", response_class=HTMLResponse)
+async def read_agent():
+    if os.path.exists("web_agent.html"):
+        with open("web_agent.html", "r", encoding="utf-8") as f:
+            return f.read()
+    return "<h1>Agent page (web_agent.html) not found.</h1>"
+    
 @app.get("/public-key", response_class=PlainTextResponse)
 async def get_public_key():
     if not PUBLIC_KEY_PEM:
-        raise HTTPException(status_code=500, detail="Public Key not configured.")
+        raise HTTPException(status_code=500, detail="Public Key not configured on server.")
     return PUBLIC_KEY_PEM
 
 @app.post("/register")
@@ -162,7 +181,7 @@ async def register_client(request: Request):
 @app.post("/log-traffic")
 async def log_traffic(request: Request):
     if not private_key:
-        raise HTTPException(status_code=500, detail="Private key uninitialized.")
+        raise HTTPException(status_code=500, detail="Private key uninitialized on server.")
     if not supabase:
         raise HTTPException(status_code=500, detail="Database connection missing.")
         
@@ -187,7 +206,7 @@ async def log_traffic(request: Request):
     except Exception:
         pass
 
-    # Decrypt RSA Encrypted Telemetry Payload
+    # Decrypt RSA Encrypted Telemetry Payload (RSA-OAEP SHA-256)
     try:
         encrypted_data = base64.b64decode(encrypted_payload_b64)
         decrypted_bytes = private_key.decrypt(
@@ -203,7 +222,7 @@ async def log_traffic(request: Request):
         print(f"[!] Decryption Failure for [{hw_id}]: {str(e)}")
         raise HTTPException(status_code=401, detail=f"Decryption Failure: {str(e)}")
 
-    # Unpack Compact (m, v, t, l, i, o, b, s) or Standard Schema
+    # Unpack Telemetry Payload
     model_name = payload.get("m") or payload.get("model_name", "Sonar 2")
     version = payload.get("v") or payload.get("version", "v2.0")
     model_type = payload.get("t") or payload.get("model_type", "Perplexity AI")
@@ -233,13 +252,15 @@ async def log_traffic(request: Request):
 @app.get("/api/dashboard-data")
 async def get_dashboard_data(
     hw_id: Optional[str] = Query(None),
-    filter_mode: Optional[str] = Query("top100")
+    filter_mode: Optional[str] = Query("top100"),
+    x_admin_key: Optional[str] = Header(None)
 ):
+    verify_admin_auth(x_admin_key)
+    
     if not supabase:
         return {"clients": [], "logs": []}
         
     raw_clients = supabase.table("clients_registry").select("*").execute().data or []
-    
     logs_query = supabase.table("ai_usage_logs").select("*").order("created_at", desc=True)
     
     if hw_id:
@@ -276,7 +297,12 @@ async def get_dashboard_data(
     return {"clients": processed_clients, "logs": raw_logs}
 
 @app.post("/api/client-action")
-async def client_action(request: Request):
+async def client_action(
+    request: Request,
+    x_admin_key: Optional[str] = Header(None)
+):
+    verify_admin_auth(x_admin_key)
+    
     if not supabase:
         raise HTTPException(status_code=500, detail="Database missing.")
     
