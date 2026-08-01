@@ -222,12 +222,12 @@
                 return `
                     <tr class="hover:bg-gray-800/30 transition">
                         <td class="p-2 font-mono text-emerald-400">${l.hw_id || 'UNKNOWN'}</td>
-                        <td class="p-2 font-semibold text-white">Claude Sonnet 5</td>
+                        <td class="p-2 font-semibold text-white">${l.model_name || 'Claude Sonnet 5'}</td>
                         <td class="p-2 text-gray-400 text-[11px]">${l.model_type || 'Anthropic Claude'}</td>
                         <td class="p-2"><span class="px-1.5 py-0.5 text-[10px] bg-gray-800 border border-gray-700 text-gray-300 rounded">${l.think_level || 'Extended'}</span></td>
-                        <td class="p-2 font-mono"><span class="text-emerald-400">↑${l.input_tokens || 145}</span> / <span class="text-cyan-400">↓${l.output_tokens || 450}</span></td>
+                        <td class="p-2 font-mono"><span class="text-emerald-400">↑${l.input_tokens || 0}</span> / <span class="text-cyan-400">↓${l.output_tokens || 0}</span></td>
                         <td class="p-2 font-mono text-amber-400 font-medium">${(l.balance_tokens || 12150).toLocaleString()}</td>
-                        <td class="p-2 text-emerald-400 text-[11px] font-bold">PRO</td>
+                        <td class="p-2 text-emerald-400 text-[11px] font-bold">${l.subscription_status || 'PRO'}</td>
                         <td class="p-2 font-mono text-gray-400 text-[11px]">${dateStr}</td>
                     </tr>
                 `;

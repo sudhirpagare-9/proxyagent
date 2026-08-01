@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="3.0.1")
+app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="3.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -131,13 +131,6 @@ async def read_index():
             return f.read()
     return "<h1>Dashboard UI (index.html) missing.</h1>"
 
-@app.get("/agent", response_class=HTMLResponse)
-async def read_agent():
-    if os.path.exists("web_agent.html"):
-        with open("web_agent.html", "r", encoding="utf-8") as f:
-            return f.read()
-    return "<h1>Agent page (web_agent.html) missing.</h1>"
-    
 @app.get("/public-key", response_class=PlainTextResponse)
 async def get_public_key():
     return public_key_pem_str
@@ -184,10 +177,10 @@ async def register_client(request: Request):
             "last_ip": encrypt_pii(safe_str(client_ip, 30)),
             "status": current_status,
             "client_name": safe_str(data.get("client_name", data.get("hostname")), 50),
-            "model_name": "Claude Sonnet 5",
-            "model_version": "v3.5",
+            "model_name": safe_str(data.get("model_name", "Claude Sonnet 5"), 50),
+            "model_version": safe_str(data.get("model_version", "v3.5"), 50),
             "thinklevl": safe_str(data.get("think_level", "Extended"), 50),
-            "interface_browser": safe_str(data.get("interface_browser", "Web Agent"), 50),
+            "interface_browser": safe_str(data.get("interface_browser", "Local Proxy Agent"), 50),
             "input_tokens": int(data.get("input_tokens", 0)),
             "output_tokens": int(data.get("output_tokens", 0)),
             "balance_tokens": int(data.get("balance_tokens", 12500)),
@@ -244,18 +237,18 @@ async def log_traffic(request: Request):
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Decryption Failure: {str(e)}")
 
-    model_name = "Claude Sonnet 5"
-    version = "v3.5"
-    model_type = "Anthropic Claude"
+    model_name = safe_str(payload.get("m") or payload.get("model_name", "Claude Sonnet 5"), 50)
+    version = safe_str(payload.get("v") or payload.get("model_version", "v3.5"), 50)
+    model_type = safe_str(payload.get("t") or payload.get("model_type", "Anthropic Claude"), 50)
     think_level = safe_str(payload.get("l") or payload.get("think_level", "Extended"), 50)
     in_tokens = int(payload.get("i") if "i" in payload else payload.get("input_tokens", 145))
     out_tokens = int(payload.get("o") if "o" in payload else payload.get("output_tokens", 450))
     bal_tokens = int(payload.get("b") if "b" in payload else payload.get("balance_tokens", 12150))
-    sub_status = "PRO"
+    sub_status = safe_str(payload.get("s") or payload.get("subscription_status", "PRO"), 20)
 
     if supabase:
         try:
-            insert_res = supabase.table("ai_usage_logs").insert({
+            supabase.table("ai_usage_logs").insert({
                 "hw_id": hw_id,
                 "model_name": model_name,
                 "version": version,
@@ -266,10 +259,9 @@ async def log_traffic(request: Request):
                 "subscription_status": sub_status,
                 "think_level": think_level
             }).execute()
-            print(f"[+] DB Log Insert Success for {hw_id}")
         except Exception as e:
             print(f"[!] DB Log Insert Error: {e}")
-            raise HTTPException(status_code=500, detail=f"Database Insert Failed: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
             
     return {"status": "success", "model_recorded": model_name, "subscription": sub_status}
 
@@ -309,9 +301,9 @@ async def get_dashboard_data(
                 "mac_address": mask_mac(dec_mac),
                 "ip_address": mask_ip(dec_ip),
                 "status": c.get("status", "PENDING"),
-                "subscription_status": "PRO",
-                "model_name": "Claude Sonnet 5",
-                "think_level": "Extended",
+                "subscription_status": c.get("subscription_status", "PRO"),
+                "model_name": c.get("model_name", "Claude Sonnet 5"),
+                "think_level": c.get("thinklevl", "Extended"),
                 "country": c.get("country", "IND"),
                 "geo_location": dec_geo,
                 "encrypted_pii": True
