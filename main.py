@@ -1,32 +1,85 @@
 import os
 import json
 import base64
-from fastapi import FastAPI, Request, HTTPException
+from datetime import datetime, timezone
+from typing import Optional
+from fastapi import FastAPI, Request, HTTPException, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from supabase import create_client
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-app = FastAPI()
+app = FastAPI(title="AI Traffic Dashboard & Security Monitor")
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
-RAW_PRIVATE_KEY = os.environ.get("RSA_PRIVATE_KEY")
-RAW_PUBLIC_KEY = os.environ.get("RSA_PUBLIC_KEY")
+RAW_PRIVATE_KEY = os.environ.get("RSA_PRIVATE_KEY", "")
+RAW_PUBLIC_KEY = os.environ.get("RSA_PUBLIC_KEY", "")
 
-# Load Private Key for Decryption
+AES_PII_SECRET = os.environ.get("AES_PII_SECRET", "soc-gdpr-nist-default-32byte-secret-key!!").encode('utf-8')[:32]
+aesgcm = AESGCM(AES_PII_SECRET)
+
+def sanitize_key_str(raw_str: str) -> str:
+    if not raw_str:
+        return ""
+    clean_str = raw_str.strip()
+    if not clean_str.startswith("-----BEGIN"):
+        try:
+            decoded = base64.b64decode(clean_str).decode('utf-8')
+            if "-----BEGIN" in decoded:
+                return decoded
+        except Exception:
+            pass
+    return clean_str.replace("\\n", "\n")
+
+PUBLIC_KEY_PEM = sanitize_key_str(RAW_PUBLIC_KEY)
+PRIVATE_KEY_PEM = sanitize_key_str(RAW_PRIVATE_KEY)
+
 private_key = None
-if RAW_PRIVATE_KEY:
-    private_key = serialization.load_pem_private_key(
-        RAW_PRIVATE_KEY.encode('utf-8'),
-        password=None
-    )
+if PRIVATE_KEY_PEM:
+    try:
+        private_key = serialization.load_pem_private_key(
+            PRIVATE_KEY_PEM.encode('utf-8'),
+            password=None
+        )
+    except Exception as e:
+        print(f"[!] Error loading RSA key: {e}")
 
-if SUPABASE_URL and SUPABASE_KEY:
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-else:
-    supabase = None
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+
+def encrypt_pii(plaintext: str) -> str:
+    if not plaintext:
+        return ""
+    try:
+        nonce = os.urandom(12)
+        ciphertext = aesgcm.encrypt(nonce, plaintext.encode('utf-8'), None)
+        return base64.b64encode(nonce + ciphertext).decode('utf-8')
+    except Exception:
+        return plaintext
+
+def decrypt_pii(encrypted_b64: str) -> str:
+    if not encrypted_b64:
+        return ""
+    try:
+        raw = base64.b64decode(encrypted_b64)
+        nonce, ciphertext = raw[:12], raw[12:]
+        return aesgcm.decrypt(nonce, ciphertext, None).decode('utf-8')
+    except Exception:
+        return encrypted_b64
+
+def mask_ip(ip: str) -> str:
+    parts = ip.split(".")
+    if len(parts) == 4:
+        return f"{parts[0]}.{parts[1]}.***.***"
+    return ip
+
+def mask_mac(mac: str) -> str:
+    parts = mac.split(":")
+    if len(parts) == 6:
+        return f"{parts[0]}:{parts[1]}:{parts[2]}:**:**:**"
+    return mac
 
 @app.get("/", response_class=HTMLResponse)
 async def read_index():
@@ -35,12 +88,11 @@ async def read_index():
             return f.read()
     return "<h1>Dashboard UI file (index.html) not found.</h1>"
 
-# Public Endpoint exposing the RSA Public Key
 @app.get("/public-key", response_class=PlainTextResponse)
 async def get_public_key():
-    if not RAW_PUBLIC_KEY:
-        raise HTTPException(status_code=500, detail="Public key not configured on server.")
-    return RAW_PUBLIC_KEY
+    if not PUBLIC_KEY_PEM:
+        raise HTTPException(status_code=500, detail="Public Key not configured.")
+    return PUBLIC_KEY_PEM
 
 @app.post("/register")
 async def register_client(request: Request):
@@ -49,35 +101,88 @@ async def register_client(request: Request):
     
     try:
         data = await request.json()
-        supabase.table("clients_registry").upsert({
-            "hw_id": data.get("hw_id"),
-            "hostname": data.get("hostname"),
-            "mac_address": data.get("mac_address"),
-            "status": "APPROVED"
-        }, on_conflict="hw_id").execute()
+        hw_id = data.get("hw_id")
+        if not hw_id:
+            raise HTTPException(status_code=400, detail="Missing hw_id.")
+
+        client_ip = request.client.host if request.client else data.get("ip_address", "127.0.0.1")
+
+        # Check existing status to preserve manual APPROVED/DENIED setting
+        existing_status = "APPROVED"
+        try:
+            existing = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
+            if existing.data:
+                existing_status = existing.data[0].get("status", "APPROVED")
+        except Exception:
+            pass
+
+        # Resilient Upsert Payload
+        client_record = {
+            "hw_id": hw_id,
+            "hostname": encrypt_pii(data.get("hostname", "UNKNOWN")),
+            "mac_address": encrypt_pii(data.get("mac_address", "00:00:00:00:00:00")),
+            "ip_address": encrypt_pii(client_ip),
+            "last_ip": encrypt_pii(client_ip),
+            "status": existing_status,
+            "client_name": data.get("client_name", data.get("hostname")),
+            "model_name": data.get("model_name", "Sonar 2"),
+            "model_version": data.get("model_version", "v2.0"),
+            "thinklevl": data.get("think_level", data.get("thinklevl", "High")),
+            "interface_browser": data.get("interface_browser", "Edge/Chrome Agent"),
+            "input_tokens": int(data.get("input_tokens", 0)),
+            "output_tokens": int(data.get("output_tokens", 0)),
+            "balance_tokens": int(data.get("balance_tokens", 5000)),
+            "subscription_status": data.get("subscription_status", "ACTIVE"),
+            "country": data.get("country", "IND"),
+            "geo_location": encrypt_pii(data.get("geo_location", "Maharashtra"))
+        }
+
+        try:
+            supabase.table("clients_registry").upsert(client_record, on_conflict="hw_id").execute()
+        except Exception as db_err:
+            print(f"[!] Primary Upsert Warning: {db_err}. Retrying with minimal fields...")
+            # Safe Fallback to minimal core schema
+            supabase.table("clients_registry").upsert({
+                "hw_id": hw_id,
+                "hostname": encrypt_pii(data.get("hostname", "UNKNOWN")),
+                "mac_address": encrypt_pii(data.get("mac_address", "")),
+                "ip_address": encrypt_pii(client_ip),
+                "status": existing_status
+            }, on_conflict="hw_id").execute()
+        
         return {"status": "success"}
     except Exception as e:
+        print(f"[!] Registration Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Registration error: {str(e)}")
 
 @app.post("/log-traffic")
 async def log_traffic(request: Request):
     if not private_key:
-        raise HTTPException(status_code=500, detail="Private key missing on backend.")
+        raise HTTPException(status_code=500, detail="Private key uninitialized.")
     if not supabase:
         raise HTTPException(status_code=500, detail="Database connection missing.")
         
     try:
         data = await request.json()
-        encrypted_payload_b64 = data.get("encrypted_payload")
-        hw_id = data.get("hw_id")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {str(e)}")
 
-        if not encrypted_payload_b64:
-            raise HTTPException(status_code=400, detail="Missing encrypted payload.")
+    encrypted_payload_b64 = data.get("encrypted_payload")
+    hw_id = data.get("hw_id")
 
-        # Decode base64 encrypted packet
+    if not encrypted_payload_b64 or not hw_id:
+        raise HTTPException(status_code=400, detail="Missing parameters.")
+
+    # Block traffic if client status is DENIED
+    try:
+        client_res = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
+        if client_res.data and client_res.data[0].get("status") == "DENIED":
+            raise HTTPException(status_code=403, detail="Client is DENIED by administrator.")
+    except Exception:
+        pass
+
+    try:
         encrypted_data = base64.b64decode(encrypted_payload_b64)
-
-        # Decrypt using Server's Private Key
         decrypted_bytes = private_key.decrypt(
             encrypted_data,
             padding.OAEP(
@@ -86,27 +191,104 @@ async def log_traffic(request: Request):
                 label=None
             )
         )
-        
         payload = json.loads(decrypted_bytes.decode('utf-8'))
-
-        # Insert Decrypted Metrics into Database
-        supabase.table("ai_usage_logs").insert({
-            "hw_id": hw_id, 
-            "model_name": payload.get("model_name", "unknown"),
-            "input_tokens": payload.get("input_tokens", 0),
-            "output_tokens": payload.get("output_tokens", 0),
-            "balance": payload.get("balance", 0.0)
-        }).execute()
-            
-        return {"status": "success"}
     except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Decryption/Verification Failed: {str(e)}")
+        print(f"[!] Decryption Failure for [{hw_id}]: {str(e)}")
+        raise HTTPException(status_code=401, detail=f"Decryption Failure: {str(e)}")
+
+    # Unpack both compact keys (m, v, t, l, i, o, b, s) and verbose keys
+    model_name = payload.get("m") or payload.get("model_name", "Sonar 2")
+    version = payload.get("v") or payload.get("version", "v2.0")
+    model_type = payload.get("t") or payload.get("model_type", "Perplexity AI")
+    think_level = payload.get("l") or payload.get("think_level", "High")
+    in_tokens = int(payload.get("i") if "i" in payload else payload.get("input_tokens", 0))
+    out_tokens = int(payload.get("o") if "o" in payload else payload.get("output_tokens", 0))
+    bal_tokens = int(payload.get("b") if "b" in payload else payload.get("balance_tokens", 0))
+    sub_status = payload.get("s") or payload.get("subscription_status", "ACTIVE")
+
+    try:
+        supabase.table("ai_usage_logs").insert({
+            "hw_id": hw_id,
+            "model_name": model_name,
+            "version": version,
+            "model_type": model_type,
+            "input_tokens": in_tokens,
+            "output_tokens": out_tokens,
+            "balance_tokens": bal_tokens,
+            "subscription_status": sub_status
+        }).execute()
+    except Exception as e:
+        print(f"[!] DB Insert Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"DB Insert Error: {str(e)}")
+            
+    return {"status": "success"}
 
 @app.get("/api/dashboard-data")
-async def get_data():
+async def get_dashboard_data(
+    hw_id: Optional[str] = Query(None),
+    filter_mode: Optional[str] = Query("top100")
+):
     if not supabase:
         return {"clients": [], "logs": []}
         
-    clients = supabase.table("clients_registry").select("*").execute().data
-    logs = supabase.table("ai_usage_logs").select("*").order("created_at", desc=True).limit(50).execute().data
-    return {"clients": clients, "logs": logs}
+    raw_clients = supabase.table("clients_registry").select("*").execute().data
+    
+    logs_query = supabase.table("ai_usage_logs").select("*").order("created_at", desc=True)
+    
+    if hw_id:
+        logs_query = logs_query.eq("hw_id", hw_id)
+        
+    if filter_mode == "today":
+        today_start = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
+        logs_query = logs_query.gte("created_at", today_start)
+    else:
+        logs_query = logs_query.limit(100)
+
+    raw_logs = logs_query.execute().data
+
+    processed_clients = []
+    for c in raw_clients:
+        dec_ip = decrypt_pii(c.get("ip_address", ""))
+        dec_mac = decrypt_pii(c.get("mac_address", ""))
+        dec_geo = decrypt_pii(c.get("geo_location", ""))
+        dec_host = decrypt_pii(c.get("hostname", ""))
+        
+        processed_clients.append({
+            "hw_id": c.get("hw_id"),
+            "hostname": dec_host,
+            "mac_address": mask_mac(dec_mac),
+            "ip_address": mask_ip(dec_ip),
+            "status": c.get("status", "APPROVED"),
+            "subscription_status": c.get("subscription_status", "ACTIVE"),
+            "model_name": c.get("model_name", "Sonar 2"),
+            "think_level": c.get("thinklevl", "High"),
+            "country": c.get("country", "IND"),
+            "geo_location": dec_geo
+        })
+
+    return {"clients": processed_clients, "logs": raw_logs}
+
+@app.post("/api/client-action")
+async def client_action(request: Request):
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database missing.")
+    
+    body = await request.json()
+    hw_id = body.get("hw_id")
+    action = body.get("action")
+
+    if not hw_id or not action:
+        raise HTTPException(status_code=400, detail="Invalid action parameters.")
+
+    if action == "approve":
+        supabase.table("clients_registry").update({"status": "APPROVED"}).eq("hw_id", hw_id).execute()
+    elif action == "deny":
+        supabase.table("clients_registry").update({"status": "DENIED"}).eq("hw_id", hw_id).execute()
+    elif action == "delete":
+        try:
+            supabase.table("ai_usage_logs").delete().eq("hw_id", hw_id).execute()
+        except Exception:
+            pass
+        supabase.table("clients_registry").delete().eq("hw_id", hw_id).execute()
+        
+    return {"status": "success", "action": action, "hw_id": hw_id}

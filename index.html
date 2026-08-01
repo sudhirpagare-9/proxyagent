@@ -1,144 +1,305 @@
 <!DOCTYPE html>
-<html class="dark">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Security Operations Center</title>
+    <title>AI Traffic Dashboard & Security Monitor</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0b0f17; color: #c9d1d9; font-family: ui-sans-serif, system-ui, sans-serif; }
+        .glass { background: rgba(18, 24, 38, 0.85); backdrop-filter: blur(12px); border: 1px solid #232d3f; }
+        .selected-row { background-color: rgba(16, 185, 129, 0.12) !important; border-left: 3px solid #10b981; }
+        
+        /* Custom Sleek Scrollbars */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0d121d; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: #2a364f; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #3b4c6e; }
+    </style>
 </head>
-<body class="bg-zinc-950 text-zinc-300 p-6 min-h-screen">
-    <header class="flex justify-between items-center mb-6 pb-4 border-b border-zinc-800">
+<body class="p-4 md:p-6 min-h-screen">
+
+    <!-- Top Header Navigation -->
+    <header class="flex flex-wrap justify-between items-center mb-6 pb-4 border-b border-gray-800 gap-4">
         <div>
-            <h1 class="text-2xl font-bold text-white tracking-wide">Security Operations Center</h1>
-            <p class="text-xs text-zinc-500 mt-1">Asymmetric RSA-2048 Encrypted Traffic Monitor</p>
+            <h1 class="text-2xl font-bold text-white flex items-center gap-2.5">
+                <span class="inline-block w-3 h-3 bg-emerald-500 rounded-full animate-ping"></span>
+                AI Traffic Dashboard & Security Monitor
+            </h1>
+            <p class="text-xs text-gray-400 mt-1">Real-time Asymmetric Encrypted AI Usage Telemetry & Client Management</p>
         </div>
-        <div class="flex items-center space-x-3">
-            <span id="status-indicator" class="flex items-center text-xs text-emerald-500 bg-emerald-950/50 border border-emerald-800/50 px-3 py-1 rounded-full">
-                <span class="w-2 h-2 mr-2 bg-emerald-500 rounded-full animate-pulse"></span> Live Syncing
+        
+        <div class="flex items-center gap-3">
+            <span class="px-3 py-1 text-xs rounded-full bg-blue-950 text-blue-400 border border-blue-800 font-mono">
+                🛡️ AES-256 PII Protected
             </span>
-            <button onclick="load()" class="bg-zinc-800 hover:bg-zinc-700 text-xs px-3 py-1.5 rounded transition text-zinc-300">
-                Refresh Now
+            <span id="active-filter-badge" class="hidden px-3 py-1 text-xs rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800">
+                Filtered: <span id="filter-client-id" class="font-bold"></span>
+                <button onclick="clearFilter()" class="ml-2 font-bold hover:text-white">✕</button>
+            </span>
+            <button onclick="fetchDashboardData()" class="px-4 py-1.5 text-xs font-semibold bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-md border border-gray-700 transition shadow">
+                🔄 Refresh Now
             </button>
         </div>
     </header>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <!-- Client Registry -->
-        <section class="bg-zinc-900/80 p-5 rounded-lg shadow-lg border border-zinc-800">
-            <h2 class="text-white text-base font-semibold mb-4 flex items-center">
-                <span>Client Registry</span>
-            </h2>
-            <div class="overflow-x-auto">
-                <table class="w-full text-xs text-left border-collapse">
-                    <thead>
-                        <tr class="text-zinc-500 border-b border-zinc-800 uppercase tracking-wider">
-                            <th class="p-2.5">HW ID / Host</th>
-                            <th class="p-2.5">Status</th>
-                            <th class="p-2.5">Action</th>
-                        </tr>
-                    </thead>
-                    <tbody id="client-body" class="divide-y divide-zinc-800/50">
-                        <tr><td colspan="3" class="p-4 text-center text-zinc-500">Loading client registry...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
+    <!-- Main Section Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        <!-- AI Usage Logs -->
-        <section class="bg-zinc-900/80 p-5 rounded-lg shadow-lg border border-zinc-800">
-            <h2 class="text-white text-base font-semibold mb-4 flex items-center">
-                <span>AI Encrypted Usage Logs</span>
-            </h2>
-            <div class="overflow-x-auto">
-                <table class="w-full text-xs text-left border-collapse">
-                    <thead>
-                        <tr class="text-zinc-500 border-b border-zinc-800 uppercase tracking-wider">
-                            <th class="p-2.5">HW ID</th>
-                            <th class="p-2.5">Model</th>
-                            <th class="p-2.5">Prompt / Completion Tokens</th>
+        <!-- Left Section: Discovered Clients -->
+        <section class="lg:col-span-5 glass rounded-xl p-5 shadow-2xl flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <h2 class="text-base font-bold text-white">Discovered Clients</h2>
+                    <p class="text-[11px] text-gray-400">Click client row to filter logs. Approve/Deny to control traffic.</p>
+                </div>
+                <span id="client-count" class="text-xs text-emerald-400 bg-emerald-950/60 px-2.5 py-1 rounded-full border border-emerald-800 font-mono">0 Registered</span>
+            </div>
+
+            <!-- Scrollable Table Container -->
+            <div class="overflow-y-auto max-h-[620px] pr-1">
+                <table class="w-full text-left text-xs border-collapse">
+                    <thead class="sticky top-0 bg-[#121826] text-gray-400 uppercase tracking-wider text-[10px] z-10">
+                        <tr class="border-b border-gray-800">
+                            <th class="p-2">HW ID / Host</th>
+                            <th class="p-2">IP Address</th>
+                            <th class="p-2">MAC Address</th>
+                            <th class="p-2">Status</th>
+                            <th class="p-2 text-center">Actions</th>
                         </tr>
                     </thead>
-                    <tbody id="log-body" class="divide-y divide-zinc-800/50">
-                        <tr><td colspan="3" class="p-4 text-center text-zinc-500">Loading traffic logs...</td></tr>
+                    <tbody id="clients-table-body" class="divide-y divide-gray-800/60">
+                        <tr><td colspan="5" class="p-4 text-center text-gray-500">Loading discovered clients...</td></tr>
                     </tbody>
                 </table>
             </div>
         </section>
+
+        <!-- Right Section: Client AI Traffic Logs -->
+        <section class="lg:col-span-7 glass rounded-xl p-5 shadow-2xl flex flex-col">
+            <div class="flex flex-wrap justify-between items-center mb-4 gap-2">
+                <div>
+                    <h2 class="text-base font-bold text-white">Client AI Traffic Logs</h2>
+                    <p id="log-subheading" class="text-[11px] text-gray-400">Captured encrypted model usage telemetry</p>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <!-- Filter Toggle -->
+                    <select id="log-filter-mode" onchange="fetchDashboardData()" class="bg-gray-900 border border-gray-700 text-gray-300 text-xs rounded-md px-2.5 py-1 focus:outline-none">
+                        <option value="top100">Top 100 Records</option>
+                        <option value="today">Today's Records Only</option>
+                    </select>
+
+                    <span id="log-count" class="text-xs text-cyan-400 bg-cyan-950/60 px-2.5 py-1 rounded-full border border-cyan-800 font-mono">0 Recorded</span>
+                </div>
+            </div>
+
+            <!-- Scrollable Table Container -->
+            <div class="overflow-y-auto max-h-[620px] pr-1">
+                <table class="w-full text-left text-xs border-collapse">
+                    <thead class="sticky top-0 bg-[#121826] text-gray-400 uppercase tracking-wider text-[10px] z-10">
+                        <tr class="border-b border-gray-800">
+                            <th class="p-2">HW ID</th>
+                            <th class="p-2">Model Name</th>
+                            <th class="p-2">Type</th>
+                            <th class="p-2">Think Level</th>
+                            <th class="p-2">Tokens (In / Out)</th>
+                            <th class="p-2">Balance</th>
+                            <th class="p-2">Subscription</th>
+                            <th class="p-2">Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logs-table-body" class="divide-y divide-gray-800/60">
+                        <tr><td colspan="8" class="p-4 text-center text-gray-500">No traffic logs received yet.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
     </div>
 
+    <!-- JavaScript Logic -->
     <script>
-        async function updateStatus(hwId, status) {
+        let selectedHwId = null;
+
+        async function fetchDashboardData() {
             try {
-                await fetch(`/api/update-status/${hwId}`, {
+                const mode = document.getElementById('log-filter-mode').value;
+                let url = `/api/dashboard-data?filter_mode=${mode}`;
+                if (selectedHwId) {
+                    url += `&hw_id=${encodeURIComponent(selectedHwId)}`;
+                }
+
+                const response = await fetch(url);
+                if (!response.ok) return;
+                const data = await response.json();
+                
+                const clients = data.clients || [];
+                const logs = data.logs || [];
+
+                renderClients(clients);
+                renderLogs(logs, clients);
+            } catch (err) {
+                console.error("Failed to sync dashboard:", err);
+            }
+        }
+
+        function renderClients(clients) {
+            const tbody = document.getElementById('clients-table-body');
+            document.getElementById('client-count').innerText = `${clients.length} Registered`;
+            
+            if (clients.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-gray-500">No discovered clients found.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = clients.map(c => {
+                const isSelected = selectedHwId === c.hw_id;
+                const isApproved = c.status === 'APPROVED';
+                const isDenied = c.status === 'DENIED';
+
+                return `
+                    <tr class="hover:bg-gray-800/40 transition cursor-pointer ${isSelected ? 'selected-row' : ''}">
+                        <td onclick="selectClient('${c.hw_id}')" class="p-2 font-mono font-medium text-emerald-400">
+                            ${c.hw_id}
+                            <span class="block text-[10px] text-gray-500 font-sans">${c.hostname || 'Host'}</span>
+                        </td>
+                        <td onclick="selectClient('${c.hw_id}')" class="p-2 font-mono text-gray-300">${c.ip_address || 'N/A'}</td>
+                        <td onclick="selectClient('${c.hw_id}')" class="p-2 font-mono text-gray-400">${c.mac_address || 'N/A'}</td>
+                        <td onclick="selectClient('${c.hw_id}')" class="p-2">
+                            <span class="px-2 py-0.5 rounded text-[10px] font-bold ${
+                                isApproved ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 
+                                (isDenied ? 'bg-red-950 text-red-400 border border-red-800' : 'bg-amber-950 text-amber-400 border border-amber-800')
+                            }">
+                                ${c.status || 'PENDING'}
+                            </span>
+                        </td>
+                        <td class="p-2 text-center">
+                            <div class="flex items-center justify-center gap-1">
+                                <button onclick="handleClientAction('${c.hw_id}', 'approve')" title="Approve Client" 
+                                    class="p-1 px-1.5 text-[10px] bg-emerald-900/60 hover:bg-emerald-700 text-emerald-200 rounded border border-emerald-700 transition">
+                                    ✓
+                                </button>
+                                <button onclick="handleClientAction('${c.hw_id}', 'deny')" title="Deny Client" 
+                                    class="p-1 px-1.5 text-[10px] bg-amber-900/60 hover:bg-amber-700 text-amber-200 rounded border border-amber-700 transition">
+                                    🚫
+                                </button>
+                                <button onclick="handleClientAction('${c.hw_id}', 'delete')" title="Delete Client" 
+                                    class="p-1 px-1.5 text-[10px] bg-red-900/60 hover:bg-red-700 text-red-200 rounded border border-red-700 transition">
+                                    🗑️
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function renderLogs(logs, clients) {
+            const tbody = document.getElementById('logs-table-body');
+
+            // Handle Filtered Client Rules
+            if (selectedHwId) {
+                const selectedClient = clients.find(c => c.hw_id === selectedHwId);
+
+                // 1. Client Deleted / Not Found
+                if (!selectedClient) {
+                    document.getElementById('log-count').innerText = `0 Recorded`;
+                    tbody.innerHTML = `<tr><td colspan="8" class="p-6 text-center text-gray-500 font-medium">Selected client was deleted. No traffic logs available.</td></tr>`;
+                    return;
+                }
+
+                // 2. Client Status is DENIED -> Clear logs and show blank state warning
+                if (selectedClient.status === 'DENIED') {
+                    document.getElementById('log-count').innerText = `0 Recorded`;
+                    tbody.innerHTML = `<tr><td colspan="8" class="p-6 text-center font-medium text-red-400 bg-red-950/20 rounded-lg">🚫 Client state is DENIED. Traffic logs are blocked and cleared from view.</td></tr>`;
+                    return;
+                }
+
+                // 3. Client Status is NOT APPROVED
+                if (selectedClient.status !== 'APPROVED') {
+                    document.getElementById('log-count').innerText = `0 Recorded`;
+                    tbody.innerHTML = `<tr><td colspan="8" class="p-6 text-center font-medium text-amber-400 bg-amber-950/20 rounded-lg">⏳ Client authorization is ${selectedClient.status}. Logs will appear once APPROVED.</td></tr>`;
+                    return;
+                }
+            }
+
+            // Client Status is APPROVED (or general view)
+            document.getElementById('log-count').innerText = `${logs.length} Recorded`;
+
+            if (logs.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-gray-500">No telemetry logs found for this selection.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = logs.map(l => {
+                const dateStr = l.created_at ? new Date(l.created_at).toLocaleTimeString() : 'N/A';
+                return `
+                    <tr class="hover:bg-gray-800/30 transition">
+                        <td class="p-2 font-mono text-emerald-400">${l.hw_id || 'UNKNOWN'}</td>
+                        <td class="p-2 font-semibold text-white">${l.model_name || 'Sonar 2'}</td>
+                        <td class="p-2 text-gray-400 text-[11px]">${l.model_type || 'Perplexity AI'}</td>
+                        <td class="p-2">
+                            <span class="px-1.5 py-0.5 text-[10px] bg-gray-800 border border-gray-700 text-gray-300 rounded">
+                                ${l.think_level || l.thinklevl || 'High'}
+                            </span>
+                        </td>
+                        <td class="p-2 font-mono">
+                            <span class="text-emerald-400">↑${l.input_tokens || 0}</span> / 
+                            <span class="text-cyan-400">↓${l.output_tokens || 0}</span>
+                        </td>
+                        <td class="p-2 font-mono text-amber-400 font-medium">${(l.balance_tokens || 0).toLocaleString()}</td>
+                        <td class="p-2 text-gray-300 text-[11px]">${l.subscription_status || 'ACTIVE'}</td>
+                        <td class="p-2 font-mono text-gray-400 text-[11px]">${dateStr}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        async function handleClientAction(hwId, action) {
+            if (action === 'delete' && !confirm(`Are you sure you want to delete client ${hwId} and its associated logs?`)) {
+                return;
+            }
+
+            try {
+                const resp = await fetch('/api/client-action', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status: status })
+                    body: JSON.stringify({ hw_id: hwId, action: action })
                 });
-                load();
+
+                if (resp.ok) {
+                    if (action === 'delete' && selectedHwId === hwId) {
+                        clearFilter();
+                    } else {
+                        fetchDashboardData();
+                    }
+                } else {
+                    alert('Failed to execute client action.');
+                }
             } catch (err) {
-                console.error("Failed to update status:", err);
+                console.error("Action Error:", err);
             }
         }
 
-        async function load() {
-            const statusElem = document.getElementById('status-indicator');
-            try {
-                const res = await fetch('/api/dashboard-data');
-                if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-                
-                const data = await res.json();
-                
-                // Update Clients Table
-                const clientBody = document.getElementById('client-body');
-                if (data.clients && data.clients.length > 0) {
-                    clientBody.innerHTML = data.clients.map(c => `
-                        <tr class="hover:bg-zinc-800/30 transition">
-                            <td class="p-2.5 font-mono text-zinc-200">${c.hw_id}</td>
-                            <td class="p-2.5 font-semibold">
-                                <span class="px-2 py-0.5 rounded text-[10px] ${
-                                    c.status === 'APPROVED' 
-                                    ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' 
-                                    : 'bg-amber-950 text-amber-400 border border-amber-800'
-                                }">
-                                    ${c.status}
-                                </span>
-                            </td>
-                            <td class="p-2.5">
-                                ${c.status !== 'APPROVED' 
-                                    ? `<button onclick="updateStatus('${c.hw_id}', 'APPROVED')" class="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded text-[11px] transition">Approve</button>`
-                                    : `<span class="text-zinc-600 text-[11px]">Active</span>`
-                                }
-                            </td>
-                        </tr>`).join('');
-                } else {
-                    clientBody.innerHTML = '<tr><td colspan="3" class="p-4 text-center text-zinc-500">No registered clients found.</td></tr>';
-                }
-
-                // Update Logs Table
-                const logBody = document.getElementById('log-body');
-                if (data.logs && data.logs.length > 0) {
-                    logBody.innerHTML = data.logs.map(l => `
-                        <tr class="hover:bg-zinc-800/30 transition">
-                            <td class="p-2.5 font-mono text-zinc-300">${l.hw_id}</td>
-                            <td class="p-2.5 text-zinc-400 font-medium">${l.model_name || 'unknown'}</td>
-                            <td class="p-2.5 font-mono text-zinc-300">${l.input_tokens || 0} / ${l.output_tokens || 0}</td>
-                        </tr>`).join('');
-                } else {
-                    logBody.innerHTML = '<tr><td colspan="3" class="p-4 text-center text-zinc-500">No traffic logs received yet.</td></tr>';
-                }
-
-                statusElem.className = "flex items-center text-xs text-emerald-500 bg-emerald-950/50 border border-emerald-800/50 px-3 py-1 rounded-full";
-                statusElem.innerHTML = `<span class="w-2 h-2 mr-2 bg-emerald-500 rounded-full animate-pulse"></span> Live Syncing`;
-
-            } catch (err) {
-                console.error("Dashboard fetch error:", err);
-                statusElem.className = "flex items-center text-xs text-rose-500 bg-rose-950/50 border border-rose-800/50 px-3 py-1 rounded-full";
-                statusElem.innerHTML = `<span class="w-2 h-2 mr-2 bg-rose-500 rounded-full"></span> Disconnected`;
-            }
+        function selectClient(hwId) {
+            selectedHwId = hwId;
+            document.getElementById('active-filter-badge').classList.remove('hidden');
+            document.getElementById('filter-client-id').innerText = hwId;
+            document.getElementById('log-subheading').innerText = `Filtered telemetry for ${hwId}`;
+            fetchDashboardData();
         }
 
-        load();
-        setInterval(load, 5000); // Auto-refresh every 5 seconds
+        function clearFilter() {
+            selectedHwId = null;
+            document.getElementById('active-filter-badge').classList.add('hidden');
+            document.getElementById('log-subheading').innerText = `Captured encrypted model usage telemetry`;
+            fetchDashboardData();
+        }
+
+        // Auto Refresh every 5 seconds
+        setInterval(fetchDashboardData, 5000);
+        fetchDashboardData();
     </script>
 </body>
 </html>
