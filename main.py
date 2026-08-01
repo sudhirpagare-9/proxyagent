@@ -1,7 +1,4 @@
 ### 3. `main.py` (FastAPI Server Application)
-Save this file as `main.py` in your root deployment directory[cite: 8].
-
-```python
 import os
 import json
 import base64
