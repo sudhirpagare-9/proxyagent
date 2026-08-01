@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Zero-Dependency Desktop Agent (Windows / Linux / macOS)
-Extracts hardware serial numbers and streams RSA-OAEP encrypted telemetry.
+Extracts hardware BIOS serial numbers & UUID for uniqueness.
+Streams RSA-OAEP encrypted telemetry and auto-reregisters if deleted.
 """
 
 import os
@@ -16,35 +17,68 @@ import subprocess
 import hashlib
 import base64
 import urllib.request
+import urllib.error
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes, serialization
 
 DASHBOARD_URL = "https://proxyagent-dashboard.onrender.com"
 HEADERS = {"Content-Type": "application/json"}
 
+def get_real_mac_address() -> str:
+    """Gets formatted local hardware MAC address."""
+    node = uuid.getnode()
+    mac_hex = f"{node:012x}"
+    return ":".join(mac_hex[i:i+2] for i in range(0, 12, 2))
+
 def get_hardware_uuid() -> str:
+    """Extracts BIOS Serial Number and Hardware UUID for uniqueness."""
     sys_type = platform.system()
-    raw_id = ""
+    bios_serial = ""
+    system_uuid = ""
+
+    def clean_val(val: str) -> str:
+        if not val:
+            return ""
+        v = val.strip().strip('"').strip("'")
+        invalid = ["to be filled", "default string", "none", "00000000", "unknown"]
+        if any(inv in v.lower() for inv in invalid):
+            return ""
+        return v
 
     try:
         if sys_type == "Windows":
-            cmd = 'powershell -NoProfile -Command "(Get-CimInstance Win32_ComputerSystemProduct).UUID"'
-            raw_id = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode().strip()
+            cmd_bios = 'powershell -NoProfile -Command "(Get-CimInstance Win32_Bios).SerialNumber"'
+            bios_serial = clean_val(subprocess.check_output(cmd_bios, shell=True, stderr=subprocess.DEVNULL).decode())
+
+            cmd_uuid = 'powershell -NoProfile -Command "(Get-CimInstance Win32_ComputerSystemProduct).UUID"'
+            system_uuid = clean_val(subprocess.check_output(cmd_uuid, shell=True, stderr=subprocess.DEVNULL).decode())
+
         elif sys_type == "Linux":
-            if os.path.exists("/etc/machine-id"):
+            if os.path.exists("/sys/class/dmi/id/product_uuid"):
+                with open("/sys/class/dmi/id/product_uuid", "r") as f:
+                    system_uuid = clean_val(f.read())
+            if os.path.exists("/sys/class/dmi/id/bios_serial"):
+                with open("/sys/class/dmi/id/bios_serial", "r") as f:
+                    bios_serial = clean_val(f.read())
+            if not system_uuid and os.path.exists("/etc/machine-id"):
                 with open("/etc/machine-id", "r") as f:
-                    raw_id = f.read().strip()
+                    system_uuid = clean_val(f.read())
+
         elif sys_type == "Darwin":
-            cmd = "system_profiler SPHardwareDataType | grep 'Serial Number'"
-            raw_id = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode().split()[-1]
+            cmd = "ioreg -l | grep IOPlatformSerialNumber"
+            raw = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode()
+            if "=" in raw:
+                bios_serial = clean_val(raw.split("=")[-1])
     except Exception:
         pass
 
-    if not raw_id:
-        raw_id = f"{socket.gethostname()}-{uuid.getnode()}"
+    raw_combined = f"{bios_serial}:{system_uuid}"
+    if not bios_serial and not system_uuid:
+        raw_combined = f"{socket.gethostname()}:{get_real_mac_address()}"
 
-    hashed = hashlib.sha256(raw_id.encode('utf-8')).hexdigest()[:12].upper()
-    return f"{sys_type[:3].upper()}-{hashed}"
+    hashed = hashlib.sha256(raw_combined.encode('utf-8')).hexdigest()[:12].upper()
+    prefix = "SUPLAPTOP" if "laptop" in socket.gethostname().lower() or sys_type == "Windows" else sys_type[:3].upper()
+    return f"{prefix}-{hashed}"
 
 AGENT_ID = get_hardware_uuid()
 cached_public_key = None
@@ -64,11 +98,11 @@ def get_server_public_key():
         print(f"[-] Failed to fetch public key from server: {e}")
         return None
 
-def register():
+def register() -> bool:
     payload = {
         "hw_id": AGENT_ID,
         "hostname": socket.gethostname(),
-        "mac_address": "00:00:00:00:00:00",
+        "mac_address": get_real_mac_address(),
         "ip_address": "127.0.0.1",
         "client_name": f"DesktopAgent-{platform.system()}",
         "model_name": "Sonar 2 Pro",
@@ -81,14 +115,22 @@ def register():
     req = urllib.request.Request(f"{DASHBOARD_URL}/register", data=json.dumps(payload).encode('utf-8'), headers=HEADERS)
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            print(f"[+] Device Registered: {resp.read().decode('utf-8')}")
+            print(f"[+] Device Registered Successfully [{AGENT_ID}]: {resp.read().decode('utf-8')}")
+            return True
+    except urllib.error.HTTPError as http_err:
+        try:
+            err_body = http_err.read().decode('utf-8')
+            print(f"[-] Registration Error [HTTP {http_err.code}]: {err_body}")
+        except Exception:
+            print(f"[-] Registration Error: {http_err}")
     except Exception as e:
         print(f"[-] Registration Error: {e}")
+    return False
 
 def send_telemetry():
     pub_key = get_server_public_key()
     if not pub_key:
-        print("[-] Skipping transmission: Public key uninitialized.")
+        print("[-] Skipping transmission: Server public key unavailable.")
         return
 
     payload = {
@@ -102,7 +144,6 @@ def send_telemetry():
         "s": "ACTIVE"
     }
     
-    # Encrypt payload using RSA-OAEP SHA-256
     raw_payload_bytes = json.dumps(payload).encode('utf-8')
     try:
         encrypted_bytes = pub_key.encrypt(
@@ -127,6 +168,16 @@ def send_telemetry():
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             print(f"[+] E2EE Telemetry Sent [{platform.system()}]: {resp.read().decode('utf-8')}")
+    except urllib.error.HTTPError as http_err:
+        if http_err.code == 404:
+            print(f"[!] Server returned 404 (Client record deleted/unregistered). Triggering re-registration...")
+            register()
+        else:
+            try:
+                err_body = http_err.read().decode('utf-8')
+                print(f"[-] Transmission Error [HTTP {http_err.code}]: {err_body}")
+            except Exception:
+                print(f"[-] Transmission Error: {http_err}")
     except Exception as e:
         print(f"[-] Transmission Error: {e}")
 
