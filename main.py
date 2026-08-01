@@ -79,7 +79,7 @@ if SUPABASE_URL and SUPABASE_KEY:
     except Exception as e:
         print(f"[!] Supabase initialization failed: {e}")
 
-# Encryption Helpers
+# Encryption & Data Masking Helpers
 def encrypt_pii(plaintext: str) -> str:
     if not plaintext:
         return ""
@@ -213,12 +213,16 @@ async def log_traffic(request: Request):
     if supabase:
         try:
             client_res = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
-            if client_res.data and client_res.data[0].get("status") == "DENIED":
+            if not client_res.data:
+                # Client was deleted or is not registered. Return 404 to prompt re-registration
+                raise HTTPException(status_code=404, detail="Client hardware ID not registered. Registration required.")
+                
+            if client_res.data[0].get("status") == "DENIED":
                 raise HTTPException(status_code=403, detail="Client is DENIED by administrator.")
         except HTTPException:
             raise
-        except Exception:
-            pass
+        except Exception as err:
+            print(f"[!] Registry Check Warning: {str(err)}")
 
     # Decrypt RSA Encrypted Telemetry
     try:

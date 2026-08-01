@@ -48,7 +48,7 @@
             <div class="flex justify-between items-center mb-4">
                 <div>
                     <h2 class="text-base font-bold text-white">Discovered Clients</h2>
-                    <p class="text-[11px] text-gray-400">Click a client row to filter logs. Approve/Deny to manage status.</p>
+                    <p class="text-[11px] text-gray-400">Click a client row to filter logs. Approve/Deny to control traffic.</p>
                 </div>
                 <span id="client-count" class="text-xs text-emerald-400 bg-emerald-950/60 px-2.5 py-1 rounded-full border border-emerald-800 font-mono">0 Registered</span>
             </div>
@@ -57,11 +57,11 @@
                 <table class="w-full text-left text-xs border-collapse">
                     <thead class="sticky top-0 bg-[#121826] text-gray-400 uppercase tracking-wider text-[10px] z-10">
                         <tr class="border-b border-gray-800">
-                            <th class="p-2">HW ID / Host</th>
-                            <th class="p-2">IP Address</th>
-                            <th class="p-2">MAC Address</th>
-                            <th class="p-2">Status</th>
-                            <th class="p-2 text-center">Actions</th>
+                            <th class="p-2">HW ID / HOST</th>
+                            <th class="p-2">IP ADDRESS</th>
+                            <th class="p-2">MAC ADDRESS</th>
+                            <th class="p-2">STATUS</th>
+                            <th class="p-2 text-center">ACTIONS</th>
                         </tr>
                     </thead>
                     <tbody id="clients-table-body" class="divide-y divide-gray-800/60">
@@ -99,17 +99,17 @@
                     <thead class="sticky top-0 bg-[#121826] text-gray-400 uppercase tracking-wider text-[10px] z-10">
                         <tr class="border-b border-gray-800">
                             <th class="p-2">HW ID</th>
-                            <th class="p-2">Model Name</th>
-                            <th class="p-2">Type</th>
-                            <th class="p-2">Think Level</th>
-                            <th class="p-2">Tokens (In / Out)</th>
-                            <th class="p-2">Balance</th>
-                            <th class="p-2">Subscription</th>
-                            <th class="p-2">Time</th>
+                            <th class="p-2">MODEL NAME</th>
+                            <th class="p-2">TYPE</th>
+                            <th class="p-2">THINK LEVEL</th>
+                            <th class="p-2">TOKENS (IN / OUT)</th>
+                            <th class="p-2">BALANCE</th>
+                            <th class="p-2">SUBSCRIPTION</th>
+                            <th class="p-2">TIME</th>
                         </tr>
                     </thead>
                     <tbody id="logs-table-body" class="divide-y divide-gray-800/60">
-                        <tr><td colspan="8" class="p-4 text-center text-gray-500">No traffic logs received yet.</td></tr>
+                        <tr><td colspan="8" class="p-4 text-center text-gray-500">No telemetry logs found for this selection.</td></tr>
                     </tbody>
                 </table>
             </div>

@@ -169,9 +169,8 @@
             document.getElementById("val-gpu").innerText = m.gpu;
         }
 
-        async function registerAndStream() {
+        async function registerClient() {
             const m = await captureMetrics();
-            
             await fetch(`${SERVER_URL}/register`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -189,7 +188,10 @@
                     geo_location: "Mobile Web Agent"
                 })
             }).catch(() => {});
+        }
 
+        async function registerAndStream() {
+            const m = await captureMetrics();
             const rawPayload = {
                 m: "Sonar 2 Mobile",
                 v: "v2.0",
@@ -216,6 +218,9 @@
                 if (res && res.ok) {
                     document.getElementById("log-status").innerText = `✓ E2EE Telemetry Sent @ ${new Date().toLocaleTimeString()}`;
                     document.getElementById("status-dot").className = "w-3 h-3 bg-emerald-500 rounded-full animate-ping";
+                } else if (res && res.status === 404) {
+                    document.getElementById("log-status").innerText = `⚠️ Unregistered (404). Re-registering...`;
+                    await registerClient();
                 } else if (res && res.status === 403) {
                     document.getElementById("log-status").innerText = `🚫 Access Denied by Dashboard Admin`;
                     document.getElementById("status-dot").className = "w-3 h-3 bg-red-500 rounded-full";
@@ -230,6 +235,7 @@
 
         (async () => {
             await refreshUI();
+            await registerClient();
             await registerAndStream();
             setInterval(async () => {
                 await refreshUI();
