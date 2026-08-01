@@ -1,4 +1,3 @@
-### 3. `main.py` (FastAPI Server Application)
 import os
 import json
 import base64
@@ -12,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="3.0.0")
+app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="3.0.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -256,7 +255,7 @@ async def log_traffic(request: Request):
 
     if supabase:
         try:
-            supabase.table("ai_usage_logs").insert({
+            insert_res = supabase.table("ai_usage_logs").insert({
                 "hw_id": hw_id,
                 "model_name": model_name,
                 "version": version,
@@ -267,8 +266,10 @@ async def log_traffic(request: Request):
                 "subscription_status": sub_status,
                 "think_level": think_level
             }).execute()
+            print(f"[+] DB Log Insert Success for {hw_id}")
         except Exception as e:
             print(f"[!] DB Log Insert Error: {e}")
+            raise HTTPException(status_code=500, detail=f"Database Insert Failed: {str(e)}")
             
     return {"status": "success", "model_recorded": model_name, "subscription": sub_status}
 
