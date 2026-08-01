@@ -1,6 +1,7 @@
 import os
 import json
 import base64
+import traceback
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import FastAPI, Request, HTTPException, Query
@@ -12,6 +13,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 app = FastAPI(title="AI Traffic Dashboard & Security Monitor")
 
+# Environment Variable Configurations
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
@@ -22,6 +24,7 @@ AES_PII_SECRET = os.environ.get("AES_PII_SECRET", "soc-gdpr-nist-default-32byte-
 aesgcm = AESGCM(AES_PII_SECRET)
 
 def sanitize_key_str(raw_str: str) -> str:
+    """Cleans base64 or escaped PEM string inputs from environment variables."""
     if not raw_str:
         return ""
     clean_str = raw_str.strip()
@@ -45,10 +48,11 @@ if PRIVATE_KEY_PEM:
             password=None
         )
     except Exception as e:
-        print(f"[!] Error loading RSA key: {e}")
+        print(f"[!] Error loading RSA private key: {e}")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
 
+# AES-GCM PII Encryption & Decryption Helpers
 def encrypt_pii(plaintext: str) -> str:
     if not plaintext:
         return ""
@@ -81,6 +85,7 @@ def mask_mac(mac: str) -> str:
         return f"{parts[0]}:{parts[1]}:{parts[2]}:**:**:**"
     return mac
 
+# Endpoints
 @app.get("/", response_class=HTMLResponse)
 async def read_index():
     if os.path.exists("index.html"):
@@ -103,11 +108,11 @@ async def register_client(request: Request):
         data = await request.json()
         hw_id = data.get("hw_id")
         if not hw_id:
-            raise HTTPException(status_code=400, detail="Missing hw_id.")
+            raise HTTPException(status_code=400, detail="Missing hw_id parameter.")
 
         client_ip = request.client.host if request.client else data.get("ip_address", "127.0.0.1")
 
-        # Check existing status to preserve manual APPROVED/DENIED setting
+        # Preserve existing status (APPROVED / DENIED)
         existing_status = "APPROVED"
         try:
             existing = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
@@ -116,7 +121,6 @@ async def register_client(request: Request):
         except Exception:
             pass
 
-        # Resilient Upsert Payload
         client_record = {
             "hw_id": hw_id,
             "hostname": encrypt_pii(data.get("hostname", "UNKNOWN")),
@@ -140,8 +144,7 @@ async def register_client(request: Request):
         try:
             supabase.table("clients_registry").upsert(client_record, on_conflict="hw_id").execute()
         except Exception as db_err:
-            print(f"[!] Primary Upsert Warning: {db_err}. Retrying with minimal fields...")
-            # Safe Fallback to minimal core schema
+            print(f"[!] Upsert Warning: {db_err}. Retrying with core schema...")
             supabase.table("clients_registry").upsert({
                 "hw_id": hw_id,
                 "hostname": encrypt_pii(data.get("hostname", "UNKNOWN")),
@@ -152,7 +155,8 @@ async def register_client(request: Request):
         
         return {"status": "success"}
     except Exception as e:
-        print(f"[!] Registration Error: {str(e)}")
+        print(f"[!] Registration Error:")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Registration error: {str(e)}")
 
 @app.post("/log-traffic")
@@ -171,16 +175,19 @@ async def log_traffic(request: Request):
     hw_id = data.get("hw_id")
 
     if not encrypted_payload_b64 or not hw_id:
-        raise HTTPException(status_code=400, detail="Missing parameters.")
+        raise HTTPException(status_code=400, detail="Missing mandatory parameters.")
 
-    # Block traffic if client status is DENIED
+    # Access Denial Check
     try:
         client_res = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
         if client_res.data and client_res.data[0].get("status") == "DENIED":
             raise HTTPException(status_code=403, detail="Client is DENIED by administrator.")
+    except HTTPException:
+        raise
     except Exception:
         pass
 
+    # Decrypt RSA Encrypted Telemetry Payload
     try:
         encrypted_data = base64.b64decode(encrypted_payload_b64)
         decrypted_bytes = private_key.decrypt(
@@ -196,7 +203,7 @@ async def log_traffic(request: Request):
         print(f"[!] Decryption Failure for [{hw_id}]: {str(e)}")
         raise HTTPException(status_code=401, detail=f"Decryption Failure: {str(e)}")
 
-    # Unpack both compact keys (m, v, t, l, i, o, b, s) and verbose keys
+    # Unpack Compact (m, v, t, l, i, o, b, s) or Standard Schema
     model_name = payload.get("m") or payload.get("model_name", "Sonar 2")
     version = payload.get("v") or payload.get("version", "v2.0")
     model_type = payload.get("t") or payload.get("model_type", "Perplexity AI")
@@ -231,7 +238,7 @@ async def get_dashboard_data(
     if not supabase:
         return {"clients": [], "logs": []}
         
-    raw_clients = supabase.table("clients_registry").select("*").execute().data
+    raw_clients = supabase.table("clients_registry").select("*").execute().data or []
     
     logs_query = supabase.table("ai_usage_logs").select("*").order("created_at", desc=True)
     
@@ -244,7 +251,7 @@ async def get_dashboard_data(
     else:
         logs_query = logs_query.limit(100)
 
-    raw_logs = logs_query.execute().data
+    raw_logs = logs_query.execute().data or []
 
     processed_clients = []
     for c in raw_clients:

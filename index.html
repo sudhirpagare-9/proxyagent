@@ -10,7 +10,6 @@
         .glass { background: rgba(18, 24, 38, 0.85); backdrop-filter: blur(12px); border: 1px solid #232d3f; }
         .selected-row { background-color: rgba(16, 185, 129, 0.12) !important; border-left: 3px solid #10b981; }
         
-        /* Custom Sleek Scrollbars */
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: #0d121d; border-radius: 4px; }
         ::-webkit-scrollbar-thumb { background: #2a364f; border-radius: 4px; }
@@ -19,7 +18,6 @@
 </head>
 <body class="p-4 md:p-6 min-h-screen">
 
-    <!-- Top Header Navigation -->
     <header class="flex flex-wrap justify-between items-center mb-6 pb-4 border-b border-gray-800 gap-4">
         <div>
             <h1 class="text-2xl font-bold text-white flex items-center gap-2.5">
@@ -43,10 +41,8 @@
         </div>
     </header>
 
-    <!-- Main Section Grid -->
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        <!-- Left Section: Discovered Clients -->
         <section class="lg:col-span-5 glass rounded-xl p-5 shadow-2xl flex flex-col">
             <div class="flex justify-between items-center mb-4">
                 <div>
@@ -56,7 +52,6 @@
                 <span id="client-count" class="text-xs text-emerald-400 bg-emerald-950/60 px-2.5 py-1 rounded-full border border-emerald-800 font-mono">0 Registered</span>
             </div>
 
-            <!-- Scrollable Table Container -->
             <div class="overflow-y-auto max-h-[620px] pr-1">
                 <table class="w-full text-left text-xs border-collapse">
                     <thead class="sticky top-0 bg-[#121826] text-gray-400 uppercase tracking-wider text-[10px] z-10">
@@ -75,7 +70,6 @@
             </div>
         </section>
 
-        <!-- Right Section: Client AI Traffic Logs -->
         <section class="lg:col-span-7 glass rounded-xl p-5 shadow-2xl flex flex-col">
             <div class="flex flex-wrap justify-between items-center mb-4 gap-2">
                 <div>
@@ -84,7 +78,6 @@
                 </div>
 
                 <div class="flex items-center gap-2">
-                    <!-- Filter Toggle -->
                     <select id="log-filter-mode" onchange="fetchDashboardData()" class="bg-gray-900 border border-gray-700 text-gray-300 text-xs rounded-md px-2.5 py-1 focus:outline-none">
                         <option value="top100">Top 100 Records</option>
                         <option value="today">Today's Records Only</option>
@@ -94,7 +87,6 @@
                 </div>
             </div>
 
-            <!-- Scrollable Table Container -->
             <div class="overflow-y-auto max-h-[620px] pr-1">
                 <table class="w-full text-left text-xs border-collapse">
                     <thead class="sticky top-0 bg-[#121826] text-gray-400 uppercase tracking-wider text-[10px] z-10">
@@ -118,7 +110,6 @@
 
     </div>
 
-    <!-- JavaScript Logic -->
     <script>
         let selectedHwId = null;
 
@@ -198,25 +189,21 @@
         function renderLogs(logs, clients) {
             const tbody = document.getElementById('logs-table-body');
 
-            // Handle Filtered Client Rules
             if (selectedHwId) {
                 const selectedClient = clients.find(c => c.hw_id === selectedHwId);
 
-                // 1. Client Deleted / Not Found
                 if (!selectedClient) {
                     document.getElementById('log-count').innerText = `0 Recorded`;
                     tbody.innerHTML = `<tr><td colspan="8" class="p-6 text-center text-gray-500 font-medium">Selected client was deleted. No traffic logs available.</td></tr>`;
                     return;
                 }
 
-                // 2. Client Status is DENIED -> Clear logs and show blank state warning
                 if (selectedClient.status === 'DENIED') {
                     document.getElementById('log-count').innerText = `0 Recorded`;
                     tbody.innerHTML = `<tr><td colspan="8" class="p-6 text-center font-medium text-red-400 bg-red-950/20 rounded-lg">🚫 Client state is DENIED. Traffic logs are blocked and cleared from view.</td></tr>`;
                     return;
                 }
 
-                // 3. Client Status is NOT APPROVED
                 if (selectedClient.status !== 'APPROVED') {
                     document.getElementById('log-count').innerText = `0 Recorded`;
                     tbody.innerHTML = `<tr><td colspan="8" class="p-6 text-center font-medium text-amber-400 bg-amber-950/20 rounded-lg">⏳ Client authorization is ${selectedClient.status}. Logs will appear once APPROVED.</td></tr>`;
@@ -224,7 +211,6 @@
                 }
             }
 
-            // Client Status is APPROVED (or general view)
             document.getElementById('log-count').innerText = `${logs.length} Recorded`;
 
             if (logs.length === 0) {
@@ -297,7 +283,6 @@
             fetchDashboardData();
         }
 
-        // Auto Refresh every 5 seconds
         setInterval(fetchDashboardData, 5000);
         fetchDashboardData();
     </script>
