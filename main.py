@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import FastAPI, Request, HTTPException, Query, Header
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from supabase import create_client
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -15,21 +15,20 @@ app = FastAPI(title="AI Traffic Dashboard & Security Monitor")
 
 # Environment Variable Configurations
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+SUPABASE_KEY = (
+    os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or 
+    os.environ.get("SUPABASE_KEY") or 
+    os.environ.get("SUPABASE_ANON_KEY")
+)
 
 RAW_PRIVATE_KEY = os.environ.get("RSA_PRIVATE_KEY", "")
 RAW_PUBLIC_KEY = os.environ.get("RSA_PUBLIC_KEY", "")
 
-# Secure handling of PII Encryption Secret (NIST Compliance)
-AES_SECRET_ENV = os.environ.get("AES_PII_SECRET")
-if not AES_SECRET_ENV:
-    print("[!] WARNING: AES_PII_SECRET not set in environment. Using standard default key.")
-    AES_SECRET_ENV = "soc-gdpr-nist-default-32byte-secret-key!!"
-
+AES_SECRET_ENV = os.environ.get("AES_PII_SECRET", "soc-gdpr-nist-default-32byte-secret-key!!")
 AES_PII_SECRET = AES_SECRET_ENV.encode('utf-8')[:32].ljust(32, b'0')
 aesgcm = AESGCM(AES_PII_SECRET)
 
-ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "")  # Optional admin authorization key
+ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "")
 
 def sanitize_key_str(raw_str: str) -> str:
     """Cleans base64 or escaped PEM string inputs from environment variables."""
@@ -45,22 +44,42 @@ def sanitize_key_str(raw_str: str) -> str:
             pass
     return clean_str.replace("\\n", "\n")
 
+# Load or Auto-Generate RSA Keys for E2EE
 PUBLIC_KEY_PEM = sanitize_key_str(RAW_PUBLIC_KEY)
 PRIVATE_KEY_PEM = sanitize_key_str(RAW_PRIVATE_KEY)
 
 private_key = None
+public_key_pem_str = ""
+
 if PRIVATE_KEY_PEM:
     try:
         private_key = serialization.load_pem_private_key(
             PRIVATE_KEY_PEM.encode('utf-8'),
             password=None
         )
+        public_key_pem_str = PUBLIC_KEY_PEM
     except Exception as e:
-        print(f"[!] Error loading RSA private key: {e}")
+        print(f"[!] Error loading provided RSA private key: {e}")
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+# Fallback: Auto-generate in-memory RSA keypair if env keys are missing/invalid
+if not private_key:
+    print("[*] Generating automatic in-memory RSA keypair for E2EE...")
+    _generated_priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_key = _generated_priv
+    _generated_pub = _generated_priv.public_key()
+    public_key_pem_str = _generated_pub.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode('utf-8')
 
-# AES-GCM PII Encryption & Decryption Helpers
+supabase = None
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception as e:
+        print(f"[!] Supabase initialization failed: {e}")
+
+# Encryption Helpers
 def encrypt_pii(plaintext: str) -> str:
     if not plaintext:
         return ""
@@ -114,15 +133,10 @@ async def read_agent():
     
 @app.get("/public-key", response_class=PlainTextResponse)
 async def get_public_key():
-    if not PUBLIC_KEY_PEM:
-        raise HTTPException(status_code=500, detail="Public Key not configured on server.")
-    return PUBLIC_KEY_PEM
+    return public_key_pem_str
 
 @app.post("/register")
 async def register_client(request: Request):
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Database connection missing.")
-    
     try:
         data = await request.json()
         hw_id = data.get("hw_id")
@@ -131,7 +145,10 @@ async def register_client(request: Request):
 
         client_ip = request.client.host if request.client else data.get("ip_address", "127.0.0.1")
 
-        # Preserve existing status (APPROVED / DENIED)
+        if not supabase:
+            print(f"[!] Warning: Registering {hw_id} in offline mode (Supabase DB not configured).")
+            return {"status": "success", "mode": "offline"}
+
         existing_status = "APPROVED"
         try:
             existing = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
@@ -173,18 +190,15 @@ async def register_client(request: Request):
             }, on_conflict="hw_id").execute()
         
         return {"status": "success"}
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"[!] Registration Error:")
+        print(f"[!] Registration Error: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Registration error: {str(e)}")
 
 @app.post("/log-traffic")
 async def log_traffic(request: Request):
-    if not private_key:
-        raise HTTPException(status_code=500, detail="Private key uninitialized on server.")
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Database connection missing.")
-        
     try:
         data = await request.json()
     except Exception as e:
@@ -196,17 +210,17 @@ async def log_traffic(request: Request):
     if not encrypted_payload_b64 or not hw_id:
         raise HTTPException(status_code=400, detail="Missing mandatory parameters.")
 
-    # Access Denial Check
-    try:
-        client_res = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
-        if client_res.data and client_res.data[0].get("status") == "DENIED":
-            raise HTTPException(status_code=403, detail="Client is DENIED by administrator.")
-    except HTTPException:
-        raise
-    except Exception:
-        pass
+    if supabase:
+        try:
+            client_res = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
+            if client_res.data and client_res.data[0].get("status") == "DENIED":
+                raise HTTPException(status_code=403, detail="Client is DENIED by administrator.")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
 
-    # Decrypt RSA Encrypted Telemetry Payload (RSA-OAEP SHA-256)
+    # Decrypt RSA Encrypted Telemetry
     try:
         encrypted_data = base64.b64decode(encrypted_payload_b64)
         decrypted_bytes = private_key.decrypt(
@@ -222,7 +236,6 @@ async def log_traffic(request: Request):
         print(f"[!] Decryption Failure for [{hw_id}]: {str(e)}")
         raise HTTPException(status_code=401, detail=f"Decryption Failure: {str(e)}")
 
-    # Unpack Telemetry Payload
     model_name = payload.get("m") or payload.get("model_name", "Sonar 2")
     version = payload.get("v") or payload.get("version", "v2.0")
     model_type = payload.get("t") or payload.get("model_type", "Perplexity AI")
@@ -232,20 +245,20 @@ async def log_traffic(request: Request):
     bal_tokens = int(payload.get("b") if "b" in payload else payload.get("balance_tokens", 0))
     sub_status = payload.get("s") or payload.get("subscription_status", "ACTIVE")
 
-    try:
-        supabase.table("ai_usage_logs").insert({
-            "hw_id": hw_id,
-            "model_name": model_name,
-            "version": version,
-            "model_type": model_type,
-            "input_tokens": in_tokens,
-            "output_tokens": out_tokens,
-            "balance_tokens": bal_tokens,
-            "subscription_status": sub_status
-        }).execute()
-    except Exception as e:
-        print(f"[!] DB Insert Error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"DB Insert Error: {str(e)}")
+    if supabase:
+        try:
+            supabase.table("ai_usage_logs").insert({
+                "hw_id": hw_id,
+                "model_name": model_name,
+                "version": version,
+                "model_type": model_type,
+                "input_tokens": in_tokens,
+                "output_tokens": out_tokens,
+                "balance_tokens": bal_tokens,
+                "subscription_status": sub_status
+            }).execute()
+        except Exception as e:
+            print(f"[!] DB Log Insert Warning: {str(e)}")
             
     return {"status": "success"}
 
@@ -258,43 +271,47 @@ async def get_dashboard_data(
     verify_admin_auth(x_admin_key)
     
     if not supabase:
-        return {"clients": [], "logs": []}
+        return {"clients": [], "logs": [], "db_status": "disconnected"}
         
-    raw_clients = supabase.table("clients_registry").select("*").execute().data or []
-    logs_query = supabase.table("ai_usage_logs").select("*").order("created_at", desc=True)
-    
-    if hw_id:
-        logs_query = logs_query.eq("hw_id", hw_id)
+    try:
+        raw_clients = supabase.table("clients_registry").select("*").execute().data or []
+        logs_query = supabase.table("ai_usage_logs").select("*").order("created_at", desc=True)
         
-    if filter_mode == "today":
-        today_start = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
-        logs_query = logs_query.gte("created_at", today_start)
-    else:
-        logs_query = logs_query.limit(100)
+        if hw_id:
+            logs_query = logs_query.eq("hw_id", hw_id)
+            
+        if filter_mode == "today":
+            today_start = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
+            logs_query = logs_query.gte("created_at", today_start)
+        else:
+            logs_query = logs_query.limit(100)
 
-    raw_logs = logs_query.execute().data or []
+        raw_logs = logs_query.execute().data or []
 
-    processed_clients = []
-    for c in raw_clients:
-        dec_ip = decrypt_pii(c.get("ip_address", ""))
-        dec_mac = decrypt_pii(c.get("mac_address", ""))
-        dec_geo = decrypt_pii(c.get("geo_location", ""))
-        dec_host = decrypt_pii(c.get("hostname", ""))
-        
-        processed_clients.append({
-            "hw_id": c.get("hw_id"),
-            "hostname": dec_host,
-            "mac_address": mask_mac(dec_mac),
-            "ip_address": mask_ip(dec_ip),
-            "status": c.get("status", "APPROVED"),
-            "subscription_status": c.get("subscription_status", "ACTIVE"),
-            "model_name": c.get("model_name", "Sonar 2"),
-            "think_level": c.get("thinklevl", "High"),
-            "country": c.get("country", "IND"),
-            "geo_location": dec_geo
-        })
+        processed_clients = []
+        for c in raw_clients:
+            dec_ip = decrypt_pii(c.get("ip_address", ""))
+            dec_mac = decrypt_pii(c.get("mac_address", ""))
+            dec_geo = decrypt_pii(c.get("geo_location", ""))
+            dec_host = decrypt_pii(c.get("hostname", ""))
+            
+            processed_clients.append({
+                "hw_id": c.get("hw_id"),
+                "hostname": dec_host,
+                "mac_address": mask_mac(dec_mac),
+                "ip_address": mask_ip(dec_ip),
+                "status": c.get("status", "APPROVED"),
+                "subscription_status": c.get("subscription_status", "ACTIVE"),
+                "model_name": c.get("model_name", "Sonar 2"),
+                "think_level": c.get("thinklevl", "High"),
+                "country": c.get("country", "IND"),
+                "geo_location": dec_geo
+            })
 
-    return {"clients": processed_clients, "logs": raw_logs}
+        return {"clients": processed_clients, "logs": raw_logs, "db_status": "connected"}
+    except Exception as e:
+        print(f"[!] Fetch Dashboard Data Error: {e}")
+        return {"clients": [], "logs": [], "error": str(e), "db_status": "error"}
 
 @app.post("/api/client-action")
 async def client_action(

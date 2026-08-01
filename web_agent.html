@@ -20,7 +20,6 @@
             <span id="agent-id" class="text-[10px] font-mono bg-gray-800 text-emerald-400 px-2 py-1 rounded border border-gray-700">Connecting...</span>
         </div>
 
-        <!-- Live Metrics Cards -->
         <div class="grid grid-cols-2 gap-3 text-xs">
             <div class="bg-gray-950 p-3 rounded-lg border border-gray-800/80">
                 <span class="text-gray-500 block">Battery Level</span>
@@ -40,7 +39,6 @@
             </div>
         </div>
 
-        <!-- GPU Card -->
         <div class="bg-gray-950 p-3 rounded-lg border border-gray-800/80 text-xs">
             <span class="text-gray-500 block mb-1">Graphics (GPU)</span>
             <span id="val-gpu" class="font-mono text-gray-300 break-words text-[11px]">Detecting GPU...</span>
@@ -50,9 +48,8 @@
             <p id="log-status" class="text-xs text-emerald-400 font-mono">Initializing RSA encrypted telemetry feed...</p>
         </div>
 
-        <!-- GDPR Transparency Disclosure -->
         <div class="border-t border-gray-800/60 pt-3 text-[10px] text-gray-500 text-center">
-            🔒 Telemetry is encrypted end-to-end via RSA-OAEP SHA-256 before transmission. No personal identifiable information (PII) is stored unencrypted.
+            🔒 Telemetry is encrypted end-to-end via RSA-OAEP SHA-256 before transmission. No PII is stored unencrypted.
         </div>
     </div>
 
@@ -75,7 +72,6 @@
         const AGENT_ID = getPersistentHwId();
         document.getElementById("agent-id").innerText = AGENT_ID;
 
-        // Fetch RSA Public Key from Server and Import to WebCrypto
         async function getCryptoPublicKey() {
             if (cachedPublicKey) return cachedPublicKey;
             try {
@@ -83,7 +79,6 @@
                 if (!res.ok) throw new Error("Key fetch failed");
                 const pem = await res.text();
                 
-                // Strip Pem Headers
                 const b64 = pem.replace(/-----[^\n]+-----/g, '').replace(/\s+/g, '');
                 const binaryStr = atob(b64);
                 const bytes = new Uint8Array(binaryStr.length);
@@ -118,7 +113,6 @@
                 dataBytes
             );
 
-            // Convert ArrayBuffer to Base64
             const encryptedBytes = new Uint8Array(encryptedBuffer);
             let binary = '';
             for (let i = 0; i < encryptedBytes.byteLength; i++) {
@@ -178,7 +172,6 @@
         async function registerAndStream() {
             const m = await captureMetrics();
             
-            // Step 1: Register Client
             await fetch(`${SERVER_URL}/register`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -197,7 +190,6 @@
                 })
             }).catch(() => {});
 
-            // Step 2: Encrypt Telemetry Payload with Web Crypto RSA-OAEP SHA-256
             const rawPayload = {
                 m: "Sonar 2 Mobile",
                 v: "v2.0",
