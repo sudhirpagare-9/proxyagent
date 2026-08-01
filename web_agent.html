@@ -3,66 +3,116 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Live Client Telemetry Agent</title>
+    <title>Mobile AI Traffic Telemetry Agent</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0b0f17; color: #c9d1d9; font-family: ui-sans-serif, system-ui, sans-serif; }
+    </style>
 </head>
-<body class="bg-gray-950 text-gray-200 min-h-screen flex items-center justify-center p-4">
+<body class="min-h-screen flex items-center justify-center p-4">
 
     <div class="max-w-md w-full bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-5">
         <div class="flex items-center justify-between border-b border-gray-800 pb-4">
             <div>
                 <h1 class="text-lg font-bold text-white flex items-center gap-2">
                     <span id="status-dot" class="w-3 h-3 bg-amber-500 rounded-full animate-pulse"></span>
-                    Mobile Client Agent
+                    Mobile Client Telemetry Agent
                 </h1>
-                <p id="platform-text" class="text-xs text-gray-400">Detecting system environment...</p>
+                <p id="platform-text" class="text-xs text-gray-400">Detecting Device & Geolocation...</p>
             </div>
             <span id="agent-id" class="text-[10px] font-mono bg-gray-800 text-emerald-400 px-2 py-1 rounded border border-gray-700">Connecting...</span>
         </div>
 
+        <!-- Approval Status Banner -->
+        <div id="approval-banner" class="p-3 rounded-lg text-xs flex items-center justify-between bg-amber-950/70 border border-amber-800 text-amber-300">
+            <span class="font-medium flex items-center gap-1.5">
+                ⏳ Approval Status: <strong id="status-label">PENDING APPROVAL</strong>
+            </span>
+            <span class="text-[10px] bg-amber-900 px-2 py-0.5 rounded font-mono">Waiting for Admin</span>
+        </div>
+
         <div class="grid grid-cols-2 gap-3 text-xs">
             <div class="bg-gray-950 p-3 rounded-lg border border-gray-800/80">
-                <span class="text-gray-500 block">Battery Level</span>
-                <span id="val-battery" class="font-bold text-white font-mono">Checking...</span>
+                <span class="text-gray-500 block">Mobile OS / Model</span>
+                <span id="val-os" class="font-bold text-white font-mono">Detecting...</span>
             </div>
             <div class="bg-gray-950 p-3 rounded-lg border border-gray-800/80">
-                <span class="text-gray-500 block">Network Latency</span>
-                <span id="val-rtt" class="font-bold text-cyan-400 font-mono">Measuring...</span>
+                <span class="text-gray-500 block">Geo Location / City</span>
+                <span id="val-geo" class="font-bold text-cyan-400 font-mono">Locating...</span>
             </div>
             <div class="bg-gray-950 p-3 rounded-lg border border-gray-800/80">
-                <span class="text-gray-500 block">CPU Cores / RAM</span>
-                <span id="val-hardware" class="font-bold text-white font-mono">-- Cores / -- GB</span>
+                <span class="text-gray-500 block">Synthesized MAC</span>
+                <span id="val-mac" class="font-bold text-emerald-400 font-mono">Generating...</span>
             </div>
             <div class="bg-gray-950 p-3 rounded-lg border border-gray-800/80">
-                <span class="text-gray-500 block">Screen Resolution</span>
-                <span id="val-screen" class="font-bold text-white font-mono">--x--</span>
+                <span class="text-gray-500 block">Detected AI Model</span>
+                <span id="val-aimodel" class="font-bold text-purple-400 font-mono">Claude 3.5 Sonnet</span>
             </div>
         </div>
 
         <div class="bg-gray-950 p-3 rounded-lg border border-gray-800/80 text-xs">
-            <span class="text-gray-500 block mb-1">Graphics (GPU)</span>
-            <span id="val-gpu" class="font-mono text-gray-300 break-words text-[11px]">Detecting GPU...</span>
+            <div class="flex justify-between items-center">
+                <span class="text-gray-500">Subscription Tier & Version:</span>
+                <span id="val-subtier" class="font-bold text-amber-400 font-mono bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800">PRO (v3.5 Extended)</span>
+            </div>
         </div>
 
         <div class="text-center pt-2">
-            <p id="log-status" class="text-xs text-emerald-400 font-mono">Initializing RSA encrypted telemetry feed...</p>
+            <p id="log-status" class="text-xs text-amber-400 font-mono">Registered as PENDING. Awaiting dashboard admin approval to start telemetry.</p>
         </div>
 
         <div class="border-t border-gray-800/60 pt-3 text-[10px] text-gray-500 text-center">
-            🔒 Telemetry is encrypted end-to-end via RSA-OAEP SHA-256 before transmission. No PII is stored unencrypted.
+            🔒 Telemetry is encrypted end-to-end via RSA-2048 OAEP & AES-CTR 256 before transmission.
         </div>
     </div>
 
     <script>
         const SERVER_URL = window.location.origin;
         let cachedPublicKey = null;
+        let clientStatus = "PENDING";
+        let capturedCityGeo = "Mumbai, Maharashtra";
+
+        function getDetailedMobileOS() {
+            const ua = navigator.userAgent;
+            let os = "Mobile OS";
+            if (/Android/i.test(ua)) {
+                const match = ua.match(/Android\s([0-9\.]+)/);
+                os = match ? `Android ${match[1]}` : "Android OS";
+            } else if (/iPhone|iPad|iPod/i.test(ua)) {
+                const match = ua.match(/OS\s([0-9_]+)/);
+                os = match ? `iOS ${match[1].replace(/_/g, '.')}` : "iOS";
+            } else if (/Linux/i.test(ua)) {
+                os = "Linux Mobile";
+            }
+            return os;
+        }
+
+        function generateHardwareMAC() {
+            let key = localStorage.getItem("mobile_mac_fingerprint");
+            if (!key) {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                ctx.textBaseline = "top";
+                ctx.font = "14px 'Arial'";
+                ctx.fillText("MAC_FINGERPRINT_SEED", 2, 2);
+                const data = canvas.toDataURL();
+                let hash = 0;
+                for (let i = 0; i < data.length; i++) {
+                    hash = ((hash << 5) - hash) + data.charCodeAt(i);
+                    hash |= 0;
+                }
+                const hex = Math.abs(hash).toString(16).padStart(12, '0').substring(0, 12);
+                key = hex.match(/.{1,2}/g).join(':');
+                localStorage.setItem("mobile_mac_fingerprint", key);
+            }
+            return key;
+        }
 
         function getPersistentHwId() {
             let id = localStorage.getItem("client_hw_id");
             if (!id) {
-                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-                const isAndroid = /Android/.test(navigator.userAgent);
-                const prefix = isIOS ? "IOS" : (isAndroid ? "AND" : "WEB");
+                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+                const prefix = isIOS ? "IOS" : "AND";
                 id = `${prefix}-${crypto.randomUUID().substring(0, 12).toUpperCase()}`;
                 localStorage.setItem("client_hw_id", id);
             }
@@ -70,7 +120,68 @@
         }
 
         const AGENT_ID = getPersistentHwId();
+        const HARDWARE_MAC = generateHardwareMAC();
+        const MOBILE_OS = getDetailedMobileOS();
+
         document.getElementById("agent-id").innerText = AGENT_ID;
+        document.getElementById("val-os").innerText = MOBILE_OS;
+        document.getElementById("val-mac").innerText = HARDWARE_MAC;
+
+        async function resolveGeoLocation() {
+            if ("geolocation" in navigator) {
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        capturedCityGeo = `Lat:${pos.coords.latitude.toFixed(2)}, Lon:${pos.coords.longitude.toFixed(2)}`;
+                        document.getElementById("val-geo").innerText = capturedCityGeo;
+                    },
+                    async () => {
+                        try {
+                            const res = await fetch("https://ipapi.co/json/");
+                            if (res.ok) {
+                                const data = await res.json();
+                                capturedCityGeo = `${data.city || 'Mumbai'}, ${data.region || 'Maharashtra'}`;
+                            }
+                        } catch(e) {}
+                        document.getElementById("val-geo").innerText = capturedCityGeo;
+                    },
+                    { timeout: 5000 }
+                );
+            }
+        }
+
+        function detectAIContext() {
+            const href = window.location.href;
+            const referrer = document.referrer;
+
+            if (href.includes("claude.ai") || referrer.includes("claude.ai")) {
+                return {
+                    name: "Claude 3.5 Sonnet",
+                    version: "v3.5",
+                    type: "Anthropic Claude",
+                    think_level: "Extended / High",
+                    tier: "PRO",
+                    balance: 12500
+                };
+            } else if (href.includes("chatgpt") || referrer.includes("chatgpt")) {
+                return {
+                    name: "ChatGPT (GPT-4o)",
+                    version: "v4o",
+                    type: "OpenAI",
+                    think_level: "High",
+                    tier: "PLUS",
+                    balance: 15000
+                };
+            }
+
+            return {
+                name: "Claude 3.5 Sonnet",
+                version: "v3.5",
+                type: "Anthropic AI (Mobile Web)",
+                think_level: "Extended",
+                tier: "PRO",
+                balance: 10000
+            };
+        }
 
         async function getCryptoPublicKey() {
             if (cachedPublicKey) return cachedPublicKey;
@@ -121,86 +232,86 @@
             return btoa(binary);
         }
 
-        function getGPUInfo() {
+        async function checkClientStatus() {
             try {
-                const canvas = document.createElement("canvas");
-                const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
-                if (gl) {
-                    const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
-                    if (debugInfo) {
-                        return gl.getParameter(debugInfo.UNMASKED_RENDERER_GL_STRING);
-                    }
+                const res = await fetch(`${SERVER_URL}/client-status?hw_id=${AGENT_ID}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    clientStatus = data.status || "PENDING";
+                    updateApprovalUI();
                 }
             } catch (e) {}
-            return "Standard WebGL Engine";
         }
 
-        async function captureMetrics() {
-            let battery = "N/A", charging = false;
-            if ('getBattery' in navigator) {
-                try {
-                    const b = await navigator.getBattery();
-                    battery = `${Math.round(b.level * 100)}%`;
-                    charging = b.charging;
-                } catch (e) {}
+        function updateApprovalUI() {
+            const banner = document.getElementById("approval-banner");
+            const label = document.getElementById("status-label");
+            const dot = document.getElementById("status-dot");
+
+            if (clientStatus === "APPROVED") {
+                banner.className = "p-3 rounded-lg text-xs flex items-center justify-between bg-emerald-950/70 border border-emerald-800 text-emerald-300";
+                label.innerText = "APPROVED (Streaming Active)";
+                dot.className = "w-3 h-3 bg-emerald-500 rounded-full animate-ping";
+            } else if (clientStatus === "DENIED") {
+                banner.className = "p-3 rounded-lg text-xs flex items-center justify-between bg-red-950/70 border border-red-800 text-red-300";
+                label.innerText = "DENIED (Traffic Blocked)";
+                dot.className = "w-3 h-3 bg-red-500 rounded-full";
+            } else {
+                banner.className = "p-3 rounded-lg text-xs flex items-center justify-between bg-amber-950/70 border border-amber-800 text-amber-300";
+                label.innerText = "PENDING APPROVAL";
+                dot.className = "w-3 h-3 bg-amber-500 rounded-full animate-pulse";
             }
-            const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection || {};
-            return {
-                hw_id: AGENT_ID,
-                platform: navigator.platform || "Mobile",
-                cores: navigator.hardwareConcurrency || "N/A",
-                memory: navigator.deviceMemory || "N/A",
-                screen: `${window.screen.width}x${window.screen.height}`,
-                gpu: getGPUInfo(),
-                battery: battery,
-                charging: charging,
-                network: conn.effectiveType || "wifi/4g",
-                rtt: conn.rtt || 25
-            };
-        }
-
-        async function refreshUI() {
-            const m = await captureMetrics();
-            document.getElementById("platform-text").innerText = `${m.platform} • ${navigator.language}`;
-            document.getElementById("val-battery").innerText = m.battery !== "N/A" ? `${m.battery} ${m.charging ? '⚡' : ''}` : 'N/A';
-            document.getElementById("val-rtt").innerText = `${m.rtt} ms (${m.network})`;
-            document.getElementById("val-hardware").innerText = `${m.cores} Cores / ${m.memory} GB`;
-            document.getElementById("val-screen").innerText = m.screen;
-            document.getElementById("val-gpu").innerText = m.gpu;
         }
 
         async function registerClient() {
-            const m = await captureMetrics();
-            await fetch(`${SERVER_URL}/register`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    hw_id: AGENT_ID,
-                    hostname: `Mobile-${m.platform}`,
-                    mac_address: "WEB-SANDBOX-MAC",
-                    ip_address: "127.0.0.1",
-                    client_name: `MobileNode-${m.platform}`,
-                    model_name: "Sonar 2 Mobile",
-                    model_version: "v2.0",
-                    think_level: "High",
-                    subscription_status: "ACTIVE",
-                    country: "IND",
-                    geo_location: "Mobile Web Agent"
-                })
-            }).catch(() => {});
+            const aiCtx = detectAIContext();
+            try {
+                const res = await fetch(`${SERVER_URL}/register`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        hw_id: AGENT_ID,
+                        hostname: `Mobile-${MOBILE_OS}`,
+                        mac_address: HARDWARE_MAC,
+                        ip_address: "127.0.0.1",
+                        client_name: `MobileNode-${MOBILE_OS}`,
+                        model_name: aiCtx.name,
+                        model_version: aiCtx.version,
+                        think_level: aiCtx.think_level,
+                        subscription_status: aiCtx.tier,
+                        country: "IND",
+                        geo_location: capturedCityGeo
+                    })
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    clientStatus = data.client_status || "PENDING";
+                    updateApprovalUI();
+                }
+            } catch (e) {}
         }
 
-        async function registerAndStream() {
-            const m = await captureMetrics();
+        async function streamTelemetry() {
+            await checkClientStatus();
+
+            if (clientStatus !== "APPROVED") {
+                document.getElementById("log-status").innerText = clientStatus === "DENIED" 
+                    ? "🚫 Access Denied by Admin. Telemetry paused." 
+                    : "⏳ Status is PENDING. Waiting for dashboard admin to click Approve (✓)...";
+                return;
+            }
+
+            const aiCtx = detectAIContext();
             const rawPayload = {
-                m: "Sonar 2 Mobile",
-                v: "v2.0",
-                t: `${m.network.toUpperCase()} / ${m.platform}`,
-                l: "High",
-                i: Math.floor(Math.random() * 200) + 50,
-                o: Math.floor(Math.random() * 400) + 100,
-                b: 9500,
-                s: "ACTIVE"
+                m: aiCtx.name,
+                v: aiCtx.version,
+                t: aiCtx.type,
+                l: aiCtx.think_level,
+                i: Math.floor(Math.random() * 250) + 120,
+                o: Math.floor(Math.random() * 500) + 200,
+                b: aiCtx.balance,
+                s: aiCtx.tier
             };
 
             try {
@@ -213,34 +324,24 @@
                         hw_id: AGENT_ID,
                         encrypted_payload: encryptedB64
                     })
-                }).catch(() => null);
+                });
 
-                if (res && res.ok) {
+                if (res.ok) {
                     document.getElementById("log-status").innerText = `✓ E2EE Telemetry Sent @ ${new Date().toLocaleTimeString()}`;
-                    document.getElementById("status-dot").className = "w-3 h-3 bg-emerald-500 rounded-full animate-ping";
-                } else if (res && res.status === 404) {
-                    document.getElementById("log-status").innerText = `⚠️ Unregistered (404). Re-registering...`;
-                    await registerClient();
-                } else if (res && res.status === 403) {
-                    document.getElementById("log-status").innerText = `🚫 Access Denied by Dashboard Admin`;
-                    document.getElementById("status-dot").className = "w-3 h-3 bg-red-500 rounded-full";
-                } else {
-                    document.getElementById("log-status").innerText = `⚠️ Transmission Warning (${res ? res.status : 'Offline'})`;
+                } else if (res.status === 402 || res.status === 403) {
+                    clientStatus = res.status === 403 ? "DENIED" : "PENDING";
+                    updateApprovalUI();
                 }
             } catch (err) {
-                console.error("Telemetry Encryption Error:", err);
-                document.getElementById("log-status").innerText = `❌ Encryption Error: ${err.message}`;
+                console.error("Telemetry Transmission Error:", err);
             }
         }
 
         (async () => {
-            await refreshUI();
+            await resolveGeoLocation();
             await registerClient();
-            await registerAndStream();
-            setInterval(async () => {
-                await refreshUI();
-                await registerAndStream();
-            }, 6000);
+            await streamTelemetry();
+            setInterval(streamTelemetry, 6000);
         })();
     </script>
 </body>

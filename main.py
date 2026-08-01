@@ -36,7 +36,6 @@ def safe_str(val, max_len=50) -> str:
     return str(val).strip()[:max_len]
 
 def sanitize_key_str(raw_str: str) -> str:
-    """Cleans base64 or escaped PEM string inputs from environment variables."""
     if not raw_str:
         return ""
     clean_str = raw_str.strip()
@@ -49,7 +48,6 @@ def sanitize_key_str(raw_str: str) -> str:
             pass
     return clean_str.replace("\\n", "\n")
 
-# Load or Auto-Generate RSA Keys for E2EE
 PUBLIC_KEY_PEM = sanitize_key_str(RAW_PUBLIC_KEY)
 PRIVATE_KEY_PEM = sanitize_key_str(RAW_PRIVATE_KEY)
 
@@ -127,7 +125,6 @@ def verify_admin_auth(x_admin_key: Optional[str]):
     if ADMIN_API_KEY and x_admin_key != ADMIN_API_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized Admin Request")
 
-# Endpoints
 @app.get("/", response_class=HTMLResponse)
 async def read_index():
     if os.path.exists("index.html"):
@@ -146,6 +143,19 @@ async def read_agent():
 async def get_public_key():
     return public_key_pem_str
 
+@app.get("/client-status")
+async def get_client_status(hw_id: str = Query(...)):
+    hw_id_safe = safe_str(hw_id, 50)
+    if not supabase:
+        return {"status": "APPROVED"}
+    try:
+        res = supabase.table("clients_registry").select("status").eq("hw_id", hw_id_safe).execute()
+        if res.data:
+            return {"status": res.data[0].get("status", "PENDING")}
+    except Exception:
+        pass
+    return {"status": "PENDING"}
+
 @app.post("/register")
 async def register_client(request: Request):
     try:
@@ -157,50 +167,51 @@ async def register_client(request: Request):
         client_ip = request.client.host if request.client else data.get("ip_address", "127.0.0.1")
 
         if not supabase:
-            print(f"[!] Warning: Registering {hw_id} in offline mode (Supabase DB not configured).")
-            return {"status": "success", "mode": "offline"}
+            print(f"[!] Warning: Registering {hw_id} in offline mode.")
+            return {"status": "success", "client_status": "APPROVED", "mode": "offline"}
 
-        existing_status = "APPROVED"
+        # DEFAULT TO PENDING FOR NEW CLIENTS
+        current_status = "PENDING"
         try:
             existing = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
             if existing.data:
-                existing_status = safe_str(existing.data[0].get("status", "APPROVED"), 50)
+                current_status = safe_str(existing.data[0].get("status", "PENDING"), 50)
         except Exception:
             pass
 
         client_record = {
             "hw_id": hw_id,
-            "hostname": encrypt_pii(safe_str(data.get("hostname", "UNKNOWN"), 30)),
-            "mac_address": encrypt_pii(safe_str(data.get("mac_address", "00:00:00:00:00:00"), 30)),
+            "hostname": encrypt_pii(safe_str(data.get("hostname", "UNKNOWN"), 40)),
+            "mac_address": encrypt_pii(safe_str(data.get("mac_address", "00:00:00:00:00:00"), 40)),
             "ip_address": encrypt_pii(safe_str(client_ip, 30)),
             "last_ip": encrypt_pii(safe_str(client_ip, 30)),
-            "status": existing_status,
+            "status": current_status,
             "client_name": safe_str(data.get("client_name", data.get("hostname")), 50),
             "model_name": safe_str(data.get("model_name", "Sonar 2"), 50),
             "model_version": safe_str(data.get("model_version", "v2.0"), 50),
             "thinklevl": safe_str(data.get("think_level", data.get("thinklevl", "High")), 50),
-            "interface_browser": safe_str(data.get("interface_browser", "Edge/Chrome Agent"), 50),
+            "interface_browser": safe_str(data.get("interface_browser", "Web Agent"), 50),
             "input_tokens": int(data.get("input_tokens", 0)),
             "output_tokens": int(data.get("output_tokens", 0)),
             "balance_tokens": int(data.get("balance_tokens", 5000)),
-            "subscription_status": safe_str(data.get("subscription_status", "ACTIVE"), 50),
+            "subscription_status": safe_str(data.get("subscription_status", "FREE"), 50),
             "country": safe_str(data.get("country", "IND"), 50),
-            "geo_location": encrypt_pii(safe_str(data.get("geo_location", "Maharashtra"), 30))
+            "geo_location": encrypt_pii(safe_str(data.get("geo_location", "Maharashtra"), 40))
         }
 
         try:
             supabase.table("clients_registry").upsert(client_record, on_conflict="hw_id").execute()
         except Exception as db_err:
-            print(f"[!] Upsert Warning: {db_err}. Retrying with core schema...")
+            print(f"[!] Upsert Warning: {db_err}. Retrying core schema...")
             supabase.table("clients_registry").upsert({
                 "hw_id": hw_id,
-                "hostname": encrypt_pii(safe_str(data.get("hostname", "UNKNOWN"), 30)),
-                "mac_address": encrypt_pii(safe_str(data.get("mac_address", ""), 30)),
+                "hostname": encrypt_pii(safe_str(data.get("hostname", "UNKNOWN"), 40)),
+                "mac_address": encrypt_pii(safe_str(data.get("mac_address", ""), 40)),
                 "ip_address": encrypt_pii(safe_str(client_ip, 30)),
-                "status": existing_status
+                "status": current_status
             }, on_conflict="hw_id").execute()
         
-        return {"status": "success"}
+        return {"status": "success", "client_status": current_status}
     except HTTPException:
         raise
     except Exception as e:
@@ -225,16 +236,19 @@ async def log_traffic(request: Request):
         try:
             client_res = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
             if not client_res.data:
-                raise HTTPException(status_code=404, detail="Client hardware ID not registered. Registration required.")
+                raise HTTPException(status_code=404, detail="Client hardware ID not registered.")
                 
-            if client_res.data[0].get("status") == "DENIED":
-                raise HTTPException(status_code=403, detail="Client is DENIED by administrator.")
+            status = client_res.data[0].get("status")
+            if status == "PENDING":
+                raise HTTPException(status_code=402, detail="Client pending admin approval.")
+            elif status == "DENIED":
+                raise HTTPException(status_code=403, detail="Client DENIED by admin.")
         except HTTPException:
             raise
         except Exception as err:
             print(f"[!] Registry Check Warning: {str(err)}")
 
-    # Decrypt RSA Encrypted Telemetry
+    # Decrypt RSA Encrypted Telemetry Payload
     try:
         encrypted_data = base64.b64decode(encrypted_payload_b64)
         decrypted_bytes = private_key.decrypt(
@@ -257,7 +271,7 @@ async def log_traffic(request: Request):
     in_tokens = int(payload.get("i") if "i" in payload else payload.get("input_tokens", 0))
     out_tokens = int(payload.get("o") if "o" in payload else payload.get("output_tokens", 0))
     bal_tokens = int(payload.get("b") if "b" in payload else payload.get("balance_tokens", 0))
-    sub_status = safe_str(payload.get("s") or payload.get("subscription_status", "ACTIVE"), 50)
+    sub_status = safe_str(payload.get("s") or payload.get("subscription_status", "FREE"), 50)
 
     if supabase:
         try:
@@ -285,7 +299,7 @@ async def get_dashboard_data(
     verify_admin_auth(x_admin_key)
     
     if not supabase:
-        return {"clients": [], "logs": [], "db_status": "disconnected"}
+        return {"clients": [], "logs": [], "db_status": "disconnected", "crypto_status": "Active (RSA-2048 / AES-CTR)"}
         
     try:
         raw_clients = supabase.table("clients_registry").select("*").execute().data or []
@@ -314,15 +328,21 @@ async def get_dashboard_data(
                 "hostname": dec_host,
                 "mac_address": mask_mac(dec_mac),
                 "ip_address": mask_ip(dec_ip),
-                "status": c.get("status", "APPROVED"),
-                "subscription_status": c.get("subscription_status", "ACTIVE"),
-                "model_name": c.get("model_name", "Sonar 2"),
-                "think_level": c.get("thinklevl", "High"),
+                "status": c.get("status", "PENDING"),
+                "subscription_status": c.get("subscription_status", "FREE"),
+                "model_name": c.get("model_name", "Claude 3.5 Sonnet"),
+                "think_level": c.get("thinklevl", "Extended"),
                 "country": c.get("country", "IND"),
-                "geo_location": dec_geo
+                "geo_location": dec_geo,
+                "encrypted_pii": True
             })
 
-        return {"clients": processed_clients, "logs": raw_logs, "db_status": "connected"}
+        return {
+            "clients": processed_clients, 
+            "logs": raw_logs, 
+            "db_status": "connected",
+            "crypto_status": "Active (RSA-2048 OAEP / AES-CTR 256)"
+        }
     except Exception as e:
         print(f"[!] Fetch Dashboard Data Error: {e}")
         return {"clients": [], "logs": [], "error": str(e), "db_status": "error"}

@@ -28,8 +28,9 @@
         </div>
         
         <div class="flex items-center gap-3">
-            <span id="db-status-badge" class="px-3 py-1 text-xs rounded-full bg-blue-950 text-blue-400 border border-blue-800 font-mono">
-                🛡️ AES-256 PII Protected
+            <span id="crypto-status-badge" class="px-3 py-1 text-xs rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800 font-mono flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                🔒 <span id="crypto-text">RSA-2048 OAEP / AES-CTR Active</span>
             </span>
             <span id="active-filter-badge" class="hidden px-3 py-1 text-xs rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800">
                 Filtered: <span id="filter-client-id" class="font-bold"></span>
@@ -53,7 +54,7 @@
                 <span id="client-count" class="text-xs text-emerald-400 bg-emerald-950/60 px-2.5 py-1 rounded-full border border-emerald-800 font-mono">0 Registered</span>
             </div>
 
-            <div class="overflow-y-auto max-h-[620px] pr-1">
+            <div class="overflow-y-auto max-h-[620px] pr-1" id="clients-scroll-container">
                 <table class="w-full text-left text-xs border-collapse">
                     <thead class="sticky top-0 bg-[#121826] text-gray-400 uppercase tracking-wider text-[10px] z-10">
                         <tr class="border-b border-gray-800">
@@ -94,7 +95,7 @@
                 </div>
             </div>
 
-            <div class="overflow-y-auto max-h-[620px] pr-1">
+            <div class="overflow-y-auto max-h-[620px] pr-1" id="logs-scroll-container">
                 <table class="w-full text-left text-xs border-collapse">
                     <thead class="sticky top-0 bg-[#121826] text-gray-400 uppercase tracking-wider text-[10px] z-10">
                         <tr class="border-b border-gray-800">
@@ -135,6 +136,10 @@
                 const clients = data.clients || [];
                 const logs = data.logs || [];
 
+                if (data.crypto_status) {
+                    document.getElementById('crypto-text').innerText = data.crypto_status;
+                }
+
                 renderClients(clients);
                 renderLogs(logs, clients);
             } catch (err) {
@@ -160,7 +165,7 @@
                     <tr class="hover:bg-gray-800/40 transition cursor-pointer ${isSelected ? 'selected-row' : ''}">
                         <td onclick="selectClient('${c.hw_id}')" class="p-2 font-mono font-medium text-emerald-400">
                             ${c.hw_id}
-                            <span class="block text-[10px] text-gray-500 font-sans">${c.hostname || 'Host'}</span>
+                            <span class="block text-[10px] text-gray-500 font-sans">${c.hostname || 'Host'} • ${c.geo_location || 'Maharashtra'}</span>
                         </td>
                         <td onclick="selectClient('${c.hw_id}')" class="p-2 font-mono text-gray-300">${c.ip_address || 'N/A'}</td>
                         <td onclick="selectClient('${c.hw_id}')" class="p-2 font-mono text-gray-400">${c.mac_address || 'N/A'}</td>
@@ -209,9 +214,15 @@
                     return;
                 }
 
+                if (selectedClient.status === 'PENDING') {
+                    document.getElementById('log-count').innerText = `0 Recorded`;
+                    tbody.innerHTML = `<tr><td colspan="8" class="p-6 text-center font-medium text-amber-400 bg-amber-950/20 rounded-lg">⏳ Client status is PENDING. Click Approve (✓) to enable traffic logging.</td></tr>`;
+                    return;
+                }
+
                 if (selectedClient.status === 'DENIED') {
                     document.getElementById('log-count').innerText = `0 Recorded`;
-                    tbody.innerHTML = `<tr><td colspan="8" class="p-6 text-center font-medium text-red-400 bg-red-950/20 rounded-lg">🚫 Client state is DENIED. Traffic logs are blocked and cleared from view.</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="8" class="p-6 text-center font-medium text-red-400 bg-red-950/20 rounded-lg">🚫 Client state is DENIED. Traffic logs are blocked.</td></tr>`;
                     return;
                 }
             } else {
@@ -231,11 +242,11 @@
                 return `
                     <tr class="hover:bg-gray-800/30 transition">
                         <td class="p-2 font-mono text-emerald-400">${l.hw_id || 'UNKNOWN'}</td>
-                        <td class="p-2 font-semibold text-white">${l.model_name || 'Sonar 2'}</td>
-                        <td class="p-2 text-gray-400 text-[11px]">${l.model_type || 'Perplexity AI'}</td>
+                        <td class="p-2 font-semibold text-white">${l.model_name || 'Claude 3.5 Sonnet'}</td>
+                        <td class="p-2 text-gray-400 text-[11px]">${l.model_type || 'Anthropic AI'}</td>
                         <td class="p-2">
                             <span class="px-1.5 py-0.5 text-[10px] bg-gray-800 border border-gray-700 text-gray-300 rounded">
-                                ${l.think_level || l.thinklevl || 'High'}
+                                ${l.think_level || 'Extended'}
                             </span>
                         </td>
                         <td class="p-2 font-mono">
@@ -243,7 +254,7 @@
                             <span class="text-cyan-400">↓${l.output_tokens || 0}</span>
                         </td>
                         <td class="p-2 font-mono text-amber-400 font-medium">${(l.balance_tokens || 0).toLocaleString()}</td>
-                        <td class="p-2 text-gray-300 text-[11px]">${l.subscription_status || 'ACTIVE'}</td>
+                        <td class="p-2 text-gray-300 text-[11px] font-bold">${l.subscription_status || 'PRO'}</td>
                         <td class="p-2 font-mono text-gray-400 text-[11px]">${dateStr}</td>
                     </tr>
                 `;
@@ -291,7 +302,7 @@
             fetchDashboardData();
         }
 
-        setInterval(fetchDashboardData, 5000);
+        setInterval(fetchDashboardData, 4000);
         fetchDashboardData();
     </script>
 </body>
