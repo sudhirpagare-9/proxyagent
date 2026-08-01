@@ -1,3 +1,8 @@
+
+### 2. `web_agent.html` (Mobile Telemetry Client Agent)
+Save this file as `web_agent.html` in your root deployment directory[cite: 6].
+
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -16,24 +21,23 @@
             <div>
                 <h1 class="text-lg font-bold text-white flex items-center gap-2">
                     <span id="status-dot" class="w-3 h-3 bg-amber-500 rounded-full animate-pulse"></span>
-                    Mobile Client Telemetry Agent
+                    Claude Sonnet 5 Telemetry Agent
                 </h1>
                 <p id="platform-text" class="text-xs text-gray-400">Detecting Device & Geolocation...</p>
             </div>
             <span id="agent-id" class="text-[10px] font-mono bg-gray-800 text-emerald-400 px-2 py-1 rounded border border-gray-700">Connecting...</span>
         </div>
 
-        <!-- Approval Status Banner -->
         <div id="approval-banner" class="p-3 rounded-lg text-xs flex items-center justify-between bg-amber-950/70 border border-amber-800 text-amber-300">
             <span class="font-medium flex items-center gap-1.5">
-                ⏳ Approval Status: <strong id="status-label">PENDING APPROVAL</strong>
+                ⏳ Status: <strong id="status-label">PENDING APPROVAL</strong>
             </span>
             <span class="text-[10px] bg-amber-900 px-2 py-0.5 rounded font-mono">Waiting for Admin</span>
         </div>
 
         <div class="grid grid-cols-2 gap-3 text-xs">
             <div class="bg-gray-950 p-3 rounded-lg border border-gray-800/80">
-                <span class="text-gray-500 block">Mobile OS / Model</span>
+                <span class="text-gray-500 block">OS / Model</span>
                 <span id="val-os" class="font-bold text-white font-mono">Detecting...</span>
             </div>
             <div class="bg-gray-950 p-3 rounded-lg border border-gray-800/80">
@@ -46,23 +50,23 @@
             </div>
             <div class="bg-gray-950 p-3 rounded-lg border border-gray-800/80">
                 <span class="text-gray-500 block">Detected AI Model</span>
-                <span id="val-aimodel" class="font-bold text-purple-400 font-mono">Claude 3.5 Sonnet</span>
+                <span id="val-aimodel" class="font-bold text-purple-400 font-mono">Claude Sonnet 5</span>
             </div>
         </div>
 
         <div class="bg-gray-950 p-3 rounded-lg border border-gray-800/80 text-xs">
             <div class="flex justify-between items-center">
                 <span class="text-gray-500">Subscription Tier & Version:</span>
-                <span id="val-subtier" class="font-bold text-amber-400 font-mono bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800">PRO (v3.5 Extended)</span>
+                <span id="val-subtier" class="font-bold text-amber-400 font-mono bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800">PRO (v3.5)</span>
             </div>
         </div>
 
         <div class="text-center pt-2">
-            <p id="log-status" class="text-xs text-amber-400 font-mono">Registered as PENDING. Awaiting dashboard admin approval to start telemetry.</p>
+            <p id="log-status" class="text-xs text-amber-400 font-mono">Registered as PENDING. Awaiting dashboard admin approval.</p>
         </div>
 
         <div class="border-t border-gray-800/60 pt-3 text-[10px] text-gray-500 text-center">
-            🔒 Telemetry is encrypted end-to-end via RSA-2048 OAEP & AES-CTR 256 before transmission.
+            🔒 Telemetry is encrypted end-to-end via RSA-2048 OAEP & AES-CTR 256.
         </div>
     </div>
 
@@ -149,40 +153,6 @@
             }
         }
 
-        function detectAIContext() {
-            const href = window.location.href;
-            const referrer = document.referrer;
-
-            if (href.includes("claude.ai") || referrer.includes("claude.ai")) {
-                return {
-                    name: "Claude 3.5 Sonnet",
-                    version: "v3.5",
-                    type: "Anthropic Claude",
-                    think_level: "Extended / High",
-                    tier: "PRO",
-                    balance: 12500
-                };
-            } else if (href.includes("chatgpt") || referrer.includes("chatgpt")) {
-                return {
-                    name: "ChatGPT (GPT-4o)",
-                    version: "v4o",
-                    type: "OpenAI",
-                    think_level: "High",
-                    tier: "PLUS",
-                    balance: 15000
-                };
-            }
-
-            return {
-                name: "Claude 3.5 Sonnet",
-                version: "v3.5",
-                type: "Anthropic AI (Mobile Web)",
-                think_level: "Extended",
-                tier: "PRO",
-                balance: 10000
-            };
-        }
-
         async function getCryptoPublicKey() {
             if (cachedPublicKey) return cachedPublicKey;
             try {
@@ -224,12 +194,7 @@
                 dataBytes
             );
 
-            const encryptedBytes = new Uint8Array(encryptedBuffer);
-            let binary = '';
-            for (let i = 0; i < encryptedBytes.byteLength; i++) {
-                binary += String.fromCharCode(encryptedBytes[i]);
-            }
-            return btoa(binary);
+            return btoa(String.fromCharCode(...new Uint8Array(encryptedBuffer)));
         }
 
         async function checkClientStatus() {
@@ -264,7 +229,6 @@
         }
 
         async function registerClient() {
-            const aiCtx = detectAIContext();
             try {
                 const res = await fetch(`${SERVER_URL}/register`, {
                     method: "POST",
@@ -275,10 +239,10 @@
                         mac_address: HARDWARE_MAC,
                         ip_address: "127.0.0.1",
                         client_name: `MobileNode-${MOBILE_OS}`,
-                        model_name: aiCtx.name,
-                        model_version: aiCtx.version,
-                        think_level: aiCtx.think_level,
-                        subscription_status: aiCtx.tier,
+                        model_name: "Claude Sonnet 5",
+                        model_version: "v3.5",
+                        think_level: "Extended",
+                        subscription_status: "PRO",
                         country: "IND",
                         geo_location: capturedCityGeo
                     })
@@ -298,20 +262,19 @@
             if (clientStatus !== "APPROVED") {
                 document.getElementById("log-status").innerText = clientStatus === "DENIED" 
                     ? "🚫 Access Denied by Admin. Telemetry paused." 
-                    : "⏳ Status is PENDING. Waiting for dashboard admin to click Approve (✓)...";
+                    : "⏳ Status is PENDING. Waiting for dashboard admin approval...";
                 return;
             }
 
-            const aiCtx = detectAIContext();
             const rawPayload = {
-                m: aiCtx.name,
-                v: aiCtx.version,
-                t: aiCtx.type,
-                l: aiCtx.think_level,
+                m: "Claude Sonnet 5",
+                v: "v3.5",
+                t: "Anthropic Claude",
+                l: "Extended",
                 i: Math.floor(Math.random() * 250) + 120,
                 o: Math.floor(Math.random() * 500) + 200,
-                b: aiCtx.balance,
-                s: aiCtx.tier
+                b: 12150,
+                s: "PRO"
             };
 
             try {
@@ -327,7 +290,7 @@
                 });
 
                 if (res.ok) {
-                    document.getElementById("log-status").innerText = `✓ E2EE Telemetry Sent @ ${new Date().toLocaleTimeString()}`;
+                    document.getElementById("log-status").innerText = `✓ E2EE Telemetry Sent [Claude Sonnet 5 / PRO] @ ${new Date().toLocaleTimeString()}`;
                 } else if (res.status === 402 || res.status === 403) {
                     clientStatus = res.status === 403 ? "DENIED" : "PENDING";
                     updateApprovalUI();

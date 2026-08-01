@@ -1,10 +1,13 @@
+### 3. `main.py` (FastAPI Server Application)
+Save this file as `main.py` in your root deployment directory[cite: 8].
+
+```python
 import os
 import json
 import base64
-import traceback
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import FastAPI, Request, HTTPException, Query, Header
+from fastapi import FastAPI, Request, HTTPException, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client
@@ -12,7 +15,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="2.8.0")
+app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="3.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -32,7 +35,6 @@ SUPABASE_KEY = (
 
 RAW_PRIVATE_KEY = os.environ.get("RSA_PRIVATE_KEY", "")
 RAW_PUBLIC_KEY = os.environ.get("RSA_PUBLIC_KEY", "")
-ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "")
 
 AES_SECRET_ENV = os.environ.get("AES_PII_SECRET", "soc-gdpr-nist-default-32byte-secret-key!!")
 AES_PII_SECRET = AES_SECRET_ENV.encode('utf-8')[:32].ljust(32, b'0')
@@ -72,7 +74,6 @@ if PRIVATE_KEY_PEM:
         print(f"[!] Error loading RSA private key: {e}")
 
 if not private_key:
-    print("[*] Generating automatic in-memory RSA keypair for E2EE...")
     _generated_priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     private_key = _generated_priv
     _generated_pub = _generated_priv.public_key()
@@ -89,7 +90,6 @@ if SUPABASE_URL and SUPABASE_KEY:
     except Exception as e:
         print(f"[!] Supabase initialization failed: {e}")
 
-# PII Encryption helper
 def encrypt_pii(plaintext: str) -> str:
     if not plaintext:
         return ""
@@ -133,7 +133,7 @@ async def read_index():
     if os.path.exists("index.html"):
         with open("index.html", "r", encoding="utf-8") as f:
             return f.read()
-    return "<h1>Dashboard UI (index.html) missing. Please upload index.html</h1>"
+    return "<h1>Dashboard UI (index.html) missing.</h1>"
 
 @app.get("/agent", response_class=HTMLResponse)
 async def read_agent():
@@ -188,14 +188,14 @@ async def register_client(request: Request):
             "last_ip": encrypt_pii(safe_str(client_ip, 30)),
             "status": current_status,
             "client_name": safe_str(data.get("client_name", data.get("hostname")), 50),
-            "model_name": safe_str(data.get("model_name", "Claude Sonnet 5"), 50),
-            "model_version": safe_str(data.get("model_version", "v3.5"), 50),
+            "model_name": "Claude Sonnet 5",
+            "model_version": "v3.5",
             "thinklevl": safe_str(data.get("think_level", "Extended"), 50),
             "interface_browser": safe_str(data.get("interface_browser", "Web Agent"), 50),
             "input_tokens": int(data.get("input_tokens", 0)),
             "output_tokens": int(data.get("output_tokens", 0)),
-            "balance_tokens": int(data.get("balance_tokens", 10000)),
-            "subscription_status": safe_str(data.get("subscription_status", "PRO"), 50),
+            "balance_tokens": int(data.get("balance_tokens", 12500)),
+            "subscription_status": "PRO",
             "country": safe_str(data.get("country", "IND"), 50),
             "geo_location": encrypt_pii(safe_str(data.get("geo_location", "Mumbai, Maharashtra"), 40))
         }
@@ -223,18 +223,17 @@ async def log_traffic(request: Request):
         try:
             client_res = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
             if not client_res.data:
-                raise HTTPException(status_code=404, detail="Client record deleted/unregistered.")
+                raise HTTPException(status_code=404, detail="Client record unregistered.")
             status = client_res.data[0].get("status")
             if status == "PENDING":
-                raise HTTPException(status_code=402, detail="Client pending admin approval.")
+                raise HTTPException(status_code=402, detail="Client pending approval.")
             elif status == "DENIED":
-                raise HTTPException(status_code=403, detail="Client DENIED by admin.")
+                raise HTTPException(status_code=403, detail="Client DENIED.")
         except HTTPException:
             raise
         except Exception:
             pass
 
-    # Decrypt RSA E2EE Payload
     try:
         encrypted_data = base64.b64decode(encrypted_payload_b64)
         decrypted_bytes = private_key.decrypt(
@@ -249,15 +248,14 @@ async def log_traffic(request: Request):
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Decryption Failure: {str(e)}")
 
-    # Exact Model & Subscription Resolution Fixes
-    model_name = safe_str(payload.get("m") or payload.get("model_name", "Claude Sonnet 5"), 50)
-    version = safe_str(payload.get("v") or payload.get("version", "v3.5"), 50)
-    model_type = safe_str(payload.get("t") or payload.get("model_type", "Anthropic Claude"), 50)
+    model_name = "Claude Sonnet 5"
+    version = "v3.5"
+    model_type = "Anthropic Claude"
     think_level = safe_str(payload.get("l") or payload.get("think_level", "Extended"), 50)
-    in_tokens = int(payload.get("i") if "i" in payload else payload.get("input_tokens", 0))
-    out_tokens = int(payload.get("o") if "o" in payload else payload.get("output_tokens", 0))
-    bal_tokens = int(payload.get("b") if "b" in payload else payload.get("balance_tokens", 10000))
-    sub_status = safe_str(payload.get("s") or payload.get("subscription_status", "PRO"), 50)
+    in_tokens = int(payload.get("i") if "i" in payload else payload.get("input_tokens", 145))
+    out_tokens = int(payload.get("o") if "o" in payload else payload.get("output_tokens", 450))
+    bal_tokens = int(payload.get("b") if "b" in payload else payload.get("balance_tokens", 12150))
+    sub_status = "PRO"
 
     if supabase:
         try:
@@ -293,8 +291,8 @@ async def get_dashboard_data(
             logs_query = logs_query.eq("hw_id", hw_id)
             
         if filter_mode == "today":
-            today_start = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
-            logs_query = logs_query.gte("created_at", today_start)
+            today_start = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            logs_query = logs_query.gte("created_at", f"{today_start}T00:00:00")
         else:
             logs_query = logs_query.limit(100)
 
@@ -313,9 +311,9 @@ async def get_dashboard_data(
                 "mac_address": mask_mac(dec_mac),
                 "ip_address": mask_ip(dec_ip),
                 "status": c.get("status", "PENDING"),
-                "subscription_status": c.get("subscription_status", "PRO"),
-                "model_name": c.get("model_name", "Claude Sonnet 5"),
-                "think_level": c.get("thinklevl", "Extended"),
+                "subscription_status": "PRO",
+                "model_name": "Claude Sonnet 5",
+                "think_level": "Extended",
                 "country": c.get("country", "IND"),
                 "geo_location": dec_geo,
                 "encrypted_pii": True
@@ -358,14 +356,16 @@ async def client_action(request: Request):
 @app.get("/api/verify-db", response_class=JSONResponse)
 async def verify_database():
     if not supabase:
-        return {"database_status": "Supabase credentials not configured"}
+        return {"database_status": "Disconnected", "backend": "In-Memory"}
     try:
-        res = supabase.table("ai_usage_logs").select("*").order("created_at", desc=True).limit(5).execute()
-        clients_res = supabase.table("clients_registry").select("*").execute()
+        res = supabase.table("ai_usage_logs").select("id", count="exact").execute()
+        clients_res = supabase.table("clients_registry").select("hw_id", count="exact").execute()
         return {
-            "database_status": "Operational & Connected",
-            "total_registered_clients": len(clients_res.data or []),
-            "recent_database_logs": res.data or []
+            "database_status": "Connected & Operational",
+            "storage_backend": "Supabase PostgreSQL",
+            "total_clients": len(clients_res.data or []),
+            "total_logs": len(res.data or []),
+            "last_ping": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         }
     except Exception as e:
         return {"database_status": "Error", "detail": str(e)}
