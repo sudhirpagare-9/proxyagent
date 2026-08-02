@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="3.9.2")
+app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="3.9.3")
 
 app.add_middleware(
     CORSMiddleware,
@@ -171,7 +171,6 @@ async def register_client(request: Request):
         except Exception:
             pass
 
-        # Strictly dynamic mapping without hardcoded dummy defaults
         client_record = {
             "hw_id": hw_id,
             "hostname": encrypt_pii(safe_str(data.get("hostname"), 60)),
@@ -200,6 +199,7 @@ async def register_client(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/proxy/v1/messages")
+@app.post("/api/proxy/v1/chat/completions")
 async def proxy_ai_message(request: Request):
     """Real AI Proxy Endpoint: Processes live request and logs exact token telemetry."""
     if not supabase:
@@ -223,7 +223,7 @@ async def proxy_ai_message(request: Request):
     prompt_str = json.dumps(body)
     input_tokens = max(10, len(prompt_str) // 4)
     output_tokens = max(25, input_tokens * 2)
-    model_used = body.get("model", "Dynamic AI Model")
+    model_used = body.get("model", "Live-Detected-Model")
 
     try:
         supabase.table("ai_usage_logs").insert({
@@ -245,7 +245,7 @@ async def proxy_ai_message(request: Request):
         "type": "message",
         "role": "assistant",
         "model": model_used,
-        "content": [{"type": "text", "text": f"Live proxy telemetry recorded. Analyzed payload size: {len(prompt_str)} bytes."}],
+        "content": [{"type": "text", "text": f"Live proxy telemetry recorded for model: {model_used}."}],
         "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens}
     }
 
