@@ -127,6 +127,13 @@ async def read_index():
             return f.read()
     return "<h1>Dashboard UI (index.html) missing.</h1>"
 
+@app.get("/web-agent", response_class=HTMLResponse)
+async def read_web_agent():
+    if os.path.exists("web_agent.html"):
+        with open("web_agent.html", "r", encoding="utf-8") as f:
+            return f.read()
+    return "<h1>Mobile Web Agent (web_agent.html) missing.</h1>"
+
 @app.get("/public-key", response_class=PlainTextResponse)
 async def get_public_key():
     return public_key_pem_str
@@ -134,7 +141,7 @@ async def get_public_key():
 @app.get("/client-status")
 async def get_client_status(hw_id: str = Query(...)):
     if not supabase:
-        raise HTTPException(status_code=500, detail="Database (Supabase) connection required for real client status verification.")
+        raise HTTPException(status_code=500, detail="Database connection required.")
     try:
         res = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
         if res.data and len(res.data) > 0:
@@ -146,7 +153,7 @@ async def get_client_status(hw_id: str = Query(...)):
 @app.post("/register")
 async def register_client(request: Request):
     if not supabase:
-        raise HTTPException(status_code=500, detail="Database (Supabase) connection required for real registration data.")
+        raise HTTPException(status_code=500, detail="Database connection required.")
     try:
         data = await request.json()
         hw_id = safe_str(data.get("hw_id"), 50)
@@ -171,10 +178,10 @@ async def register_client(request: Request):
             "last_ip": encrypt_pii(safe_str(client_ip, 30)),
             "status": current_status,
             "client_name": safe_str(data.get("client_name", data.get("hostname")), 50),
-            "model_name": safe_str(data.get("model_name", "Sonar 2 Pro"), 50),
-            "model_version": safe_str(data.get("model_version", "v2.5"), 50),
-            "thinklevl": safe_str(data.get("think_level", "High"), 50),
-            "interface_browser": safe_str(data.get("interface_browser", "Agent Client"), 50),
+            "model_name": safe_str(data.get("model_name", "Claude 3.5 Sonnet"), 50),
+            "model_version": safe_str(data.get("model_version", "v3.5"), 50),
+            "thinklevl": safe_str(data.get("think_level", "Extended"), 50),
+            "interface_browser": safe_str(data.get("interface_browser", "Web Agent"), 50),
             "input_tokens": int(data.get("input_tokens", 0)),
             "output_tokens": int(data.get("output_tokens", 0)),
             "balance_tokens": int(data.get("balance_tokens", 12500)),
@@ -188,13 +195,12 @@ async def register_client(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[!] Registration Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/log-traffic")
 async def log_traffic(request: Request):
     if not supabase:
-        raise HTTPException(status_code=500, detail="Database (Supabase) connection required to store real telemetry data.")
+        raise HTTPException(status_code=500, detail="Database connection required.")
     try:
         data = await request.json()
     except Exception as e:
@@ -234,10 +240,10 @@ async def log_traffic(request: Request):
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Decryption Failure: {str(e)}")
 
-    model_name = safe_str(payload.get("m") or payload.get("model_name", "Sonar 2 Pro"), 50)
-    version = safe_str(payload.get("v") or payload.get("model_version", "v2.5"), 50)
-    model_type = safe_str(payload.get("t") or payload.get("model_type", "API Gateway"), 50)
-    think_level = safe_str(payload.get("l") or payload.get("think_level", "High"), 50)
+    model_name = safe_str(payload.get("m") or payload.get("model_name", "Claude 3.5 Sonnet"), 50)
+    version = safe_str(payload.get("v") or payload.get("model_version", "v3.5"), 50)
+    model_type = safe_str(payload.get("t") or payload.get("model_type", "Mobile Web Agent"), 50)
+    think_level = safe_str(payload.get("l") or payload.get("think_level", "Extended"), 50)
     in_tokens = int(payload.get("i") if "i" in payload else payload.get("input_tokens", 100))
     out_tokens = int(payload.get("o") if "o" in payload else payload.get("output_tokens", 250))
     bal_tokens = int(payload.get("b") if "b" in payload else payload.get("balance_tokens", 12000))
@@ -256,7 +262,6 @@ async def log_traffic(request: Request):
             "think_level": think_level
         }).execute()
     except Exception as e:
-        print(f"[!] DB Log Insert Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
             
     return {"status": "success", "model_recorded": model_name, "subscription": sub_status}
@@ -267,7 +272,7 @@ async def get_dashboard_data(
     filter_mode: Optional[str] = Query("top100")
 ):
     if not supabase:
-        raise HTTPException(status_code=500, detail="Database (Supabase) connection required for dashboard data.")
+        raise HTTPException(status_code=500, detail="Database connection required.")
         
     try:
         raw_clients = supabase.table("clients_registry").select("*").execute().data or []
@@ -298,8 +303,8 @@ async def get_dashboard_data(
                 "ip_address": mask_ip(dec_ip),
                 "status": c.get("status", "PENDING"),
                 "subscription_status": c.get("subscription_status", "PRO"),
-                "model_name": c.get("model_name", "Sonar 2 Pro"),
-                "think_level": c.get("thinklevl", "High"),
+                "model_name": c.get("model_name", "Claude 3.5 Sonnet"),
+                "think_level": c.get("thinklevl", "Extended"),
                 "country": c.get("country", "IND"),
                 "geo_location": dec_geo,
                 "encrypted_pii": True
@@ -317,7 +322,7 @@ async def get_dashboard_data(
 @app.post("/api/client-action")
 async def client_action(request: Request):
     if not supabase:
-        raise HTTPException(status_code=500, detail="Database (Supabase) connection required for client actions.")
+        raise HTTPException(status_code=500, detail="Database connection required.")
     
     body = await request.json()
     hw_id = safe_str(body.get("hw_id"), 50)
@@ -338,20 +343,3 @@ async def client_action(request: Request):
         supabase.table("clients_registry").delete().eq("hw_id", hw_id).execute()
         
     return {"status": "success", "action": action, "hw_id": hw_id}
-
-@app.get("/api/verify-db", response_class=JSONResponse)
-async def verify_database():
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Database (Supabase) not connected.")
-    try:
-        res = supabase.table("ai_usage_logs").select("id", count="exact").execute()
-        clients_res = supabase.table("clients_registry").select("hw_id", count="exact").execute()
-        return {
-            "database_status": "Connected & Operational",
-            "storage_backend": "Supabase PostgreSQL",
-            "total_clients": len(clients_res.data or []),
-            "total_logs": len(res.data or []),
-            "last_ping": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
