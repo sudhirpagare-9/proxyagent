@@ -9,65 +9,61 @@
         body { background-color: #0b0f17; color: #c9d1d9; font-family: ui-sans-serif, system-ui, sans-serif; }
     </style>
 </head>
-<body class="min-h-screen p-4 md:p-6 space-y-6">
-
-    <!-- Top Navigation Header -->
-    <header class="flex flex-col md:flex-row justify-between items-start md:items-center bg-gray-900 border border-gray-800 p-4 rounded-2xl shadow-xl gap-4">
+<body class="min-h-screen p-6">
+    <header class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-800 pb-4 mb-6 gap-4">
         <div>
             <h1 class="text-xl font-bold text-white flex items-center gap-2">
                 🛡️ AI Traffic Dashboard & Security Monitor
             </h1>
-            <p class="text-xs text-gray-400">Real-time Asymmetric Encrypted AI Usage Telemetry & Client Management</p>
+            <p class="text-xs text-gray-400">Real-time Asymmetric Encrypted AI Usage Telemetry & NIST/GDPR Client Management</p>
         </div>
-        <div class="flex flex-wrap items-center gap-2 text-xs font-mono">
-            <span id="db-status-badge" class="px-3 py-1 bg-emerald-950 text-emerald-300 border border-emerald-800 rounded-full">DB: Connecting...</span>
-            <span id="crypto-badge" class="px-3 py-1 bg-cyan-950 text-cyan-300 border border-cyan-800 rounded-full">Active (RSA-2048 OAEP / AES-CTR 256)</span>
-            <button onclick="refreshDashboard()" class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold transition">Refresh Now</button>
+        <div class="flex items-center gap-3">
+            <span id="db-badge" class="px-3 py-1 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded-full text-xs font-mono">DB: Connecting...</span>
+            <span id="crypto-badge" class="px-3 py-1 bg-cyan-950 text-cyan-400 border border-cyan-800 rounded-full text-xs font-mono">Crypto: Active</span>
+            <button onclick="fetchDashboardData()" class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition">Refresh Now</button>
         </div>
     </header>
 
-    <!-- Main Grid Layout -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
         <!-- Discovered Clients Section -->
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-xl space-y-4">
-            <div class="flex justify-between items-center border-b border-gray-800 pb-3">
-                <h2 class="font-bold text-white text-sm">Discovered Clients</h2>
-                <span id="client-count" class="text-xs font-mono bg-gray-800 text-gray-300 px-2 py-0.5 rounded">0 Registered</span>
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 flex flex-col h-[700px]">
+            <div class="flex justify-between items-center mb-3">
+                <h2 class="text-sm font-bold text-white uppercase tracking-wider">Discovered Clients</h2>
+                <span id="client-count" class="text-xs font-mono bg-gray-800 px-2 py-0.5 rounded text-gray-300">0 Registered</span>
             </div>
-            <p class="text-[11px] text-gray-400">Click a client row to filter telemetry logs. Approve or Deny client traffic.</p>
-            <div id="clients-container" class="space-y-3 overflow-y-auto max-h-[500px]">
-                <div class="text-xs text-gray-500 text-center py-6">Loading client registry...</div>
+            <p class="text-[11px] text-gray-400 mb-3">Click an approved client row to inspect live telemetry logs.</p>
+            <div id="clients-list" class="space-y-3 overflow-y-auto flex-1 pr-1">
+                <div class="text-center py-10 text-xs text-gray-500">Loading clients...</div>
             </div>
         </div>
 
         <!-- Client AI Traffic Logs Section -->
-        <div class="lg:col-span-2 bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-xl space-y-4">
-            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-800 pb-3 gap-2">
+        <div class="lg:col-span-2 bg-gray-900 border border-gray-800 rounded-xl p-4 flex flex-col h-[700px]">
+            <div class="flex justify-between items-center mb-3">
                 <div>
-                    <h2 class="font-bold text-white text-sm" id="log-title">Client AI Traffic Logs</h2>
-                    <p class="text-[11px] text-gray-400" id="filter-subtitle">Filtered telemetry across all active devices</p>
+                    <h2 class="text-sm font-bold text-white uppercase tracking-wider">Client AI Traffic Logs (Filtered)</h2>
+                    <p id="log-subtitle" class="text-[11px] text-gray-400">Select an approved client to view telemetry records.</p>
                 </div>
-                <div class="flex items-center gap-2 text-xs font-mono">
-                    <span id="log-count" class="bg-gray-800 text-emerald-400 px-2.5 py-1 rounded border border-gray-700">0 Recorded</span>
-                </div>
+                <span id="log-count" class="text-xs font-mono bg-gray-800 px-2 py-0.5 rounded text-gray-300">0 Recorded</span>
             </div>
             
-            <div class="overflow-x-auto">
-                <table class="w-full text-left text-xs">
-                    <thead class="bg-gray-950 text-gray-400 uppercase font-mono text-[10px] border-b border-gray-800">
+            <div class="overflow-y-auto flex-1 border border-gray-800 rounded-lg">
+                <table class="w-full text-left border-collapse text-xs">
+                    <thead class="bg-gray-950 text-gray-400 sticky top-0 border-b border-gray-800">
                         <tr>
                             <th class="p-3">HW ID / Host</th>
                             <th class="p-3">Model Name</th>
                             <th class="p-3">Tier</th>
                             <th class="p-3">Think</th>
-                            <th class="p-3">Tokens (In / Out)</th>
+                            <th class="p-3">Tokens (IN / OUT)</th>
                             <th class="p-3">Time</th>
                         </tr>
                     </thead>
                     <tbody id="logs-table-body" class="divide-y divide-gray-800/60 font-mono">
                         <tr>
-                            <td colspan="6" class="p-6 text-center text-gray-500">Awaiting encrypted telemetry streams...</td>
+                            <td colspan="6" class="p-10 text-center text-gray-500 text-xs">
+                                📌 No client selected or logs empty. Click an <strong>APPROVED</strong> client card on the left.
+                            </td>
                         </tr>
                     </tbody>
                 </table>
@@ -78,39 +74,31 @@
     <script>
         const SERVER_URL = window.location.origin;
         let selectedHwId = null;
+        let dashboardCache = { clients: [], logs: [] };
 
-        async function refreshDashboard() {
+        async function fetchDashboardData() {
             try {
-                let url = `${SERVER_URL}/api/dashboard-data`;
-                if (selectedHwId) url += `?hw_id=${encodeURIComponent(selectedHwId)}`;
-
+                const url = selectedHwId ? `${SERVER_URL}/api/dashboard-data?hw_id=${selectedHwId}` : `${SERVER_URL}/api/dashboard-data`;
                 const res = await fetch(url);
-                if (!res.ok) throw new Error("Failed to fetch dashboard telemetry");
+                if (!res.ok) throw new Error("Failed to fetch dashboard telemetry.");
                 const data = await res.json();
+                
+                dashboardCache = data;
+                renderClients(data.clients);
+                renderLogs(data.logs);
 
-                // Update DB Status
-                const dbBadge = document.getElementById("db-status-badge");
-                if (data.db_status === "connected") {
-                    dbBadge.innerText = "DB: Connected & Operational";
-                    dbBadge.className = "px-3 py-1 bg-emerald-950 text-emerald-300 border border-emerald-800 rounded-full";
-                } else {
-                    dbBadge.innerText = "DB: Disconnected";
-                    dbBadge.className = "px-3 py-1 bg-red-950 text-red-300 border border-red-800 rounded-full";
-                }
-
-                renderClients(data.clients || []);
-                renderLogs(data.logs || []);
+                document.getElementById("db-badge").innerText = "DB: Connected & Operational";
             } catch (err) {
-                console.error("Dashboard refresh error:", err);
+                document.getElementById("db-badge").innerText = "DB: Connection Error";
             }
         }
 
         function renderClients(clients) {
-            const container = document.getElementById("clients-container");
+            const container = document.getElementById("clients-list");
             document.getElementById("client-count").innerText = `${clients.length} Registered`;
 
-            if (clients.length === 0) {
-                container.innerHTML = `<div class="text-xs text-gray-500 text-center py-6">No clients discovered yet. Run desktop_agent.py or open mobile view.</div>`;
+            if (!clients.length) {
+                container.innerHTML = `<div class="text-center py-10 text-xs text-gray-500">No client agents registered yet.</div>`;
                 return;
             }
 
@@ -119,24 +107,25 @@
                 const statusColor = c.status === "APPROVED" ? "bg-emerald-950 text-emerald-400 border-emerald-800" :
                                     c.status === "DENIED" ? "bg-red-950 text-red-400 border-red-800" :
                                     "bg-amber-950 text-amber-400 border-amber-800";
-
+                
                 return `
-                    <div class="bg-gray-950 border ${isSelected ? 'border-blue-500' : 'border-gray-800'} rounded-xl p-3 space-y-2 cursor-pointer hover:border-gray-700 transition" onclick="selectClient('${c.hw_id}')">
-                        <div class="flex justify-between items-start">
-                            <span class="font-mono text-xs font-bold text-white">${c.hw_id}</span>
-                            <span class="text-[10px] font-mono px-2 py-0.5 rounded border ${statusColor}">${c.status}</span>
+                    <div onclick="${c.status === 'APPROVED' ? `selectClient('${c.hw_id}')` : ''}" 
+                         class="p-3 rounded-lg border bg-gray-950 transition cursor-pointer ${isSelected ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-800 hover:border-gray-700'}">
+                        <div class="flex justify-between items-center mb-1.5">
+                            <span class="font-mono font-bold text-xs text-white">${c.hw_id}</span>
+                            <span class="text-[10px] px-2 py-0.5 rounded font-mono border ${statusColor}">${c.status}</span>
                         </div>
                         <div class="text-[11px] text-gray-400 space-y-0.5">
-                            <div>📍 Location: <strong class="text-cyan-400">${c.geo_location || 'Maharashtra'}</strong></div>
-                            <div>🌐 IP: <span class="font-mono text-gray-300">${c.ip_address}</span></div>
-                            <div>💻 Host: <span class="text-gray-300">${c.hostname}</span></div>
+                            <div>📍 Location: <strong class="text-gray-200">${c.geo_location || 'Unknown'}</strong></div>
+                            <div>🌐 IP: <strong class="text-gray-200">${c.ip_address}</strong></div>
+                            <div>💻 Host: <strong class="text-gray-200">${c.hostname}</strong></div>
                         </div>
-                        <div class="flex items-center justify-between pt-2 border-t border-gray-900">
-                            <span class="text-[10px] text-amber-400 font-mono">Tier: ${c.subscription_status || 'PRO'}</span>
-                            <div class="flex gap-1">
-                                ${c.status !== 'APPROVED' ? `<button onclick="event.stopPropagation(); clientAction('${c.hw_id}', 'approve')" class="px-2 py-0.5 bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] rounded">Approve</button>` : ''}
-                                ${c.status !== 'DENIED' ? `<button onclick="event.stopPropagation(); clientAction('${c.hw_id}', 'deny')" class="px-2 py-0.5 bg-amber-700 hover:bg-amber-600 text-white text-[10px] rounded">Deny</button>` : ''}
-                                <button onclick="event.stopPropagation(); clientAction('${c.hw_id}', 'delete')" class="px-2 py-0.5 bg-red-700 hover:bg-red-600 text-white text-[10px] rounded">Delete</button>
+                        <div class="mt-2.5 pt-2 border-t border-gray-800/80 flex justify-between items-center text-[11px]">
+                            <span class="text-amber-400 font-mono">Tier: ${c.subscription_status}</span>
+                            <div class="space-x-1" onclick="event.stopPropagation()">
+                                ${c.status !== 'APPROVED' ? `<button onclick="performAction('${c.hw_id}', 'approve')" class="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px]">Approve</button>` : ''}
+                                ${c.status !== 'DENIED' ? `<button onclick="performAction('${c.hw_id}', 'deny')" class="px-2 py-0.5 bg-amber-600 hover:bg-amber-500 text-white rounded text-[10px]">Deny</button>` : ''}
+                                <button onclick="performAction('${c.hw_id}', 'delete')" class="px-2 py-0.5 bg-red-600 hover:bg-red-500 text-white rounded text-[10px]">Delete</button>
                             </div>
                         </div>
                     </div>
@@ -148,53 +137,58 @@
             const tbody = document.getElementById("logs-table-body");
             document.getElementById("log-count").innerText = `${logs.length} Recorded`;
 
-            if (selectedHwId) {
-                document.getElementById("log-title").innerText = `Client AI Traffic Logs (Filtered)`;
-                document.getElementById("filter-subtitle").innerText = `Showing telemetry for HW ID: ${selectedHwId}`;
-            } else {
-                document.getElementById("log-title").innerText = `Client AI Traffic Logs`;
-                document.getElementById("filter-subtitle").innerText = `Showing recent global telemetry records`;
+            if (!selectedHwId) {
+                document.getElementById("log-subtitle").innerText = "Select an approved client to view telemetry records.";
+                tbody.innerHTML = `<tr><td colspan="6" class="p-10 text-center text-gray-500 text-xs">📌 No client selected. Click an APPROVED client card on the left.</td></tr>`;
+                return;
             }
 
-            if (logs.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-gray-500">No traffic logs recorded yet or client pending approval.</td></tr>`;
+            document.getElementById("log-subtitle").innerText = `Showing telemetry for HW ID: ${selectedHwId}`;
+
+            if (!logs.length) {
+                tbody.innerHTML = `<tr><td colspan="6" class="p-10 text-center text-gray-500 text-xs">No traffic logs found for this client.</td></tr>`;
                 return;
             }
 
             tbody.innerHTML = logs.map(l => `
-                <tr class="hover:bg-gray-950/60 transition">
-                    <td class="p-3 text-cyan-300 font-mono">${l.hw_id}</td>
-                    <td class="p-3 text-white">${l.model_name}</td>
-                    <td class="p-3 text-amber-400">${l.subscription_status || 'PRO'}</td>
-                    <td class="p-3 text-gray-300">${l.think_level || 'Extended'}</td>
+                <tr class="hover:bg-gray-800/40">
+                    <td class="p-3 text-white font-bold">${l.hw_id}</td>
+                    <td class="p-3 text-cyan-300">${l.model_name}</td>
+                    <td class="p-3 text-amber-400">${l.subscription_status}</td>
+                    <td class="p-3 text-gray-300">${l.think_level}</td>
                     <td class="p-3 text-emerald-400">↑ ${l.input_tokens} / ↓ ${l.output_tokens}</td>
-                    <td class="p-3 text-gray-500 text-[10px]">${new Date(l.created_at).toLocaleTimeString()}</td>
+                    <td class="p-3 text-gray-400 text-[11px]">${new Date(l.created_at).toLocaleTimeString()}</td>
                 </tr>
             `).join('');
         }
 
         function selectClient(hwId) {
-            selectedHwId = selectedHwId === hwId ? null : hwId;
-            refreshDashboard();
+            selectedHwId = hwId;
+            fetchDashboardData();
         }
 
-        async function clientAction(hwId, action) {
+        async function performAction(hwId, action) {
             try {
                 const res = await fetch(`${SERVER_URL}/api/client-action`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ hw_id: hwId, action: action })
                 });
-                if (res.ok) {
-                    refreshDashboard();
+                if (!res.ok) throw new Error("Action failed");
+
+                // Requirement 2: If denied or deleted, clear selected client telemetry view from dashboard
+                if ((action === "deny" || action === "delete") && selectedHwId === hwId) {
+                    selectedHwId = null;
                 }
+
+                fetchDashboardData();
             } catch (err) {
-                console.error("Action error:", err);
+                alert("Failed to execute client action.");
             }
         }
 
-        refreshDashboard();
-        setInterval(refreshDashboard, 5000);
+        fetchDashboardData();
+        setInterval(fetchDashboardData, 5000);
     </script>
 </body>
 </html>

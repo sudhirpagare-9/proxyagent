@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="3.5.0")
+app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="3.6.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -128,6 +128,7 @@ async def read_index():
     return "<h1>Dashboard UI (index.html) missing.</h1>"
 
 @app.get("/web-agent", response_class=HTMLResponse)
+@app.get("/web_agent.html", response_class=HTMLResponse)
 async def read_web_agent():
     if os.path.exists("web_agent.html"):
         with open("web_agent.html", "r", encoding="utf-8") as f:
@@ -181,7 +182,7 @@ async def register_client(request: Request):
             "model_name": safe_str(data.get("model_name", "Claude 3.5 Sonnet"), 50),
             "model_version": safe_str(data.get("model_version", "v3.5"), 50),
             "thinklevl": safe_str(data.get("think_level", "Extended"), 50),
-            "interface_browser": safe_str(data.get("interface_browser", "Web Agent"), 50),
+            "interface_browser": safe_str(data.get("interface_browser", "Agent Client"), 50),
             "input_tokens": int(data.get("input_tokens", 0)),
             "output_tokens": int(data.get("output_tokens", 0)),
             "balance_tokens": int(data.get("balance_tokens", 12500)),
@@ -242,7 +243,7 @@ async def log_traffic(request: Request):
 
     model_name = safe_str(payload.get("m") or payload.get("model_name", "Claude 3.5 Sonnet"), 50)
     version = safe_str(payload.get("v") or payload.get("model_version", "v3.5"), 50)
-    model_type = safe_str(payload.get("t") or payload.get("model_type", "Mobile Web Agent"), 50)
+    model_type = safe_str(payload.get("t") or payload.get("model_type", "AI Client Agent"), 50)
     think_level = safe_str(payload.get("l") or payload.get("think_level", "Extended"), 50)
     in_tokens = int(payload.get("i") if "i" in payload else payload.get("input_tokens", 100))
     out_tokens = int(payload.get("o") if "o" in payload else payload.get("output_tokens", 250))
@@ -276,18 +277,21 @@ async def get_dashboard_data(
         
     try:
         raw_clients = supabase.table("clients_registry").select("*").execute().data or []
-        logs_query = supabase.table("ai_usage_logs").select("*").order("created_at", desc=True)
         
+        raw_logs = []
+        # Requirement 1: Only load telemetry logs if a valid APPROVED client is explicitly selected
         if hw_id:
-            logs_query = logs_query.eq("hw_id", hw_id)
-            
-        if filter_mode == "today":
-            today_start = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            logs_query = logs_query.gte("created_at", f"{today_start}T00:00:00")
-        else:
-            logs_query = logs_query.limit(100)
+            client_check = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
+            if client_check.data and client_check.data[0].get("status") == "APPROVED":
+                logs_query = supabase.table("ai_usage_logs").select("*").eq("hw_id", hw_id).order("created_at", desc=True)
+                
+                if filter_mode == "today":
+                    today_start = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                    logs_query = logs_query.gte("created_at", f"{today_start}T00:00:00")
+                else:
+                    logs_query = logs_query.limit(100)
 
-        raw_logs = logs_query.execute().data or []
+                raw_logs = logs_query.execute().data or []
 
         processed_clients = []
         for c in raw_clients:
@@ -304,7 +308,7 @@ async def get_dashboard_data(
                 "status": c.get("status", "PENDING"),
                 "subscription_status": c.get("subscription_status", "PRO"),
                 "model_name": c.get("model_name", "Claude 3.5 Sonnet"),
-                "think_level": c.get("thinklevl", "Extended"),
+                "think_level": c.get("thinklevl", "High"),
                 "country": c.get("country", "IND"),
                 "geo_location": dec_geo,
                 "encrypted_pii": True
@@ -336,10 +340,7 @@ async def client_action(request: Request):
     elif action == "deny":
         supabase.table("clients_registry").update({"status": "DENIED"}).eq("hw_id", hw_id).execute()
     elif action == "delete":
-        try:
-            supabase.table("ai_usage_logs").delete().eq("hw_id", hw_id).execute()
-        except Exception:
-            pass
+        # Requirement 2: Clear client registration from dashboard view, but PRESERVE ai_usage_logs in database for NIST/GDPR audit compliance
         supabase.table("clients_registry").delete().eq("hw_id", hw_id).execute()
         
     return {"status": "success", "action": action, "hw_id": hw_id}
