@@ -8,7 +8,11 @@ import sqlite3
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
+from database import engine, Base
 
+@app.on_event("startup")
+def startup_event():
+    Base.metadata.create_all(bind=engine)
 # Robust Dynamic Configuration: Auto-load .env if available without crashing
 try:
   from dotenv import load_dotenv
