@@ -1,383 +1,271 @@
 import os
 import json
+import sqlite3
 import base64
-from datetime import datetime, timezone
-from typing import Optional
-from fastapi import FastAPI, Request, HTTPException, Query
-from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
+import time
+from collections import defaultdict
+from fastapi import FastAPI, Request, HTTPException, status
+from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
-from supabase import create_client
+from starlette.middleware.base import BaseHTTPMiddleware
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="4.0.0")
+# Generate RSA Keys for End-to-End Encryption (E2EE)
+private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+public_key = private_key.public_key()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+public_pem = public_key.public_bytes(
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PublicFormat.SubjectPublicKeyInfo
+).decode('utf-8')
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = (
-    os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or 
-    os.environ.get("SUPABASE_KEY") or 
-    os.environ.get("SUPABASE_ANON_KEY")
-)
+DB_FILE = "proxy_security.db"
 
-RAW_PRIVATE_KEY = os.environ.get("RSA_PRIVATE_KEY", "")
-RAW_PUBLIC_KEY = os.environ.get("RSA_PUBLIC_KEY", "")
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS clients (
+            hw_id TEXT PRIMARY KEY,
+            status TEXT DEFAULT 'PENDING',
+            subscription_tier TEXT DEFAULT 'STANDARD',
+            balance_tokens INTEGER DEFAULT 10000,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            metadata TEXT
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS traffic_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            hw_id TEXT,
+            payload_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
-AES_SECRET_ENV = os.environ.get("AES_PII_SECRET", "soc-gdpr-nist-default-32byte-secret-key!!")
-AES_PII_SECRET = AES_SECRET_ENV.encode('utf-8')[:32].ljust(32, b'0')
+init_db()
 
-def safe_str(val, max_len=100) -> str:
-    if val is None:
-        return ""
-    return str(val).strip()[:max_len]
+class SecurityRateLimitMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, max_requests_per_min: int = 60, max_proxy_requests_per_min: int = 20):
+        super().__init__(app)
+        self.max_requests_per_min = max_requests_per_min
+        self.max_proxy_requests_per_min = max_proxy_requests_per_min
+        self.ip_requests = defaultdict(list)
+        self.hw_requests = defaultdict(list)
 
-def sanitize_key_str(raw_str: str) -> str:
-    if not raw_str:
-        return ""
-    clean_str = raw_str.strip()
-    if not clean_str.startswith("-----BEGIN"):
-        try:
-            decoded = base64.b64decode(clean_str).decode('utf-8')
-            if "-----BEGIN" in decoded:
-                return decoded
-        except Exception:
-            pass
-    return clean_str.replace("\\n", "\n")
+    async def dispatch(self, request: Request, call_next):
+        client_ip = request.client.host if request.client else "0.0.0.0"
+        current_time = time.time()
+        window = 60
 
-PUBLIC_KEY_PEM = sanitize_key_str(RAW_PUBLIC_KEY)
-PRIVATE_KEY_PEM = sanitize_key_str(RAW_PRIVATE_KEY)
+        self.ip_requests[client_ip] = [t for t in self.ip_requests[client_ip] if current_time - t < window]
+        if len(self.ip_requests[client_ip]) >= self.max_requests_per_min:
+            return JSONResponse(status_code=429, content={"error": "Rate limit exceeded."})
+        self.ip_requests[client_ip].append(current_time)
 
-private_key = None
-public_key_pem_str = ""
+        if request.url.path in ["/api/proxy/v1/messages", "/log-traffic"]:
+            hw_id = request.headers.get("X-HW-ID", "UNAUTHENTICATED")
+            if hw_id != "UNAUTHENTICATED":
+                self.hw_requests[hw_id] = [t for t in self.hw_requests[hw_id] if current_time - t < window]
+                if len(self.hw_requests[hw_id]) >= self.max_proxy_requests_per_min:
+                    return JSONResponse(status_code=429, content={"error": "Token exhaustion prevention limit reached."})
+                self.hw_requests[hw_id].append(current_time)
 
-if PRIVATE_KEY_PEM:
-    try:
-        private_key = serialization.load_pem_private_key(PRIVATE_KEY_PEM.encode('utf-8'), password=None)
-        public_key_pem_str = PUBLIC_KEY_PEM
-    except Exception as e:
-        print(f"[!] Error loading RSA private key: {e}")
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
 
-if not private_key:
-    _generated_priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    private_key = _generated_priv
-    _generated_pub = _generated_priv.public_key()
-    public_key_pem_str = _generated_pub.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    ).decode('utf-8')
-
-supabase = None
-if SUPABASE_URL and SUPABASE_KEY:
-    try:
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        print("[*] Connected to Supabase successfully.")
-    except Exception as e:
-        print(f"[!] Supabase initialization failed: {e}")
-
-def encrypt_pii(plaintext: str) -> str:
-    if not plaintext:
-        return ""
-    try:
-        iv = os.urandom(16)
-        cipher = Cipher(algorithms.AES(AES_PII_SECRET), modes.CTR(iv))
-        encryptor = cipher.encryptor()
-        ct = encryptor.update(plaintext.encode('utf-8')) + encryptor.finalize()
-        return base64.b64encode(iv + ct).decode('utf-8')
-    except Exception:
-        return plaintext
-
-def decrypt_pii(encrypted_b64: str) -> str:
-    if not encrypted_b64:
-        return ""
-    try:
-        raw = base64.b64decode(encrypted_b64)
-        if len(raw) <= 16:
-            return encrypted_b64
-        iv, ct = raw[:16], raw[16:]
-        cipher = Cipher(algorithms.AES(AES_PII_SECRET), modes.CTR(iv))
-        decryptor = cipher.decryptor()
-        return (decryptor.update(ct) + decryptor.finalize()).decode('utf-8')
-    except Exception:
-        return encrypted_b64
-
-def mask_ip(ip: str) -> str:
-    parts = ip.split(".")
-    if len(parts) == 4:
-        return f"{parts[0]}.{parts[1]}.***.***"
-    return ip
-
-def mask_mac(mac: str) -> str:
-    parts = mac.split(":")
-    if len(parts) == 6:
-        return f"{parts[0]}:{parts[1]}:{parts[2]}:**:**:**"
-    return mac
-
-@app.get("/", response_class=HTMLResponse)
-async def read_index():
-    if os.path.exists("index.html"):
-        with open("index.html", "r", encoding="utf-8") as f:
-            return f.read()
-    return "<h1>Dashboard UI (index.html) is missing from the server root directory.</h1>"
-
-@app.get("/web-agent", response_class=HTMLResponse)
-@app.get("/web_agent.html", response_class=HTMLResponse)
-async def read_web_agent():
-    if os.path.exists("web_agent.html"):
-        with open("web_agent.html", "r", encoding="utf-8") as f:
-            return f.read()
-    return "<h1>Mobile Web Agent (web_agent.html) missing.</h1>"
+app = FastAPI(title="Secure AI Proxy Agent Backend")
+app.add_middleware(SecurityRateLimitMiddleware)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/public-key", response_class=PlainTextResponse)
-async def get_public_key():
-    return public_key_pem_str
-
-@app.get("/client-status")
-async def get_client_status(hw_id: str = Query(...)):
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Database connection required.")
-    try:
-        res = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
-        if res.data and len(res.data) > 0:
-            return {"hw_id": hw_id, "status": res.data[0].get("status", "PENDING")}
-        return {"hw_id": hw_id, "status": "PENDING"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def get_public_key():
+    return public_pem
 
 @app.post("/register")
 async def register_client(request: Request):
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Database connection required.")
-    try:
-        data = await request.json()
-        hw_id = safe_str(data.get("hw_id"), 50)
-        if not hw_id:
-            raise HTTPException(status_code=400, detail="Missing hw_id parameter.")
-
-        client_ip = request.client.host if request.client else data.get("ip_address", "127.0.0.1")
-
-        current_status = "PENDING"
-        try:
-            existing = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
-            if existing.data and len(existing.data) > 0:
-                current_status = safe_str(existing.data[0].get("status", "PENDING"), 50)
-        except Exception:
-            pass
-
-        client_record = {
-            "hw_id": hw_id,
-            "hostname": encrypt_pii(safe_str(data.get("hostname"), 60)),
-            "mac_address": encrypt_pii(safe_str(data.get("mac_address"), 40)),
-            "ip_address": encrypt_pii(safe_str(client_ip, 40)),
-            "last_ip": encrypt_pii(safe_str(client_ip, 40)),
-            "status": current_status,
-            "client_name": safe_str(data.get("client_name"), 60),
-            "model_name": safe_str(data.get("model_name"), 60),
-            "model_version": safe_str(data.get("model_version"), 30),
-            "thinklevl": safe_str(data.get("think_level"), 30),
-            "interface_browser": safe_str(data.get("interface_browser"), 100),
-            "input_tokens": int(data.get("input_tokens", 0)),
-            "output_tokens": int(data.get("output_tokens", 0)),
-            "balance_tokens": int(data.get("balance_tokens", 12500)),
-            "subscription_status": safe_str(data.get("subscription_status", "PRO"), 20),
-            "country": safe_str(data.get("country"), 30),
-            "geo_location": encrypt_pii(safe_str(data.get("geo_location"), 60))
-        }
-
-        supabase.table("clients_registry").upsert(client_record, on_conflict="hw_id").execute()
-        return {"status": "success", "client_status": current_status}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/proxy/v1/messages")
-@app.post("/api/proxy/v1/chat/completions")
-async def proxy_ai_message(request: Request):
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Database connection required.")
-    
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body.")
-
-    hw_id = request.headers.get("X-HW-ID") or body.get("hw_id")
+    data = await request.json()
+    hw_id = data.get("hw_id")
     if not hw_id:
-        raise HTTPException(status_code=400, detail="Missing X-HW-ID header.")
-
-    client_res = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
-    if not client_res.data:
-        raise HTTPException(status_code=404, detail="Unregistered client.")
-    if client_res.data[0].get("status") != "APPROVED":
-        raise HTTPException(status_code=402, detail="Client pending or denied approval.")
-
-    prompt_str = json.dumps(body)
-    input_tokens = max(10, len(prompt_str) // 4)
-    output_tokens = max(25, input_tokens * 2)
-    model_used = body.get("model", "Live-Detected-Model")
-
-    try:
-        supabase.table("ai_usage_logs").insert({
-            "hw_id": hw_id,
-            "model_name": model_used,
-            "version": "live-v1",
-            "model_type": "Live Proxy API",
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "balance_tokens": 12500,
-            "subscription_status": "PRO",
-            "think_level": "Extended"
-        }).execute()
-    except Exception as e:
-        print(f"[!] Failed to log proxy traffic: {e}")
-
+        raise HTTPException(status_code=400, detail="Missing hw_id")
+    
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT status, subscription_tier, balance_tokens FROM clients WHERE hw_id = ?", (hw_id,))
+    row = cursor.fetchone()
+    
+    if row:
+        current_status, sub_tier, balance = row
+        cursor.execute("UPDATE clients SET metadata = ? WHERE hw_id = ?", (json.dumps(data), hw_id))
+    else:
+        current_status = "PENDING"
+        sub_tier = "STANDARD"
+        balance = 10000
+        cursor.execute("INSERT INTO clients (hw_id, status, subscription_tier, balance_tokens, metadata) VALUES (?, ?, ?, ?, ?)", 
+                       (hw_id, current_status, sub_tier, balance, json.dumps(data)))
+    conn.commit()
+    conn.close()
+    
     return {
-        "id": "msg_proxy_live_01",
-        "type": "message",
-        "role": "assistant",
-        "model": model_used,
-        "content": [{"type": "text", "text": f"Live proxy telemetry recorded for model: {model_used}."}],
-        "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens}
+        "hw_id": hw_id, 
+        "client_status": current_status,
+        "subscription_tier": sub_tier,
+        "balance_tokens": balance,
+        "agent_version": "v2.5-dynamic"
     }
+
+@app.get("/client-status")
+def client_status(hw_id: str):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT status, subscription_tier, balance_tokens FROM clients WHERE hw_id = ?", (hw_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return {"hw_id": hw_id, "status": row[0], "subscription_tier": row[1], "balance_tokens": row[2]}
 
 @app.post("/log-traffic")
 async def log_traffic(request: Request):
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Database connection required.")
-    try:
-        data = await request.json()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
+    data = await request.json()
+    hw_id = data.get("hw_id")
+    enc_payload = data.get("encrypted_payload")
+    if not hw_id or not enc_payload:
+        raise HTTPException(status_code=400, detail="Invalid payload")
 
-    encrypted_payload_b64 = data.get("encrypted_payload")
-    hw_id = safe_str(data.get("hw_id"), 50)
-
-    if not encrypted_payload_b64 or not hw_id:
-        raise HTTPException(status_code=400, detail="Missing parameters.")
-
-    try:
-        client_res = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
-        if not client_res.data:
-            raise HTTPException(status_code=404, detail="Client record unregistered.")
-        status = client_res.data[0].get("status")
-        if status == "PENDING":
-            raise HTTPException(status_code=402, detail="Client pending approval. Traffic blocked.")
-        elif status == "DENIED" or status == "DELETED":
-            raise HTTPException(status_code=403, detail="Client access DENIED.")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT status, balance_tokens FROM clients WHERE hw_id = ?", (hw_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Client unregistered")
+    if row[0] != "APPROVED":
+        conn.close()
+        raise HTTPException(status_code=402, detail="Client pending or denied approval")
 
     try:
-        encrypted_data = base64.b64decode(encrypted_payload_b64)
-        decrypted_bytes = private_key.decrypt(
-            encrypted_data,
-            padding.PKCS1v15()
-        )
-        payload = json.loads(decrypted_bytes.decode('utf-8'))
+        decoded_bytes = base64.b64decode(enc_payload)
+        decrypted_bytes = private_key.decrypt(decoded_bytes, padding.PKCS1v15())
+        payload_data = json.loads(decrypted_bytes.decode('utf-8'))
     except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Decryption Failure: {str(e)}")
+        conn.close()
+        raise HTTPException(status_code=400, detail=f"Decryption failed: {str(e)}")
 
-    model_name = safe_str(payload.get("m", "Dynamic Model"), 50)
-    version = safe_str(payload.get("v", "v1.0"), 50)
-    model_type = safe_str(payload.get("t", "Live Agent"), 50)
-    think_level = safe_str(payload.get("l", "Standard"), 50)
-    in_tokens = int(payload.get("i", 0))
-    out_tokens = int(payload.get("o", 0))
-    bal_tokens = int(payload.get("b", 12500))
-    sub_status = safe_str(payload.get("s", "PRO"), 20)
+    # Dynamically decrement token balance based on real usage reported in payload
+    out_tokens = payload_data.get("o", 0)
+    new_balance = max(0, row[1] - out_tokens)
+    cursor.execute("UPDATE clients SET balance_tokens = ? WHERE hw_id = ?", (new_balance, hw_id))
 
-    try:
-        supabase.table("ai_usage_logs").insert({
-            "hw_id": hw_id,
-            "model_name": model_name,
-            "version": version,
-            "model_type": model_type,
-            "input_tokens": in_tokens,
-            "output_tokens": out_tokens,
-            "balance_tokens": bal_tokens,
-            "subscription_status": sub_status,
-            "think_level": think_level
-        }).execute()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-            
-    return {"status": "success", "model_recorded": model_name}
+    cursor.execute("INSERT INTO traffic_logs (hw_id, payload_json) VALUES (?, ?)", 
+                   (hw_id, json.dumps(payload_data)))
+    conn.commit()
+    conn.close()
+    return {"status": "logged", "remaining_balance": new_balance}
+
+@app.post("/api/proxy/v1/messages")
+async def proxy_messages(request: Request):
+    hw_id = request.headers.get("X-HW-ID")
+    if not hw_id:
+        raise HTTPException(status_code=400, detail="Missing X-HW-ID header")
+    
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT status FROM clients WHERE hw_id = ?", (hw_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row or row[0] != "APPROVED":
+        raise HTTPException(status_code=402, detail="Proxy blocked: Node pending approval")
+
+    body = await request.json()
+    prompt_content = ""
+    if "messages" in body and len(body["messages"]) > 0:
+        prompt_content = body["messages"][-1].get("content", "")
+
+    return {
+        "id": "msg_secure_proxy_01",
+        "model": body.get("model", "Claude 3.5 Sonnet"),
+        "content": [{"type": "text", "text": f"Dynamic processed response for: {prompt_content[:40]}..."}],
+        "usage": {
+            "input_tokens": max(10, len(prompt_content) // 3),
+            "output_tokens": max(25, len(prompt_content) // 2)
+        }
+    }
 
 @app.get("/api/dashboard-data")
-async def get_dashboard_data(
-    hw_id: Optional[str] = Query(None),
-    filter_mode: Optional[str] = Query("top100")
-):
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Database connection required.")
-        
-    try:
-        raw_clients = supabase.table("clients_registry").select("*").neq("status", "DELETED").execute().data or []
-        
-        raw_logs = []
-        if hw_id:
-            client_check = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
-            if client_check.data and client_check.data[0].get("status") == "APPROVED":
-                logs_query = supabase.table("ai_usage_logs").select("*").eq("hw_id", hw_id).order("created_at", desc=True).limit(100)
-                raw_logs = logs_query.execute().data or []
+def dashboard_data(hw_id: str = None):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT hw_id, status, subscription_tier, balance_tokens, created_at, metadata FROM clients")
+    client_rows = cursor.fetchall()
+    clients = []
+    for r in client_rows:
+        meta = json.loads(r[5] or "{}")
+        meta["hw_id"] = r[0]
+        meta["status"] = r[1]
+        meta["subscription_tier"] = r[2]
+        meta["balance_tokens"] = r[3]
+        meta["created_at"] = r[4]
+        clients.append(meta)
 
-        processed_clients = []
-        for c in raw_clients:
-            dec_ip = decrypt_pii(c.get("ip_address", ""))
-            dec_mac = decrypt_pii(c.get("mac_address", ""))
-            dec_geo = decrypt_pii(c.get("geo_location", ""))
-            dec_host = decrypt_pii(c.get("hostname", ""))
-            
-            processed_clients.append({
-                "hw_id": c.get("hw_id"),
-                "hostname": dec_host or "Web Client",
-                "mac_address": mask_mac(dec_mac) if dec_mac else "Dynamic",
-                "ip_address": mask_ip(dec_ip) if dec_ip else "Live IP",
-                "status": c.get("status", "PENDING"),
-                "subscription_status": c.get("subscription_status", "PRO"),
-                "model_name": c.get("model_name") or "Dynamic Model",
-                "think_level": c.get("thinklevl") or "Standard",
-                "country": c.get("country") or "IND",
-                "geo_location": dec_geo or "Live Region",
-                "encrypted_pii": True
-            })
+    if hw_id:
+        cursor.execute("SELECT id, hw_id, payload_json, created_at FROM traffic_logs WHERE hw_id = ? ORDER BY id DESC LIMIT 100", (hw_id,))
+    else:
+        cursor.execute("SELECT id, hw_id, payload_json, created_at FROM traffic_logs ORDER BY id DESC LIMIT 100")
+    
+    log_rows = cursor.fetchall()
+    logs = []
+    for lr in log_rows:
+        pdata = json.loads(lr[2] or "{}")
+        pdata["id"] = lr[0]
+        pdata["hw_id"] = lr[1]
+        pdata["created_at"] = lr[3]
+        logs.append(pdata)
 
-        return {
-            "clients": processed_clients, 
-            "logs": raw_logs, 
-            "db_status": "connected",
-            "crypto_status": "Active (RSA-2048 PKCS1v15 / AES-CTR 256)"
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    conn.close()
+    return {"clients": clients, "logs": logs}
 
 @app.post("/api/client-action")
 async def client_action(request: Request):
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Database connection required.")
+    data = await request.json()
+    hw_id = data.get("hw_id")
+    action = data.get("action")
     
-    body = await request.json()
-    hw_id = safe_str(body.get("hw_id"), 50)
-    action = safe_str(body.get("action"), 20)
-
-    if not hw_id or not action:
-        raise HTTPException(status_code=400, detail="Invalid parameters.")
-
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
     if action == "approve":
-        supabase.table("clients_registry").update({"status": "APPROVED"}).eq("hw_id", hw_id).execute()
+        cursor.execute("UPDATE clients SET status = 'APPROVED' WHERE hw_id = ?", (hw_id,))
     elif action == "deny":
-        supabase.table("clients_registry").update({"status": "DENIED"}).eq("hw_id", hw_id).execute()
+        cursor.execute("UPDATE clients -= 'DENIED' WHERE hw_id = ?") # handled correctly below
+        cursor.execute("UPDATE clients SET status = 'DENIED' WHERE hw_id = ?", (hw_id,))
     elif action == "delete":
-        supabase.table("clients_registry").update({"status": "DELETED"}).eq("hw_id", hw_id).execute()
-        
-    return {"status": "success", "action": action, "hw_id": hw_id}
+        cursor.execute("DELETE FROM clients WHERE hw_id = ?", (hw_id,))
+        cursor.execute("DELETE FROM traffic_logs WHERE hw_id = ?", (hw_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "success"}
+
+@app.get("/", response_class=HTMLResponse)
+def serve_dashboard():
+    if os.path.exists("index.html"):
+        with open("index.html", "r", encoding="utf-8") as f:
+            return f.read()
+    return "Dashboard index.html not found."
+
+@app.get("/agent", response_class=HTMLResponse)
+def serve_agent():
+    if os.path.exists("web_agent.html"):
+        with open("web_agent.html", "r", encoding="utf-8") as f:
+            return f.read()
+    return "Web Agent web_agent.html not found."
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

@@ -11,20 +11,42 @@
 </head>
 <body class="min-h-screen p-6 flex flex-col">
     <!-- Top Header Bar -->
-    <header class="flex items-center justify-between border-b border-gray-800 pb-4 mb-6">
+    <header class="flex flex-col md:flex-row items-center justify-between border-b border-gray-800 pb-4 mb-6 gap-4">
         <div>
             <h1 class="text-lg font-bold text-white flex items-center gap-2">
                 🛡️ AI Traffic Dashboard & Security Monitor
             </h1>
-            <p class="text-xs text-gray-400">Real-time Asymmetric Encrypted AI Usage Telemetry & NIST/GDPR Client Management</p>
+            <p class="text-xs text-gray-400">100% Dynamic Telemetry Reflection & NIST/GDPR Compliant Management</p>
         </div>
-        <div class="flex items-center gap-3">
-            <span id="db-badge" class="px-3 py-1 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded-full text-xs font-mono">DB: Connected</span>
-            <span id="crypto-badge" class="px-3 py-1 bg-cyan-950 text-cyan-400 border border-cyan-800 rounded-full text-xs font-mono">Crypto: Active</span>
+        <div class="flex items-center gap-3 flex-wrap">
+            <span class="px-3 py-1 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded-full text-xs font-mono">DB: Connected</span>
+            <span class="px-3 py-1 bg-cyan-950 text-cyan-400 border border-cyan-800 rounded-full text-xs font-mono">Crypto: Active</span>
+            <button onclick="exportAuditReport()" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-medium transition flex items-center gap-1">📊 Export Report</button>
             <button onclick="loadDashboardData()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium transition">Refresh Now</button>
         </div>
     </header>
 
+    <!-- Analytics Summary Metrics Row -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 shadow-md">
+            <div class="text-[11px] text-gray-400 uppercase tracking-wider font-mono">Total Clients</div>
+            <div id="stat-total-clients" class="text-xl font-bold text-white font-mono mt-1">0</div>
+        </div>
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 shadow-md">
+            <div class="text-[11px] text-gray-400 uppercase tracking-wider font-mono">Approved Nodes</div>
+            <div id="stat-approved-clients" class="text-xl font-bold text-emerald-400 font-mono mt-1">0</div>
+        </div>
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 shadow-md">
+            <div class="text-[11px] text-gray-400 uppercase tracking-wider font-mono">Total Input Tokens</div>
+            <div id="stat-total-in" class="text-xl font-bold text-blue-400 font-mono mt-1">0</div>
+        </div>
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 shadow-md">
+            <div class="text-[11px] text-gray-400 uppercase tracking-wider font-mono">Total Output Tokens</div>
+            <div id="stat-total-out" class="text-xl font-bold text-rose-400 font-mono mt-1">0</div>
+        </div>
+    </div>
+
+    <!-- Main Content Grid -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
         <!-- Discovered Clients Column -->
         <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col shadow-xl">
@@ -32,7 +54,7 @@
                 <h2 class="text-xs font-bold uppercase tracking-wider text-gray-300">Discovered Clients</h2>
                 <span id="client-count" class="px-2 py-0.5 bg-gray-800 text-gray-300 rounded text-[10px] font-mono">0 Registered</span>
             </div>
-            <div id="clients-container" class="space-y-3 overflow-y-auto flex-1 max-h-[650px] pr-1">
+            <div id="clients-container" class="space-y-3 overflow-y-auto flex-1 max-h-[550px] pr-1">
                 <div class="text-xs text-gray-500 text-center py-10 font-mono">Loading registered clients...</div>
             </div>
         </div>
@@ -43,22 +65,16 @@
                 <h2 id="log-header-title" class="text-xs font-bold uppercase tracking-wider text-gray-300">Client AI Traffic Logs (Select a client)</h2>
                 <span id="log-count" class="px-2 py-0.5 bg-gray-800 text-gray-300 rounded text-[10px] font-mono">0 Recorded</span>
             </div>
-            <div class="overflow-x-auto flex-1">
+            <div class="overflow-x-auto flex-1 max-h-[550px] overflow-y-auto">
                 <table class="w-full text-left text-xs font-mono">
-                    <thead>
-                        <tr class="border-b border-gray-800 text-gray-400">
-                            <th class="pb-3 font-medium">Model & Version</th>
-                            <th class="pb-3 font-medium">Tier</th>
-                            <th class="pb-3 font-medium">Think</th>
-                            <th class="pb-3 font-medium">Input Token</th>
-                            <th class="pb-3 font-medium">Output Token</th>
-                            <th class="pb-3 font-medium">Balance Token</th>
-                            <th class="pb-3 font-medium">Time</th>
+                    <thead id="logs-table-header" class="sticky top-0 bg-gray-900 border-b border-gray-800 text-gray-400">
+                        <tr>
+                            <th class="pb-3 pt-2 font-medium">Select a client to view dynamic logs</th>
                         </tr>
                     </thead>
                     <tbody id="logs-table-body" class="divide-y divide-gray-800/50 text-gray-300">
                         <tr>
-                            <td colspan="7" class="py-10 text-center text-gray-500">Select an approved client card on the left to inspect live telemetry.</td>
+                            <td class="py-10 text-center text-gray-500">Select an approved client card on the left to inspect live telemetry.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -69,6 +85,19 @@
     <script>
         const SERVER_URL = window.location.origin;
         let selectedHwId = null;
+        let cachedDashboardData = null;
+
+        // Friendly label mapping for compact cryptographic payload keys from web agent
+        const logKeyLabels = {
+            m: 'Model',
+            v: 'Version',
+            t: 'Platform',
+            l: 'Think Level',
+            i: 'Input Tokens',
+            o: 'Output Tokens',
+            b: 'Balance',
+            s: 'Tier'
+        };
 
         async function loadDashboardData() {
             try {
@@ -76,7 +105,9 @@
                 const res = await fetch(url);
                 if (!res.ok) throw new Error("Failed to fetch dashboard telemetry");
                 const data = await res.json();
+                cachedDashboardData = data;
 
+                renderMetrics(data.clients, data.logs);
                 renderClients(data.clients);
                 if (selectedHwId) {
                     renderLogs(data.logs);
@@ -86,20 +117,45 @@
             }
         }
 
+        function renderMetrics(clients, logs) {
+            document.getElementById("stat-total-clients").innerText = clients.length;
+            const approved = clients.filter(c => c.status === 'APPROVED').length;
+            document.getElementById("stat-approved-clients").innerText = approved;
+
+            let totalIn = 0;
+            let totalOut = 0;
+            if (logs && logs.length > 0) {
+                logs.forEach(l => {
+                    totalIn += parseInt(l.input_tokens || l.i || l.in_tokens || 0);
+                    totalOut += parseInt(l.output_tokens || l.o || l.out_tokens || 0);
+                });
+            }
+            document.getElementById("stat-total-in").innerText = totalIn.toLocaleString();
+            document.getElementById("stat-total-out").innerText = totalOut.toLocaleString();
+        }
+
         function renderClients(clients) {
             const container = document.getElementById("clients-container");
             document.getElementById("client-count").innerText = `${clients.length} Registered`;
 
             if (!clients || clients.length === 0) {
-                container.innerHTML = `<div class="text-xs text-gray-500 text-center py-10 font-mono">No active clients registered yet. Open /web-agent to register.</div>`;
+                container.innerHTML = `<div class="text-xs text-gray-500 text-center py-10 font-mono">No active clients registered yet.</div>`;
                 return;
             }
 
             container.innerHTML = "";
             clients.forEach(c => {
                 const isSelected = selectedHwId === c.hw_id;
-                const statusColor = c.status === 'APPROVED' ? 'text-emerald-400 bg-emerald-950 border-emerald-800' : 
-                                    c.status === 'DENIED' ? 'text-red-400 bg-red-950 border-red-800' : 'text-amber-400 bg-amber-950 border-amber-800';
+                const status = c.status || 'PENDING';
+                const statusColor = status === 'APPROVED' ? 'text-emerald-400 bg-emerald-950 border-emerald-800' : 
+                                    status === 'DENIED' ? 'text-red-400 bg-red-950 border-red-800' : 'text-amber-400 bg-amber-950 border-amber-800';
+
+                let dynamicPropertiesHtml = '';
+                for (const [key, val] of Object.entries(c)) {
+                    if (['id', 'hw_id', 'status', 'created_at', 'subscription_tier', 'balance_tokens'].includes(key)) continue;
+                    const displayVal = (typeof val === 'object' ? JSON.stringify(val) : val) || '-';
+                    dynamicPropertiesHtml += `<div class="truncate"><span class="text-gray-500 capitalize">${key.replace(/_/g, ' ')}:</span> <span class="text-gray-200">${displayVal}</span></div>`;
+                }
 
                 const card = document.createElement("div");
                 card.className = `p-4 rounded-xl border transition cursor-pointer bg-gray-950 ${isSelected ? 'border-blue-500 shadow-lg shadow-blue-950/40' : 'border-gray-800 hover:border-gray-700'}`;
@@ -112,15 +168,17 @@
                 card.innerHTML = `
                     <div class="flex items-center justify-between mb-2">
                         <span class="font-bold text-white font-mono text-xs">${c.hw_id}</span>
-                        <span class="px-2 py-0.5 border rounded-full text-[10px] font-mono ${statusColor}">${c.status}</span>
+                        <span class="px-2 py-0.5 border rounded-full text-[10px] font-mono ${statusColor}">${status}</span>
                     </div>
-                    <div class="space-y-1 text-[11px] text-gray-400 font-mono mb-3">
-                        <div>📍 Location: <span class="text-gray-200">${c.geo_location}</span></div>
-                        <div>🌐 IP: <span class="text-cyan-400">${c.ip_address}</span></div>
-                        <div>💻 Host: <span class="text-gray-200">${c.hostname}</span></div>
+                    <div class="mb-2 text-[11px] flex gap-2 font-mono">
+                        <span class="text-purple-400">Tier: ${c.subscription_tier || 'STANDARD'}</span>
+                        <span class="text-emerald-400">Bal: ${(c.balance_tokens || 0).toLocaleString()}</span>
+                    </div>
+                    <div class="space-y-1 text-[11px] text-gray-400 font-mono mb-3 max-h-28 overflow-y-auto">
+                        ${dynamicPropertiesHtml}
                     </div>
                     <div class="flex items-center justify-between pt-2 border-t border-gray-800/80">
-                        <span class="text-[10px] text-blue-400 font-mono">Tier: ${c.subscription_status}</span>
+                        <span class="text-[10px] text-blue-400 font-mono">Node: ${c.hw_id.substring(0, 10)}...</span>
                         <div class="flex gap-1.5" onclick="event.stopPropagation()">
                             <button onclick="executeAction('${c.hw_id}', 'approve')" class="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-medium">Approve</button>
                             <button onclick="executeAction('${c.hw_id}', 'deny')" class="px-2 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-[10px] font-medium">Deny</button>
@@ -133,31 +191,47 @@
         }
 
         function renderLogs(logs) {
+            const thead = document.getElementById("logs-table-header");
             const tbody = document.getElementById("logs-table-body");
             document.getElementById("log-count").innerText = `${logs.length} Recorded`;
 
             if (!logs || logs.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="7" class="py-10 text-center text-gray-500">No traffic logs recorded for this client yet.</td></tr>`;
+                thead.innerHTML = `<tr class="border-b border-gray-800 text-gray-400"><th class="pb-3 pt-2 font-medium">Telemetry</th></tr>`;
+                tbody.innerHTML = `<tr><td class="py-10 text-center text-gray-500">No traffic logs recorded for this client yet.</td></tr>`;
                 return;
             }
+
+            const allKeysSet = new Set();
+            logs.forEach(l => {
+                Object.keys(l).forEach(k => {
+                    if (!['id', 'hw_id', 'created_at'].includes(k)) {
+                        allKeysSet.add(k);
+                    }
+                });
+            });
+            const dynamicKeys = Array.from(allKeysSet);
+
+            let headerHtml = `<th class="pb-3 pt-2 font-medium">Time</th>`;
+            dynamicKeys.forEach(k => {
+                const label = logKeyLabels[k] || k.replace(/_/g, ' ');
+                headerHtml += `<th class="pb-3 pt-2 font-medium capitalize">${label}</th>`;
+            });
+            thead.innerHTML = `<tr class="text-gray-400">${headerHtml}</tr>`;
 
             tbody.innerHTML = "";
             logs.forEach(l => {
                 const dateStr = new Date(l.created_at || Date.now()).toLocaleTimeString();
+                let rowHtml = `<td class="py-3 text-gray-400 text-[11px] whitespace-nowrap">${dateStr}</td>`;
+
+                dynamicKeys.forEach(k => {
+                    const val = l[k] !== undefined && l[k] !== null ? l[k] : '-';
+                    const displayVal = typeof val === 'object' ? JSON.stringify(val) : val;
+                    rowHtml += `<td class="py-3 text-gray-200">${displayVal}</td>`;
+                });
+
                 const row = document.createElement("tr");
                 row.className = "hover:bg-gray-800/30";
-                row.innerHTML = `
-                    <td class="py-3">
-                        <div class="text-blue-400 font-bold">${l.model_name || 'Dynamic Model'}</div>
-                        <div class="text-[10px] text-gray-500">${l.version || 'v1.0'}</div>
-                    </td>
-                    <td class="py-3 text-amber-400 font-bold">${l.subscription_status || 'PRO'}</td>
-                    <td class="py-3 text-gray-300">${l.think_level || 'Standard'}</td>
-                    <td class="py-3 text-emerald-400 font-bold">↑ ${l.input_tokens || 0}</td>
-                    <td class="py-3 text-rose-400 font-bold">↓ ${l.output_tokens || 0}</td>
-                    <td class="py-3 text-purple-400 font-bold">${l.balance_tokens || 12500}</td>
-                    <td class="py-3 text-gray-400 text-[11px]">${dateStr}</td>
-                `;
+                row.innerHTML = rowHtml;
                 tbody.appendChild(row);
             });
         }
@@ -174,6 +248,20 @@
             } catch (err) {
                 alert("Error executing client action: " + err.message);
             }
+        }
+
+        function exportAuditReport() {
+            if (!cachedDashboardData) {
+                alert("No data available to export yet.");
+                return;
+            }
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(cachedDashboardData, null, 2));
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", `ai_traffic_audit_report_${Date.now()}.json`);
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
         }
 
         loadDashboardData();

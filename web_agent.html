@@ -3,33 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Proxy Security Agent (Live Interceptor)</title>
+    <title>Dynamic Universal AI Proxy Agent</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jsencrypt/3.3.2/jsencrypt.min.js"></script>
     <style>
         body { background-color: #0b0f17; color: #c9d1d9; font-family: ui-sans-serif, system-ui, sans-serif; }
     </style>
 </head>
-<body class="min-h-screen p-6 flex flex-col items-center justify-center">
-    <div class="max-w-md w-full bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-2xl">
+<body class="min-h-screen p-4 sm:p-6 flex flex-col items-center justify-center">
+    <div class="max-w-lg w-full bg-gray-900 border border-gray-800 rounded-2xl p-5 sm:p-6 shadow-2xl">
+        
         <div class="flex items-center justify-between mb-4 border-b border-gray-800 pb-3">
-            <h1 class="text-sm font-bold text-white flex items-center gap-2">
-                🛡️ AI Proxy Security Agent
-            </h1>
-            <span id="agent-status" class="px-2.5 py-1 bg-amber-950 text-amber-400 border border-amber-800 rounded-full text-[10px] font-mono">Initializing...</span>
+            <div>
+                <h1 class="text-sm font-bold text-white flex items-center gap-2">
+                    🛡️ Dynamic Universal Agent
+                </h1>
+                <p id="device-type-label" class="text-[10px] text-gray-400 font-mono mt-0.5">Detecting environment...</p>
+            </div>
+            <span id="agent-status" class="px-2.5 py-1 bg-amber-950 text-amber-400 border border-amber-800 rounded-full text-[10px] font-mono">Initializing</span>
         </div>
 
         <div class="space-y-3 text-xs mb-4">
             <div class="bg-gray-950 p-3 rounded-lg border border-gray-800 space-y-1.5 font-mono">
-                <div>HW ID: <span id="lbl-hw" class="text-cyan-400 font-bold">-</span></div>
-                <div>Status: <span id="lbl-status" class="text-amber-400 font-bold">Pending Approval</span></div>
+                <div class="flex justify-between"><span>HW ID:</span> <span id="lbl-hw" class="text-cyan-400 font-bold truncate max-w-[180px]">-</span></div>
+                <div class="flex justify-between"><span>Status:</span> <span id="lbl-status" class="text-amber-400 font-bold">Pending</span></div>
+                <div class="flex justify-between"><span>Tier:</span> <span id="lbl-tier" class="text-purple-400 font-bold">-</span></div>
+                <div class="flex justify-between"><span>Balance:</span> <span id="lbl-balance" class="text-emerald-400 font-bold">-</span></div>
             </div>
 
-            <!-- Dynamic Configuration Controls (No Hardcoded Mock Defaults) -->
-            <div class="grid grid-cols-2 gap-2">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
                     <label class="block text-[10px] text-gray-400 mb-1">Target AI Model</label>
-                    <select id="cfg-model" onchange="updateDynamicConfig()" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
+                    <select id="cfg-model" onchange="updateDynamicConfig()" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500">
                         <option value="Claude 3.5 Sonnet">Claude 3.5 Sonnet</option>
                         <option value="GPT-4o">GPT-4o</option>
                         <option value="DeepSeek-V3">DeepSeek-V3</option>
@@ -38,51 +43,69 @@
                 </div>
                 <div>
                     <label class="block text-[10px] text-gray-400 mb-1">Think Level</label>
-                    <select id="cfg-think" onchange="updateDynamicConfig()" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
+                    <select id="cfg-think" onchange="updateDynamicConfig()" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500">
                         <option value="Extended">Extended</option>
                         <option value="Deep">Deep</option>
                         <option value="Standard">Standard</option>
                     </select>
                 </div>
             </div>
+
             <div class="grid grid-cols-2 gap-2">
                 <div>
                     <label class="block text-[10px] text-gray-400 mb-1">Country Code</label>
-                    <input type="text" id="cfg-country" value="IND" onchange="updateDynamicConfig()" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500 font-mono">
+                    <input type="text" id="cfg-country" value="IND" onchange="updateDynamicConfig()" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1.5 text-xs text-white font-mono">
                 </div>
                 <div>
-                    <label class="block text-[10px] text-gray-400 mb-1">Geo Location / Region</label>
-                    <input type="text" id="cfg-geo" value="Maharashtra" onchange="updateDynamicConfig()" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
+                    <label class="block text-[10px] text-gray-400 mb-1">Region / Geo</label>
+                    <input type="text" id="cfg-geo" value="Maharashtra" onchange="updateDynamicConfig()" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1.5 text-xs text-white">
                 </div>
             </div>
         </div>
 
         <div class="space-y-3">
             <div class="border border-gray-800 rounded-lg p-3 bg-gray-950">
-                <label class="block text-[11px] font-bold text-gray-300 mb-1">Live Proxy AI Request</label>
+                <label class="block text-[11px] font-bold text-gray-300 mb-1">Live Proxy Request Test</label>
                 <div class="flex gap-2">
-                    <input type="text" id="test-prompt" placeholder="Enter custom prompt..." class="flex-1 bg-gray-900 border border-gray-800 rounded px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500">
-                    <button onclick="sendLiveProxyCall()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded text-xs transition">Send</button>
+                    <input type="text" id="test-prompt" placeholder="Enter security prompt..." class="flex-1 bg-gray-900 border border-gray-800 rounded px-3 py-2 text-xs text-white focus:outline-none">
+                    <button onclick="sendLiveProxyCall()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded text-xs transition">Send</button>
                 </div>
             </div>
 
-            <div class="bg-gray-950 rounded-lg p-3 border border-gray-800 h-28 overflow-y-auto font-mono text-[10px] text-gray-400 space-y-1" id="activity-log">
-                <div>[System] Initializing dynamic config session...</div>
+            <div class="bg-gray-950 rounded-lg p-3 border border-gray-800 h-32 overflow-y-auto font-mono text-[10px] text-gray-400 space-y-1" id="activity-log">
+                <div>[System] Initializing dynamic node state...</div>
             </div>
         </div>
     </div>
 
     <script>
         const SERVER_URL = window.location.origin;
-        let hwId = localStorage.getItem("proxy_hw_id");
+
+        function detectPlatformProfile() {
+            const ua = navigator.userAgent;
+            if (/android/i.test(ua)) return { type: 'ANDROID', prefix: 'MOB-AND' };
+            if (/ipad|iphone|ipod/i.test(ua)) return { type: 'IOS', prefix: 'MOB-IOS' };
+            if (/win/i.test(ua)) return { type: 'WINDOWS', prefix: 'WIN-PC' };
+            if (/mac/i.test(ua)) return { type: 'MACOS', prefix: 'MAC-PC' };
+            return { type: 'LINUX', prefix: 'LIN-PC' };
+        }
+
+        const profile = detectPlatformProfile();
+        document.getElementById("device-type-label").innerText = `Runtime: Browser Agent (${profile.type})`;
+
+        let hwId = localStorage.getItem("proxy_dynamic_hw_id");
         if (!hwId) {
-            hwId = "AGNT-" + Math.random().toString(36).substring(2, 10).toUpperCase();
-            localStorage.setItem("proxy_hw_id", hwId);
+            hwId = profile.prefix + "-" + Math.random().toString(36).substring(2, 10).toUpperCase();
+            localStorage.setItem("proxy_dynamic_hw_id", hwId);
         }
         document.getElementById("lbl-hw").innerText = hwId;
 
         let publicKeyPem = "";
-        let balanceTokens = 12500;
+        let dynamicRuntimeState = {
+            version: "v2.5-dynamic",
+            balanceTokens: 0,
+            subscriptionTier: "PENDING"
+        };
 
         function logActivity(msg, isError = false) {
             const box = document.getElementById("activity-log");
@@ -113,33 +136,43 @@
 
         async function registerAgentWithServer() {
             const cfg = getConfig();
-            const regRes = await fetch(`${SERVER_URL}/register`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    hw_id: hwId,
-                    hostname: window.location.hostname || "WebAgentNode",
-                    mac_address: "CLIENT-MAC-" + hwId.substring(5),
-                    client_name: "Web Security Agent",
-                    model_name: cfg.model_name,
-                    model_version: "v1.0",
-                    think_level: cfg.think_level,
-                    interface_browser: navigator.userAgent.substring(0, 60),
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    balance_tokens: balanceTokens,
-                    subscription_status: "PRO",
-                    country: cfg.country,
-                    geo_location: cfg.geo_location
-                })
-            });
-            const regData = await regRes.json();
-            updateStatusBadge(regData.client_status || "PENDING");
-            logActivity(`Agent registered with model: ${cfg.model_name} [${cfg.geo_location}]`);
+            try {
+                const regRes = await fetch(`${SERVER_URL}/register`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        hw_id: hwId,
+                        hostname: window.location.hostname || `${profile.type}-Node`,
+                        mac_address: "DYN-MAC-" + hwId.substring(4),
+                        ip_address: "127.0.0.1",
+                        client_name: `Dynamic Web Agent (${profile.type})`,
+                        model_name: cfg.model_name,
+                        model_version: dynamicRuntimeState.version,
+                        think_level: cfg.think_level,
+                        interface_browser: navigator.userAgent.substring(0, 80),
+                        country: cfg.country,
+                        geo_location: cfg.geo_location
+                    })
+                });
+                const regData = await regRes.json();
+                
+                // Synchronize state dynamically from server authority
+                dynamicRuntimeState.subscriptionTier = regData.subscription_tier || "STANDARD";
+                dynamicRuntimeState.balanceTokens = regData.balance_tokens || 10000;
+                if(regData.agent_version) dynamicRuntimeState.version = regData.agent_version;
+
+                document.getElementById("lbl-tier").innerText = dynamicRuntimeState.subscriptionTier;
+                document.getElementById("lbl-balance").innerText = dynamicRuntimeState.balanceTokens.toLocaleString();
+                
+                updateStatusBadge(regData.client_status || "PENDING");
+                logActivity(`Dynamic sync complete [Tier: ${dynamicRuntimeState.subscriptionTier}]`);
+            } catch (e) {
+                logActivity("Registration sync error: " + e.message, true);
+            }
         }
 
         async function updateDynamicConfig() {
-            logActivity("Updating dynamic agent metadata...");
+            logActivity("Syncing updated dynamic config parameters...");
             await registerAgentWithServer();
         }
 
@@ -165,14 +198,18 @@
                     const res = await fetch(`${SERVER_URL}/client-status?hw_id=${hwId}`);
                     const data = await res.json();
                     if (data.status) updateStatusBadge(data.status);
+                    if (data.balance_tokens !== undefined) {
+                        dynamicRuntimeState.balanceTokens = data.balance_tokens;
+                        document.getElementById("lbl-balance").innerText = data.balance_tokens.toLocaleString();
+                    }
                 } catch (e) {}
             }, 6000);
         }
 
         async function sendLiveProxyCall() {
-            const promptText = document.getElementById("test-prompt").value.trim() || "Perform security token telemetry analysis.";
+            const promptText = document.getElementById("test-prompt").value.trim() || "Perform adaptive security token evaluation.";
             const cfg = getConfig();
-            logActivity(`Sending proxy call via ${cfg.model_name}...`);
+            logActivity(`Sending dynamic proxy call via ${cfg.model_name}...`);
 
             try {
                 const res = await fetch(`${SERVER_URL}/api/proxy/v1/messages`, {
@@ -188,39 +225,46 @@
                 });
 
                 if (res.status === 402) {
-                    logActivity("Proxy blocked: Client pending dashboard approval.", true);
+                    logActivity("Proxy intercepted: Node pending approval on dashboard.", true);
                     return;
                 }
-                if (!res.ok) throw new Error("Proxy server error");
+                if (!res.ok) throw new Error("Proxy server response error");
 
                 const data = await res.json();
-                const inTok = data.usage?.input_tokens || Math.max(12, Math.floor(promptText.length / 3));
-                const outTok = data.usage?.output_tokens || Math.max(30, Math.floor(promptText.length / 2) + 20);
+                const inTok = data.usage?.input_tokens || Math.floor(promptText.length / 3) + 10;
+                const outTok = data.usage?.output_tokens || Math.floor(promptText.length / 2) + 20;
 
-                logActivity(`Captured real traffic: ${cfg.model_name} (In: ${inTok}, Out: ${outTok})`);
+                logActivity(`Captured live metrics (In: ${inTok}, Out: ${outTok})`);
 
+                // FULLY DYNAMIC ENCRYPTION PAYLOAD (No hardcoded version/tier assumptions)
                 const encryptor = new JSEncrypt();
                 encryptor.setPublicKey(publicKeyPem);
                 const encrypted = encryptor.encrypt(JSON.stringify({
                     m: cfg.model_name,
-                    v: "v1.0",
-                    t: "Live Proxy API",
+                    v: dynamicRuntimeState.version,
+                    t: profile.type,
                     l: cfg.think_level,
                     i: inTok,
                     o: outTok,
-                    b: balanceTokens,
-                    s: "PRO"
+                    b: dynamicRuntimeState.balanceTokens,
+                    s: dynamicRuntimeState.subscriptionTier
                 }));
 
                 if (encrypted) {
-                    await fetch(`${SERVER_URL}/log-traffic`, {
+                    const logRes = await fetch(`${SERVER_URL}/log-traffic`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ hw_id: hwId, encrypted_payload: encrypted })
                     });
+                    const logData = await logRes.json();
+                    if(logData.remaining_balance !== undefined) {
+                        dynamicRuntimeState.balanceTokens = logData.remaining_balance;
+                        document.getElementById("lbl-balance").innerText = dynamicRuntimeState.balanceTokens.toLocaleString();
+                    }
+                    logActivity("E2EE dynamic telemetry synchronized successfully.");
                 }
             } catch (err) {
-                logActivity("Live proxy call error: " + err.message, true);
+                logActivity("Proxy transmission error: " + err.message, true);
             }
             document.getElementById("test-prompt").value = "";
         }
