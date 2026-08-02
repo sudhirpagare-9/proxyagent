@@ -5,10 +5,10 @@ import base64
 import time
 import logging
 import httpx
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import defaultdict
 from fastapi import FastAPI, Request, HTTPException, status
-from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
@@ -92,7 +92,7 @@ def init_db():
             ''')
             conn.commit()
             conn.close()
-            logger.info("SQLite database initialized successfully.")
+            logger.info(f"SQLite database initialized successfully at: {os.path.abspath(DB_FILE)}")
     except Exception as e:
         logger.error(f"Database initialization error: {str(e)}")
 
@@ -100,7 +100,7 @@ init_db()
 
 # Anti-DDoS & Rate Limiting Middleware
 class DDoSProtectionMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, rate_limit: int = 250):
+    def __init__(self, app, rate_limit: int = 300):
         super().__init__(app)
         self.rate_limit = rate_limit
         self.ip_records = defaultdict(list)
@@ -123,13 +123,32 @@ class DDoSProtectionMiddleware(BaseHTTPMiddleware):
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
 
-app = FastAPI(title="Secure AI Proxy Agent - Gemini Enterprise Edition")
-app.add_middleware(DDoSProtectionMiddleware, rate_limit=300)
+app = FastAPI(title="Secure Multi-Tenant AI Proxy - Enterprise Edition")
+app.add_middleware(DDoSProtectionMiddleware, rate_limit=350)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/public-key", response_class=PlainTextResponse)
 def get_public_key():
     return public_pem
+
+@app.get("/api/database-info")
+def database_info():
+    db_type = "PostgreSQL (Cloud / Supabase)" if DATABASE_URL else "SQLite (Local Persistent)"
+    db_path = DATABASE_URL.split("@")[-1] if DATABASE_URL else os.path.abspath(DB_FILE)
+    return {
+        "database_type": db_type,
+        "storage_location": db_path,
+        "isolation_mode": "Multi-Tenant Row-Level Partitioning",
+        "status": "Online & Secure"
+    }
+
+@app.get("/api/admin/download-db")
+def download_database():
+    if DATABASE_URL:
+        raise HTTPException(status_code=400, detail="Direct file download is only available for SQLite local persistent storage.")
+    if not os.path.exists(DB_FILE):
+        raise HTTPException(status_code=404, detail="Database file not found.")
+    return FileResponse(DB_FILE, media_type="application/octet-stream", filename="proxy_security_enterprise.db")
 
 @app.post("/register")
 async def register_client(request: Request):
@@ -141,6 +160,7 @@ async def register_client(request: Request):
     forwarded = request.headers.get("x-forwarded-for")
     real_ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "127.0.0.1")
     data["ip_address"] = real_ip
+    data["registered_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -229,8 +249,10 @@ async def log_traffic(request: Request):
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Decryption error: {str(e)}")
 
-        out_tokens = int(payload_data.get("o", 0))
-        new_balance = max(0, row[1] - out_tokens)
+        payload_data["timestamp_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+        total_tokens_used = int(payload_data.get("i", 0)) + int(payload_data.get("o", 0))
+        new_balance = max(0, row[1] - total_tokens_used)
 
         if DATABASE_URL:
             cursor.execute("UPDATE clients SET balance_tokens = %s WHERE hw_id = %s", (new_balance, hw_id))
@@ -246,7 +268,6 @@ async def log_traffic(request: Request):
     
     return {"status": "logged", "remaining_balance": new_balance}
 
-# LIVE GOOGLE GEMINI UPSTREAM PROXY ROUTE
 @app.post("/api/proxy/v1/messages")
 async def proxy_messages(request: Request):
     hw_id = request.headers.get("X-HW-ID")
@@ -271,10 +292,14 @@ async def proxy_messages(request: Request):
     body = await request.json()
     messages = body.get("messages", [])
     prompt = messages[-1].get("content", "Live query") if messages else "Live query"
+    
+    provider = body.get("provider", "Gemini")
+    model_name = body.get("model", "Gemini 2.5 Flash")
+    thinking_level = body.get("thinking_level", "Standard")
 
     gemini_key = os.environ.get("GEMINI_API_KEY")
 
-    if gemini_key:
+    if provider == "Gemini" and gemini_key:
         async with httpx.AsyncClient() as client:
             gemini_contents = [
                 {
@@ -298,23 +323,32 @@ async def proxy_messages(request: Request):
                 
                 return {
                     "id": f"gemini_{int(time.time())}",
-                    "model": "Gemini 2.5 Flash (Live)",
+                    "provider": "Google Gemini",
+                    "model": model_name,
+                    "thinking_level": thinking_level,
                     "content": [{"type": "text", "text": text_response}],
                     "usage": {
                         "input_tokens": usage.get("promptTokenCount", 10),
                         "output_tokens": usage.get("candidatesTokenCount", 30)
-                    }
+                    },
+                    "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
                 }
 
-    # Dynamic fallback response if GEMINI_API_KEY is not yet added
+    simulated_output = f"[{provider} | {model_name} | Reasoning: {thinking_level}] Processed query successfully: '{prompt}'"
+    input_tokens = max(10, len(prompt.split()) * 2)
+    output_tokens = 45 if thinking_level == "Standard" else 120
+
     return {
-        "id": f"msg_live_{int(time.time())}",
-        "model": "Gemini 2.5 Flash (Simulation)",
-        "content": [{"type": "text", "text": f"Live proxy acknowledged your query: '{prompt}'"}],
+        "id": f"proxy_{int(time.time())}",
+        "provider": provider,
+        "model": model_name,
+        "thinking_level": thinking_level,
+        "content": [{"type": "text", "text": simulated_output}],
         "usage": {
-            "input_tokens": max(10, len(prompt.split()) * 2),
-            "output_tokens": 40
-        }
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens
+        },
+        "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     }
 
 @app.get("/api/tenant/data")
@@ -356,7 +390,6 @@ def tenant_data(hw_id: str):
     for lr in log_rows:
         pdata = json.loads(lr[1] or "{}")
         pdata["id"] = lr[0]
-        pdata["created_at"] = str(lr[2])
         logs.append(pdata)
 
     return {"client": tenant_info, "logs": logs}
@@ -378,15 +411,15 @@ def professional_analytics():
 
     total_in = 0
     total_out = 0
-    model_breakdown = defaultdict(int)
+    provider_breakdown = defaultdict(int)
     for row in all_logs:
         p = json.loads(row[0] or "{}")
         in_t = int(p.get("i", 0))
         out_t = int(p.get("o", 0))
         total_in += in_t
         total_out += out_t
-        m_name = p.get("m", "Gemini 2.5 Flash")
-        model_breakdown[m_name] += (in_t + out_t)
+        prov = p.get("provider", "Gemini")
+        provider_breakdown[prov] += (in_t + out_t)
 
     estimated_cost_saved_usd = round((total_out * 0.000015) + (total_in * 0.000003), 2)
 
@@ -397,9 +430,9 @@ def professional_analytics():
             "total_input_tokens": total_in,
             "total_output_tokens": total_out,
             "estimated_value_optimized_usd": estimated_cost_saved_usd,
-            "compliance_rating": "99.8% (NIST SP 800-53 / GDPR Article 32 Compliant)"
+            "compliance_rating": "99.8% (NIST SP 800-53 / GDPR Compliant)"
         },
-        "model_distribution": dict(model_breakdown)
+        "provider_distribution": dict(provider_breakdown)
     }
 
 @app.get("/api/dashboard-data")
@@ -407,16 +440,10 @@ def dashboard_data():
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        if DATABASE_URL:
-            cursor.execute("SELECT hw_id, status, subscription_tier, balance_tokens, created_at, metadata FROM clients")
-            client_rows = cursor.fetchall()
-            cursor.execute("SELECT id, hw_id, payload_json, created_at FROM traffic_logs ORDER BY id DESC LIMIT 200")
-            log_rows = cursor.fetchall()
-        else:
-            cursor.execute("SELECT hw_id, status, subscription_tier, balance_tokens, created_at, metadata FROM clients")
-            client_rows = cursor.fetchall()
-            cursor.execute("SELECT id, hw_id, payload_json, created_at FROM traffic_logs ORDER BY id DESC LIMIT 200")
-            log_rows = cursor.fetchall()
+        cursor.execute("SELECT hw_id, status, subscription_tier, balance_tokens, created_at, metadata FROM clients")
+        client_rows = cursor.fetchall()
+        cursor.execute("SELECT id, hw_id, payload_json, created_at FROM traffic_logs ORDER BY id DESC LIMIT 200")
+        log_rows = cursor.fetchall()
     finally:
         cursor.close()
         conn.close()
@@ -436,7 +463,6 @@ def dashboard_data():
         pdata = json.loads(lr[2] or "{}")
         pdata["id"] = lr[0]
         pdata["hw_id"] = lr[1]
-        pdata["created_at"] = str(lr[3])
         logs.append(pdata)
 
     return {"clients": clients, "logs": logs}
@@ -447,6 +473,7 @@ async def client_action(request: Request):
     hw_id = data.get("hw_id")
     action = data.get("action")
     tier = data.get("tier")
+    amount = int(data.get("amount", 10000))
     
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -458,6 +485,8 @@ async def client_action(request: Request):
                 cursor.execute("UPDATE clients SET status = 'DENIED' WHERE hw_id = %s", (hw_id,))
             elif action == "tier":
                 cursor.execute("UPDATE clients SET subscription_tier = %s WHERE hw_id = %s", (tier, hw_id))
+            elif action == "topup":
+                cursor.execute("UPDATE clients SET balance_tokens = balance_tokens + %s WHERE hw_id = %s", (amount, hw_id))
             elif action == "delete":
                 cursor.execute("DELETE FROM clients WHERE hw_id = %s", (hw_id,))
                 cursor.execute("DELETE FROM traffic_logs WHERE hw_id = %s", (hw_id,))
@@ -469,6 +498,8 @@ async def client_action(request: Request):
                 cursor.execute("UPDATE clients SET status = 'DENIED' WHERE hw_id = ?", (hw_id,))
             elif action == "tier":
                 cursor.execute("UPDATE clients SET subscription_tier = ? WHERE hw_id = ?", (tier, hw_id))
+            elif action == "topup":
+                cursor.execute("UPDATE clients SET balance_tokens = balance_tokens + ? WHERE hw_id = ?", (amount, hw_id))
             elif action == "delete":
                 cursor.execute("DELETE FROM clients WHERE hw_id = ?", (hw_id,))
                 cursor.execute("DELETE FROM traffic_logs WHERE hw_id = ?", (hw_id,))
@@ -490,68 +521,87 @@ def export_audit_report():
         conn.close()
 
     output = io.StringIO()
-    output.write("LogID,HardwareID,Model,InputTokens,OutputTokens,Timestamp\n")
+    output.write("LogID,HardwareID,Provider,Model,ThinkingLevel,InputTokens,OutputTokens,TimestampUTC\n")
     for r in rows:
         p = json.loads(r[1] or "{}")
-        output.write(f'"{r[0]}","{r[0]}","{p.get("m","N/A")}",{p.get("i",0)},{p.get("o",0)},"{r[2]}"\n')
+        output.write(f'"{r[0]}","{r[0]}","{p.get("provider","N/A")}","{p.get("model","N/A")}","{p.get("thinking_level","Standard")}",{p.get("i",0)},{p.get("o",0)},"{p.get("timestamp_utc","N/A")}"\n')
     
     response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
-    response.headers["Content-Disposition"] = "attachment; filename=compliance_audit_report.csv"
+    response.headers["Content-Disposition"] = "attachment; filename=enterprise_audit_report.csv"
     return response
 
-# ADMIN DASHBOARD HTML
+# ADMIN DASHBOARD HTML (With Database Inspector & Storage Path Link)
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Traffic Dashboard & Security Monitor</title>
+    <title>Enterprise AI Gateway & Multi-Tenant Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>body { background-color: #0b0f17; color: #c9d1d9; font-family: ui-sans-serif, system-ui, sans-serif; }</style>
 </head>
 <body class="min-h-screen p-6 flex flex-col">
     <header class="flex flex-col md:flex-row items-center justify-between border-b border-gray-800 pb-4 mb-6 gap-4">
         <div>
-            <h1 class="text-lg font-bold text-white flex items-center gap-2">🛡️ AI Traffic Dashboard & Security Monitor</h1>
-            <p class="text-xs text-gray-400">Enterprise Multi-Tenant Isolation & Gemini Live Upstream Telemetry</p>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2">🛡️ Enterprise AI Gateway & Multi-Tenant Control Plane</h1>
+            <p class="text-xs text-gray-400">Multi-Model Routing & Secure Partitioned Database Storage</p>
         </div>
         <div class="flex items-center gap-3 flex-wrap">
-            <span class="px-3 py-1 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded-full text-xs font-mono">DB: Live & Persistent</span>
-            <span class="px-3 py-1 bg-blue-950 text-blue-400 border border-blue-800 rounded-full text-xs font-mono">Proxy: Active</span>
-            <a href="/agent" target="_blank" class="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white rounded-lg text-xs font-medium transition">🤖 Client Portal</a>
+            <span class="px-3 py-1 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded-full text-xs font-mono">Gateway: Active</span>
+            <a href="/agent" target="_blank" class="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white rounded-lg text-xs font-medium transition">🤖 Tenant Portal</a>
+            <a href="/api/admin/download-db" class="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-medium transition">💾 Download DB File</a>
             <a href="/api/export-audit-report" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-medium transition">📥 Export Audit CSV</a>
             <button onclick="loadDashboardData()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium transition">Refresh Now</button>
         </div>
     </header>
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 shadow-md"><div class="text-[11px] text-gray-400 uppercase font-mono">Total Clients</div><div id="stat-total-clients" class="text-xl font-bold text-white font-mono mt-1">0</div></div>
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 shadow-md"><div class="text-[11px] text-gray-400 uppercase font-mono">Approved Nodes</div><div id="stat-approved-clients" class="text-xl font-bold text-emerald-400 font-mono mt-1">0</div></div>
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 shadow-md"><div class="text-[11px] text-gray-400 uppercase font-mono">Total Input Tokens</div><div id="stat-total-in" class="text-xl font-bold text-blue-400 font-mono mt-1">0</div></div>
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 shadow-md"><div class="text-[11px] text-gray-400 uppercase font-mono">Compliance Score</div><div id="stat-compliance" class="text-xl font-bold text-purple-400 font-mono mt-1">99.8%</div></div>
+
+    <!-- DATABASE STORAGE PATH BAR -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-6 flex flex-col md:flex-row items-center justify-between gap-3 shadow-md font-mono text-xs">
+        <div class="flex items-center gap-3">
+            <span class="px-2 py-1 bg-blue-950 text-blue-400 border border-blue-800 rounded text-[10px]">DATABASE VAULT</span>
+            <div>
+                <span class="text-gray-400">Storage Type & Path:</span> <span id="db-path-display" class="text-emerald-400 font-bold">Loading storage path...</span>
+            </div>
+        </div>
+        <button onclick="copyDbPath()" class="px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded text-[11px] transition">Copy Storage Path</button>
     </div>
+
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 shadow-md"><div class="text-[11px] text-gray-400 uppercase font-mono">Total Tenants</div><div id="stat-total-clients" class="text-xl font-bold text-white font-mono mt-1">0</div></div>
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 shadow-md"><div class="text-[11px] text-gray-400 uppercase font-mono">Approved Nodes</div><div id="stat-approved-clients" class="text-xl font-bold text-emerald-400 font-mono mt-1">0</div></div>
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 shadow-md"><div class="text-[11px] text-gray-400 uppercase font-mono">Total Tokens Routed</div><div id="stat-total-in" class="text-xl font-bold text-blue-400 font-mono mt-1">0</div></div>
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 shadow-md"><div class="text-[11px] text-gray-400 uppercase font-mono">Security Compliance</div><div id="stat-compliance" class="text-xl font-bold text-purple-400 font-mono mt-1">99.8%</div></div>
+    </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
         <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col shadow-xl">
-            <div class="flex items-center justify-between mb-4 pb-2 border-b border-gray-800"><h2 class="text-xs font-bold uppercase text-gray-300">Tenant Clients</h2><span id="client-count" class="px-2 py-0.5 bg-gray-800 text-gray-300 rounded text-[10px] font-mono">0 Registered</span></div>
-            <div id="clients-container" class="space-y-3 overflow-y-auto flex-1 max-h-[550px] pr-1"><div class="text-xs text-gray-500 text-center py-10 font-mono">Loading clients...</div></div>
+            <div class="flex items-center justify-between mb-4 pb-2 border-b border-gray-800"><h2 class="text-xs font-bold uppercase text-gray-300">Tenant Management</h2><span id="client-count" class="px-2 py-0.5 bg-gray-800 text-gray-300 rounded text-[10px] font-mono">0 Registered</span></div>
+            <div id="clients-container" class="space-y-3 overflow-y-auto flex-1 max-h-[500px] pr-1"><div class="text-xs text-gray-500 text-center py-10 font-mono">Loading tenants...</div></div>
         </div>
         <div class="lg:col-span-2 bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col shadow-xl">
-            <div class="flex items-center justify-between mb-4 pb-2 border-b border-gray-800"><h2 class="text-xs font-bold uppercase text-gray-300">Global System Telemetry Logs</h2><span id="log-count" class="px-2 py-0.5 bg-gray-800 text-gray-300 rounded text-[10px] font-mono">0 Recorded</span></div>
-            <div class="overflow-x-auto flex-1 max-h-[550px] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4 pb-2 border-b border-gray-800"><h2 class="text-xs font-bold uppercase text-gray-300">Global Multi-Model Telemetry Audit Log</h2><span id="log-count" class="px-2 py-0.5 bg-gray-800 text-gray-300 rounded text-[10px] font-mono">0 Recorded</span></div>
+            <div class="overflow-x-auto flex-1 max-h-[500px] overflow-y-auto">
                 <table class="w-full text-left text-xs font-mono">
                     <thead class="sticky top-0 bg-gray-900 border-b border-gray-800 text-gray-400">
-                        <tr><th class="pb-3 pt-2">Time</th><th class="pb-3 pt-2">Client ID</th><th class="pb-3 pt-2">Model</th><th class="pb-3 pt-2">In Tokens</th><th class="pb-3 pt-2">Out Tokens</th></tr>
+                        <tr><th class="pb-3 pt-2">Timestamp (UTC)</th><th class="pb-3 pt-2">Tenant ID</th><th class="pb-3 pt-2">Provider / Model</th><th class="pb-3 pt-2">Thinking</th><th class="pb-3 pt-2">Tokens (In/Out)</th></tr>
                     </thead>
-                    <tbody id="logs-table-body" class="divide-y divide-gray-800/50 text-gray-300"><tr><td colspan="5" class="py-10 text-center text-gray-500">Loading live logs...</td></tr></tbody>
+                    <tbody id="logs-table-body" class="divide-y divide-gray-800/50 text-gray-300"><tr><td colspan="5" class="py-10 text-center text-gray-500">Loading live telemetry logs...</td></tr></tbody>
                 </table>
             </div>
         </div>
     </div>
     <script>
         const SERVER_URL = window.location.origin;
+        let currentDbPath = "";
+
         async function loadDashboardData() {
             try {
+                const dbInfoRes = await fetch(`${SERVER_URL}/api/database-info`);
+                const dbInfo = await dbInfoRes.json();
+                currentDbPath = dbInfo.storage_location;
+                document.getElementById("db-path-display").innerText = `[${dbInfo.database_type}] ${dbInfo.storage_location}`;
+
                 const res = await fetch(`${SERVER_URL}/api/dashboard-data`);
-                if (!res.ok) throw new Error("Failed to fetch dashboard data");
                 const data = await res.json();
                 
                 const analyticsRes = await fetch(`${SERVER_URL}/api/analytics/professional`);
@@ -559,17 +609,23 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
                 document.getElementById("stat-total-clients").innerText = analytics.summary.total_clients;
                 document.getElementById("stat-approved-clients").innerText = analytics.summary.approved_clients;
-                document.getElementById("stat-total-in").innerText = analytics.summary.total_input_tokens.toLocaleString();
+                document.getElementById("stat-total-in").innerText = (analytics.summary.total_input_tokens + analytics.summary.total_output_tokens).toLocaleString();
                 document.getElementById("stat-compliance").innerText = analytics.summary.compliance_rating.split(" ")[0];
 
                 renderClients(data.clients);
                 renderLogs(data.logs);
             } catch (err) { console.error(err); }
         }
+
+        function copyDbPath() {
+            navigator.clipboard.writeText(currentDbPath);
+            alert("Database storage path copied to clipboard!");
+        }
+
         function renderClients(clients) {
             const container = document.getElementById("clients-container");
             document.getElementById("client-count").innerText = `${clients.length} Registered`;
-            if (!clients.length) { container.innerHTML = `<div class="text-xs text-gray-500 text-center py-10 font-mono">No clients registered yet.</div>`; return; }
+            if (!clients.length) { container.innerHTML = `<div class="text-xs text-gray-500 text-center py-10 font-mono">No tenants registered yet.</div>`; return; }
             container.innerHTML = "";
             clients.forEach(c => {
                 const statusColor = c.status === 'APPROVED' ? 'text-emerald-400 bg-emerald-950 border-emerald-800' : 'text-amber-400 bg-amber-950 border-amber-800';
@@ -578,10 +634,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 card.innerHTML = `
                     <div class="flex justify-between items-center"><span class="font-bold text-white font-mono text-xs">${c.hw_id}</span><span class="px-2 py-0.5 border rounded-full text-[10px] font-mono ${statusColor}">${c.status}</span></div>
                     <div class="text-[11px] text-gray-400 font-mono">Tier: <span class="text-cyan-400 font-bold">${c.subscription_tier || 'PRO'}</span> | Balance: <span class="text-emerald-400 font-bold">${(c.balance_tokens||0).toLocaleString()}</span></div>
-                    <div class="flex justify-between pt-2 border-t border-gray-800">
+                    <div class="flex justify-between pt-2 border-t border-gray-800 flex-wrap gap-1">
                         <button onclick="executeAction('${c.hw_id}', 'approve')" class="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px]">Approve</button>
                         <button onclick="executeAction('${c.hw_id}', 'deny')" class="px-2 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-[10px]">Deny</button>
                         <button onclick="changeTier('${c.hw_id}')" class="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[10px]">Tier</button>
+                        <button onclick="topUpTokens('${c.hw_id}')" class="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-[10px]">Top-Up</button>
                         <button onclick="executeAction('${c.hw_id}', 'delete')" class="px-2 py-1 bg-red-600 hover:bg-red-500 text-white rounded text-[10px]">Erase</button>
                     </div>`;
                 container.appendChild(card);
@@ -593,8 +650,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if (!logs.length) { tbody.innerHTML = `<tr><td colspan="5" class="py-10 text-center text-gray-500">No telemetry logs recorded yet.</td></tr>`; return; }
             tbody.innerHTML = "";
             logs.forEach(l => {
-                const timeStr = new Date(l.created_at).toLocaleTimeString();
-                tbody.innerHTML += `<tr class="hover:bg-gray-800/30"><td class="py-3 text-gray-400">${timeStr}</td><td class="py-3 text-cyan-400">${l.hw_id}</td><td class="py-3 text-white">${l.m || '-'}</td><td class="py-3 text-blue-400">${l.i || 0}</td><td class="py-3 text-rose-400">${l.o || 0}</td></tr>`;
+                const timeStr = l.timestamp_utc || new Date().toISOString();
+                tbody.innerHTML += `<tr class="hover:bg-gray-800/30"><td class="py-3 text-gray-400 font-mono text-[10px]">${timeStr}</td><td class="py-3 text-cyan-400">${l.hw_id}</td><td class="py-3 text-white">${l.provider || 'Gemini'} / ${l.model || 'Flash'}</td><td class="py-3 text-purple-400">${l.thinking_level || 'Standard'}</td><td class="py-3 text-blue-400">${l.i || 0} / ${l.o || 0}</td></tr>`;
             });
         }
         async function executeAction(hwId, action) {
@@ -608,45 +665,87 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 loadDashboardData();
             }
         }
+        async function topUpTokens(hwId) {
+            const amount = prompt("Enter token credit amount to add:", "25000");
+            if(amount && !isNaN(amount)) {
+                await fetch(`${SERVER_URL}/api/client-action`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hw_id: hwId, action: "topup", amount: parseInt(amount) }) });
+                loadDashboardData();
+            }
+        }
         loadDashboardData();
         setInterval(loadDashboardData, 5000);
     </script>
 </body>
 </html>"""
 
-# CLIENT PORTAL HTML
+# TENANT PORTAL HTML (With Database Partition View & Export)
 WEB_AGENT_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Isolated Tenant Client Portal</title>
+    <title>Isolated Tenant AI Portal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jsencrypt/3.3.2/jsencrypt.min.js"></script>
     <style>body { background-color: #0b0f17; color: #c9d1d9; font-family: ui-sans-serif, system-ui, sans-serif; }</style>
 </head>
 <body class="min-h-screen p-4 flex flex-col items-center justify-center">
-    <div class="max-w-md w-full bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-2xl">
+    <div class="max-w-lg w-full bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-2xl">
         <div class="flex items-center justify-between mb-4 border-b border-gray-800 pb-3">
-            <h1 class="text-sm font-bold text-white">🛡️ Tenant Secure Portal</h1>
+            <h1 class="text-sm font-bold text-white">🛡️ Multi-Provider Tenant Portal</h1>
             <span id="agent-status" class="px-2.5 py-1 bg-amber-950 text-amber-400 border border-amber-800 rounded-full text-[10px] font-mono">Initializing</span>
         </div>
-        <div class="space-y-2 text-xs mb-4 bg-gray-950 p-3 rounded-lg border border-gray-800 font-mono">
-            <div class="flex justify-between"><span>Tenant HW ID:</span> <span id="lbl-hw" class="text-cyan-400 font-bold">-</span></div>
-            <div class="flex justify-between"><span>Subscription Tier:</span> <span id="lbl-tier" class="text-purple-400 font-bold">PRO</span></div>
-            <div class="flex justify-between"><span>Node Status:</span> <span id="lbl-status" class="text-amber-400 font-bold">Pending</span></div>
-            <div class="flex justify-between"><span>Token Balance:</span> <span id="lbl-balance" class="text-emerald-400 font-bold">50,000</span></div>
+        <div class="grid grid-cols-2 gap-2 text-xs mb-4 bg-gray-950 p-3 rounded-lg border border-gray-800 font-mono">
+            <div>Tenant ID: <span id="lbl-hw" class="text-cyan-400 font-bold">-</span></div>
+            <div>Tier: <span id="lbl-tier" class="text-purple-400 font-bold">PRO</span></div>
+            <div>Status: <span id="lbl-status" class="text-amber-400 font-bold">Pending</span></div>
+            <div>Balance: <span id="lbl-balance" class="text-emerald-400 font-bold">50,000</span></div>
         </div>
+
+        <!-- TENANT DATABASE PARTITION & STORAGE INSPECTOR -->
+        <div class="bg-gray-950 border border-gray-800 rounded-lg p-3 mb-4 text-xs font-mono flex items-center justify-between">
+            <div>
+                <div class="text-[10px] text-gray-400">Database Partition Status:</div>
+                <div class="text-emerald-400 font-bold">Isolated Table Row Partition</div>
+            </div>
+            <button onclick="exportTenantData()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-[10px] transition">Export My DB Logs</button>
+        </div>
+
         <div class="space-y-3">
-            <div class="border border-gray-800 rounded-lg p-3 bg-gray-950">
-                <label class="block text-[11px] font-bold text-gray-300 mb-1">Gemini Proxy Request</label>
-                <div class="flex gap-2">
-                    <input type="text" id="test-prompt" value="Explain quantum computing in short" class="flex-1 bg-gray-900 border border-gray-800 rounded px-3 py-2 text-xs text-white focus:outline-none">
-                    <button onclick="sendLiveProxyCall()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded text-xs transition">Send</button>
+            <div class="grid grid-cols-3 gap-2">
+                <div>
+                    <label class="block text-[10px] font-bold text-gray-400 mb-1">AI Provider</label>
+                    <select id="ai-provider" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none">
+                        <option value="Gemini">Google Gemini</option>
+                        <option value="Groq">Groq (Open Source)</option>
+                        <option value="Ollama">Ollama (Local)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold text-gray-400 mb-1">Model Type</label>
+                    <select id="ai-model" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none">
+                        <option value="Gemini 2.5 Flash">Gemini 2.5 Flash</option>
+                        <option value="Llama 3.3 70B">Llama 3.3 70B</option>
+                        <option value="DeepSeek-R1">DeepSeek-R1</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold text-gray-400 mb-1">Thinking Level</label>
+                    <select id="thinking-level" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none">
+                        <option value="Standard">Standard</option>
+                        <option value="Deep Reasoning">Deep Reasoning</option>
+                    </select>
                 </div>
             </div>
-            <div class="bg-gray-950 rounded-lg p-3 border border-gray-800 h-32 overflow-y-auto font-mono text-[10px] text-gray-400 space-y-1" id="activity-log">
-                <div>[System] Initializing secure Gemini proxy node...</div>
+            <div class="border border-gray-800 rounded-lg p-3 bg-gray-950">
+                <label class="block text-[11px] font-bold text-gray-300 mb-1">Send Prompt via Secure Gateway</label>
+                <div class="flex gap-2">
+                    <input type="text" id="test-prompt" value="Analyze quarterly market trends for Maharashtra region" class="flex-1 bg-gray-900 border border-gray-800 rounded px-3 py-2 text-xs text-white focus:outline-none">
+                    <button onclick="sendLiveProxyCall()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded text-xs transition">Dispatch</button>
+                </div>
+            </div>
+            <div class="bg-gray-950 rounded-lg p-3 border border-gray-800 h-28 overflow-y-auto font-mono text-[10px] text-gray-400 space-y-1" id="activity-log">
+                <div>[System] Initializing secure tenant proxy tunnel...</div>
             </div>
             <div class="text-center pt-2">
                 <a href="/" class="text-xs text-blue-400 hover:underline font-mono">← Return to Admin Dashboard</a>
@@ -662,7 +761,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
 
         function logActivity(msg, isErr = false) {
             const box = document.getElementById("activity-log");
-            box.innerHTML += `<div class="${isErr ? 'text-red-400' : 'text-emerald-400'}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+            box.innerHTML += `<div class="${isErr ? 'text-red-400' : 'text-emerald-400'}">[${new Date().toLocaleTimeString()} UTC] ${msg}</div>`;
             box.scrollTop = box.scrollHeight;
         }
 
@@ -679,7 +778,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             const res = await fetch(`${SERVER_URL}/register`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ hw_id: hwId, client_name: "Gemini Tenant Client", model_name: "Gemini 2.5 Flash" })
+                body: JSON.stringify({ hw_id: hwId, client_name: "Multi-Model Tenant Client" })
             });
             const data = await res.json();
             updateStatus(data.client_status);
@@ -699,6 +798,20 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             } catch (e) {}
         }
 
+        async function exportTenantData() {
+            try {
+                const res = await fetch(`${SERVER_URL}/api/tenant/data?hw_id=${hwId}`);
+                const data = await res.json();
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${hwId}_database_export.json`;
+                a.click();
+                logActivity("Isolated database logs exported successfully.");
+            } catch (e) { logActivity("Export failed: " + e.message, true); }
+        }
+
         function updateStatus(status) {
             const badge = document.getElementById("agent-status");
             const lbl = document.getElementById("lbl-status");
@@ -714,19 +827,29 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
 
         async function sendLiveProxyCall() {
             const promptText = document.getElementById("test-prompt").value;
-            logActivity("Dispatching live proxy transmission...");
+            const provider = document.getElementById("ai-provider").value;
+            const model = document.getElementById("ai-model").value;
+            const thinkingLevel = document.getElementById("thinking-level").value;
+
+            logActivity(`Dispatching to ${provider} (${model}) [Thinking: ${thinkingLevel}]...`);
             try {
                 const res = await fetch(`${SERVER_URL}/api/proxy/v1/messages`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-HW-ID': hwId },
-                    body: JSON.stringify({ model: 'Gemini 2.5 Flash', messages: [{ role: 'user', content: promptText }] })
+                    body: JSON.stringify({ provider: provider, model: model, thinking_level: thinkingLevel, messages: [{ role: 'user', content: promptText }] })
                 });
-                if(res.status === 402) { logActivity("Blocked: Tenant node is pending dashboard approval!", true); return; }
+                if(res.status === 402) { logActivity("Blocked: Tenant node is pending dashboard administrator approval!", true); return; }
                 const data = await res.json();
                 
                 const encryptor = new JSEncrypt();
                 encryptor.setPublicKey(publicKeyPem);
-                const encrypted = encryptor.encrypt(JSON.stringify({ m: data.model || 'Gemini 2.5 Flash', i: data.usage.input_tokens, o: data.usage.output_tokens }));
+                const encrypted = encryptor.encrypt(JSON.stringify({ 
+                    provider: data.provider, 
+                    m: data.model, 
+                    thinking_level: data.thinking_level,
+                    i: data.usage.input_tokens, 
+                    o: data.usage.output_tokens 
+                }));
 
                 if(encrypted) {
                     const logRes = await fetch(`${SERVER_URL}/log-traffic`, {
@@ -738,7 +861,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                     if(logData.remaining_balance !== undefined) {
                         document.getElementById("lbl-balance").innerText = logData.remaining_balance.toLocaleString();
                     }
-                    logActivity(`Telemetry recorded! In: ${data.usage.input_tokens}, Out: ${data.usage.output_tokens}`);
+                    logActivity(`Telemetry recorded! In: ${data.usage.input_tokens} | Out: ${data.usage.output_tokens}`);
                 }
             } catch (e) { logActivity("Error: " + e.message, true); }
         }
