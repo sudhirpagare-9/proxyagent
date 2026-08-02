@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="3.6.0")
+app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="3.7.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -241,14 +241,14 @@ async def log_traffic(request: Request):
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Decryption Failure: {str(e)}")
 
-    model_name = safe_str(payload.get("m") or payload.get("model_name", "Claude 3.5 Sonnet"), 50)
-    version = safe_str(payload.get("v") or payload.get("model_version", "v3.5"), 50)
-    model_type = safe_str(payload.get("t") or payload.get("model_type", "AI Client Agent"), 50)
-    think_level = safe_str(payload.get("l") or payload.get("think_level", "Extended"), 50)
-    in_tokens = int(payload.get("i") if "i" in payload else payload.get("input_tokens", 100))
-    out_tokens = int(payload.get("o") if "o" in payload else payload.get("output_tokens", 250))
-    bal_tokens = int(payload.get("b") if "b" in payload else payload.get("balance_tokens", 12000))
-    sub_status = safe_str(payload.get("s") or payload.get("subscription_status", "PRO"), 20)
+    model_name = safe_str(payload.get("model_name") or payload.get("m", "Claude 3.5 Sonnet"), 50)
+    version = safe_str(payload.get("model_version") or payload.get("v", "v3.5"), 50)
+    model_type = safe_str(payload.get("model_type") or payload.get("t", "AI Client Agent"), 50)
+    think_level = safe_str(payload.get("think_level") or payload.get("l", "Extended"), 50)
+    in_tokens = int(payload.get("input_tokens") if "input_tokens" in payload else payload.get("i", 0))
+    out_tokens = int(payload.get("output_tokens") if "output_tokens" in payload else payload.get("o", 0))
+    bal_tokens = int(payload.get("balance_tokens") if "balance_tokens" in payload else payload.get("b", 12500))
+    sub_status = safe_str(payload.get("subscription_status") or payload.get("s", "PRO"), 20)
 
     try:
         supabase.table("ai_usage_logs").insert({
@@ -279,7 +279,6 @@ async def get_dashboard_data(
         raw_clients = supabase.table("clients_registry").select("*").execute().data or []
         
         raw_logs = []
-        # Requirement 1: Only load telemetry logs if a valid APPROVED client is explicitly selected
         if hw_id:
             client_check = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
             if client_check.data and client_check.data[0].get("status") == "APPROVED":
@@ -340,7 +339,6 @@ async def client_action(request: Request):
     elif action == "deny":
         supabase.table("clients_registry").update({"status": "DENIED"}).eq("hw_id", hw_id).execute()
     elif action == "delete":
-        # Requirement 2: Clear client registration from dashboard view, but PRESERVE ai_usage_logs in database for NIST/GDPR audit compliance
         supabase.table("clients_registry").delete().eq("hw_id", hw_id).execute()
         
     return {"status": "success", "action": action, "hw_id": hw_id}

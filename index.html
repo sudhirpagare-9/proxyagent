@@ -31,7 +31,7 @@
                 <h2 class="text-sm font-bold text-white uppercase tracking-wider">Discovered Clients</h2>
                 <span id="client-count" class="text-xs font-mono bg-gray-800 px-2 py-0.5 rounded text-gray-300">0 Registered</span>
             </div>
-            <p class="text-[11px] text-gray-400 mb-3">Click an approved client row to inspect live telemetry logs.</p>
+            <p class="text-[11px] text-gray-400 mb-3">Click an approved client row to inspect telemetry logs.</p>
             <div id="clients-list" class="space-y-3 overflow-y-auto flex-1 pr-1">
                 <div class="text-center py-10 text-xs text-gray-500">Loading clients...</div>
             </div>
@@ -49,20 +49,21 @@
             
             <div class="overflow-y-auto flex-1 border border-gray-800 rounded-lg">
                 <table class="w-full text-left border-collapse text-xs">
-                    <thead class="bg-gray-950 text-gray-400 sticky top-0 border-b border-gray-800">
+                    <thead class="bg-gray-950 text-gray-400 sticky top-0 border-b border-gray-800 z-10">
                         <tr>
-                            <th class="p-3">HW ID / Host</th>
-                            <th class="p-3">Model Name</th>
+                            <th class="p-3">Model & Version</th>
                             <th class="p-3">Tier</th>
                             <th class="p-3">Think</th>
-                            <th class="p-3">Tokens (IN / OUT)</th>
+                            <th class="p-3">Input Token</th>
+                            <th class="p-3">Output Token</th>
+                            <th class="p-3">Balance Token</th>
                             <th class="p-3">Time</th>
                         </tr>
                     </thead>
                     <tbody id="logs-table-body" class="divide-y divide-gray-800/60 font-mono">
                         <tr>
-                            <td colspan="6" class="p-10 text-center text-gray-500 text-xs">
-                                📌 No client selected or logs empty. Click an <strong>APPROVED</strong> client card on the left.
+                            <td colspan="7" class="p-10 text-center text-gray-500 text-xs">
+                                📌 No client selected. Click an <strong>APPROVED</strong> client card on the left.
                             </td>
                         </tr>
                     </tbody>
@@ -139,24 +140,28 @@
 
             if (!selectedHwId) {
                 document.getElementById("log-subtitle").innerText = "Select an approved client to view telemetry records.";
-                tbody.innerHTML = `<tr><td colspan="6" class="p-10 text-center text-gray-500 text-xs">📌 No client selected. Click an APPROVED client card on the left.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="7" class="p-10 text-center text-gray-500 text-xs">📌 No client selected. Click an APPROVED client card on the left.</td></tr>`;
                 return;
             }
 
             document.getElementById("log-subtitle").innerText = `Showing telemetry for HW ID: ${selectedHwId}`;
 
             if (!logs.length) {
-                tbody.innerHTML = `<tr><td colspan="6" class="p-10 text-center text-gray-500 text-xs">No traffic logs found for this client.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="7" class="p-10 text-center text-gray-500 text-xs">No traffic logs found for this client.</td></tr>`;
                 return;
             }
 
             tbody.innerHTML = logs.map(l => `
                 <tr class="hover:bg-gray-800/40">
-                    <td class="p-3 text-white font-bold">${l.hw_id}</td>
-                    <td class="p-3 text-cyan-300">${l.model_name}</td>
-                    <td class="p-3 text-amber-400">${l.subscription_status}</td>
-                    <td class="p-3 text-gray-300">${l.think_level}</td>
-                    <td class="p-3 text-emerald-400">↑ ${l.input_tokens} / ↓ ${l.output_tokens}</td>
+                    <td class="p-3">
+                        <div class="text-cyan-300 font-bold">${l.model_name || 'Claude 3.5 Sonnet'}</div>
+                        <div class="text-[10px] text-gray-400">${l.version || 'v3.5'}</div>
+                    </td>
+                    <td class="p-3 text-amber-400 font-bold">${l.subscription_status || 'PRO'}</td>
+                    <td class="p-3 text-gray-300">${l.think_level || 'Extended'}</td>
+                    <td class="p-3 text-emerald-400 font-bold">↑ ${l.input_tokens ?? 0}</td>
+                    <td class="p-3 text-blue-400 font-bold">↓ ${l.output_tokens ?? 0}</td>
+                    <td class="p-3 text-purple-300 font-bold">${l.balance_tokens ?? 12500}</td>
                     <td class="p-3 text-gray-400 text-[11px]">${new Date(l.created_at).toLocaleTimeString()}</td>
                 </tr>
             `).join('');
@@ -176,7 +181,6 @@
                 });
                 if (!res.ok) throw new Error("Action failed");
 
-                // Requirement 2: If denied or deleted, clear selected client telemetry view from dashboard
                 if ((action === "deny" || action === "delete") && selectedHwId === hwId) {
                     selectedHwId = null;
                 }
