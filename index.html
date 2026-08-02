@@ -87,7 +87,6 @@
         let selectedHwId = null;
         let cachedDashboardData = null;
 
-        // Friendly label mapping for compact cryptographic payload keys from web agent
         const logKeyLabels = {
             m: 'Model',
             v: 'Version',
@@ -152,7 +151,7 @@
 
                 let dynamicPropertiesHtml = '';
                 for (const [key, val] of Object.entries(c)) {
-                    if (['id', 'hw_id', 'status', 'created_at', 'subscription_tier', 'balance_tokens'].includes(key)) continue;
+                    if (['id', 'hw_id', 'status', 'created_at', 'subscription_tier', 'balance_tokens', 'metadata'].includes(key)) continue;
                     const displayVal = (typeof val === 'object' ? JSON.stringify(val) : val) || '-';
                     dynamicPropertiesHtml += `<div class="truncate"><span class="text-gray-500 capitalize">${key.replace(/_/g, ' ')}:</span> <span class="text-gray-200">${displayVal}</span></div>`;
                 }
@@ -197,7 +196,7 @@
 
             if (!logs || logs.length === 0) {
                 thead.innerHTML = `<tr class="border-b border-gray-800 text-gray-400"><th class="pb-3 pt-2 font-medium">Telemetry</th></tr>`;
-                tbody.innerHTML = `<tr><td class="py-10 text-center text-gray-500">No traffic logs recorded for this client yet.</td></tr>`;
+                tbody.innerHTML = `<tr><td class="py-10 text-center text-gray-500">No traffic logs recorded for this client yet. Send a test message from the web agent.</td></tr>`;
                 return;
             }
 

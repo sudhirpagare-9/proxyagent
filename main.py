@@ -57,7 +57,9 @@ class SecurityRateLimitMiddleware(BaseHTTPMiddleware):
         self.hw_requests = defaultdict(list)
 
     async def dispatch(self, request: Request, call_next):
-        client_ip = request.client.host if request.client else "0.0.0.0"
+        forwarded_for = request.headers.get("x-forwarded-for")
+        client_ip = forwarded_for.split(",")[0].strip() if forwarded_for else (request.client.host if request.client else "0.0.0.0")
+        
         current_time = time.time()
         window = 60
 
@@ -95,6 +97,11 @@ async def register_client(request: Request):
     if not hw_id:
         raise HTTPException(status_code=400, detail="Missing hw_id")
     
+    # Automatically extract real client IP (fixing dummy 127.0.0.1 issue)
+    forwarded_for = request.headers.get("x-forwarded-for")
+    real_ip = forwarded_for.split(",")[0].strip() if forwarded_for else (request.client.host if request.client else "127.0.0.1")
+    data["ip_address"] = real_ip
+
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("SELECT status, subscription_tier, balance_tokens FROM clients WHERE hw_id = ?", (hw_id,))
@@ -158,7 +165,6 @@ async def log_traffic(request: Request):
         conn.close()
         raise HTTPException(status_code=400, detail=f"Decryption failed: {str(e)}")
 
-    # Dynamically decrement token balance based on real usage reported in payload
     out_tokens = payload_data.get("o", 0)
     new_balance = max(0, row[1] - out_tokens)
     cursor.execute("UPDATE clients SET balance_tokens = ? WHERE hw_id = ?", (new_balance, hw_id))
@@ -243,7 +249,6 @@ async def client_action(request: Request):
     if action == "approve":
         cursor.execute("UPDATE clients SET status = 'APPROVED' WHERE hw_id = ?", (hw_id,))
     elif action == "deny":
-        cursor.execute("UPDATE clients -= 'DENIED' WHERE hw_id = ?") # handled correctly below
         cursor.execute("UPDATE clients SET status = 'DENIED' WHERE hw_id = ?", (hw_id,))
     elif action == "delete":
         cursor.execute("DELETE FROM clients WHERE hw_id = ?", (hw_id,))

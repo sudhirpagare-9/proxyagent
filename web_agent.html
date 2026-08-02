@@ -144,7 +144,6 @@
                         hw_id: hwId,
                         hostname: window.location.hostname || `${profile.type}-Node`,
                         mac_address: "DYN-MAC-" + hwId.substring(4),
-                        ip_address: "127.0.0.1",
                         client_name: `Dynamic Web Agent (${profile.type})`,
                         model_name: cfg.model_name,
                         model_version: dynamicRuntimeState.version,
@@ -156,7 +155,6 @@
                 });
                 const regData = await regRes.json();
                 
-                // Synchronize state dynamically from server authority
                 dynamicRuntimeState.subscriptionTier = regData.subscription_tier || "STANDARD";
                 dynamicRuntimeState.balanceTokens = regData.balance_tokens || 10000;
                 if(regData.agent_version) dynamicRuntimeState.version = regData.agent_version;
@@ -236,7 +234,6 @@
 
                 logActivity(`Captured live metrics (In: ${inTok}, Out: ${outTok})`);
 
-                // FULLY DYNAMIC ENCRYPTION PAYLOAD (No hardcoded version/tier assumptions)
                 const encryptor = new JSEncrypt();
                 encryptor.setPublicKey(publicKeyPem);
                 const encrypted = encryptor.encrypt(JSON.stringify({
