@@ -20,7 +20,7 @@
         <div class="flex items-center gap-3">
             <span id="db-badge" class="px-3 py-1 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded-full text-xs font-mono">DB: Connecting...</span>
             <span id="crypto-badge" class="px-3 py-1 bg-cyan-950 text-cyan-400 border border-cyan-800 rounded-full text-xs font-mono">Crypto: Active</span>
-            <button onclick="fetchDashboardData()" class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition">Refresh Now</button>
+            <button id="refresh-btn" onclick="fetchDashboardData()" class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition">Refresh Now</button>
         </div>
     </header>
 
@@ -78,8 +78,11 @@
         let dashboardCache = { clients: [], logs: [] };
 
         async function fetchDashboardData() {
+            const btn = document.getElementById("refresh-btn");
+            if (btn) btn.innerText = "Refreshing...";
             try {
-                const url = selectedHwId ? `${SERVER_URL}/api/dashboard-data?hw_id=${selectedHwId}` : `${SERVER_URL}/api/dashboard-data`;
+                const ts = Date.now();
+                const url = selectedHwId ? `${SERVER_URL}/api/dashboard-data?hw_id=${selectedHwId}&_t=${ts}` : `${SERVER_URL}/api/dashboard-data?_t=${ts}`;
                 const res = await fetch(url);
                 if (!res.ok) throw new Error("Failed to fetch dashboard telemetry.");
                 const data = await res.json();
@@ -91,6 +94,8 @@
                 document.getElementById("db-badge").innerText = "DB: Connected & Operational";
             } catch (err) {
                 document.getElementById("db-badge").innerText = "DB: Connection Error";
+            } finally {
+                if (btn) btn.innerText = "Refresh Now";
             }
         }
 

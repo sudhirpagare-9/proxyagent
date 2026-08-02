@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="3.7.0")
+app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="3.8.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -220,7 +220,7 @@ async def log_traffic(request: Request):
         status = client_res.data[0].get("status")
         if status == "PENDING":
             raise HTTPException(status_code=402, detail="Client pending approval. Traffic blocked.")
-        elif status == "DENIED":
+        elif status == "DENIED" or status == "DELETED":
             raise HTTPException(status_code=403, detail="Client access DENIED.")
     except HTTPException:
         raise
@@ -241,14 +241,14 @@ async def log_traffic(request: Request):
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Decryption Failure: {str(e)}")
 
-    model_name = safe_str(payload.get("model_name") or payload.get("m", "Claude 3.5 Sonnet"), 50)
-    version = safe_str(payload.get("model_version") or payload.get("v", "v3.5"), 50)
-    model_type = safe_str(payload.get("model_type") or payload.get("t", "AI Client Agent"), 50)
-    think_level = safe_str(payload.get("think_level") or payload.get("l", "Extended"), 50)
-    in_tokens = int(payload.get("input_tokens") if "input_tokens" in payload else payload.get("i", 0))
-    out_tokens = int(payload.get("output_tokens") if "output_tokens" in payload else payload.get("o", 0))
-    bal_tokens = int(payload.get("balance_tokens") if "balance_tokens" in payload else payload.get("b", 12500))
-    sub_status = safe_str(payload.get("subscription_status") or payload.get("s", "PRO"), 20)
+    model_name = safe_str(payload.get("model_name") or payload.get("model") or payload.get("m", "Claude 3.5 Sonnet"), 50)
+    version = safe_str(payload.get("model_version") or payload.get("version") or payload.get("v", "v3.5"), 50)
+    model_type = safe_str(payload.get("model_type") or payload.get("type") or payload.get("t", "AI Client Agent"), 50)
+    think_level = safe_str(payload.get("think_level") or payload.get("think") or payload.get("l", "Extended"), 50)
+    in_tokens = int(payload.get("input_tokens") or payload.get("in_tokens") or payload.get("i", 0))
+    out_tokens = int(payload.get("output_tokens") or payload.get("out_tokens") or payload.get("o", 0))
+    bal_tokens = int(payload.get("balance_tokens") or payload.get("balance") or payload.get("b", 12500))
+    sub_status = safe_str(payload.get("subscription_status") or payload.get("subscription") or payload.get("s", "PRO"), 20)
 
     try:
         supabase.table("ai_usage_logs").insert({
@@ -276,7 +276,7 @@ async def get_dashboard_data(
         raise HTTPException(status_code=500, detail="Database connection required.")
         
     try:
-        raw_clients = supabase.table("clients_registry").select("*").execute().data or []
+        raw_clients = supabase.table("clients_registry").select("*").neq("status", "DELETED").execute().data or []
         
         raw_logs = []
         if hw_id:
@@ -339,6 +339,7 @@ async def client_action(request: Request):
     elif action == "deny":
         supabase.table("clients_registry").update({"status": "DENIED"}).eq("hw_id", hw_id).execute()
     elif action == "delete":
-        supabase.table("clients_registry").delete().eq("hw_id", hw_id).execute()
+        # Soft delete client status to avoid FK constraint violation while keeping database audit logs intact
+        supabase.table("clients_registry").update({"status": "DELETED"}).eq("hw_id", hw_id).execute()
         
     return {"status": "success", "action": action, "hw_id": hw_id}
