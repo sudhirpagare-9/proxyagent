@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="3.1.0")
+app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="3.5.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,7 +21,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Environment Configurations
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = (
     os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or 
@@ -61,10 +60,7 @@ public_key_pem_str = ""
 
 if PRIVATE_KEY_PEM:
     try:
-        private_key = serialization.load_pem_private_key(
-            PRIVATE_KEY_PEM.encode('utf-8'),
-            password=None
-        )
+        private_key = serialization.load_pem_private_key(PRIVATE_KEY_PEM.encode('utf-8'), password=None)
         public_key_pem_str = PUBLIC_KEY_PEM
     except Exception as e:
         print(f"[!] Error loading RSA private key: {e}")
@@ -137,19 +133,20 @@ async def get_public_key():
 
 @app.get("/client-status")
 async def get_client_status(hw_id: str = Query(...)):
-    hw_id_safe = safe_str(hw_id, 50)
     if not supabase:
-        return {"status": "APPROVED"}
+        raise HTTPException(status_code=500, detail="Database (Supabase) connection required for real client status verification.")
     try:
-        res = supabase.table("clients_registry").select("status").eq("hw_id", hw_id_safe).execute()
-        if res.data:
-            return {"status": res.data[0].get("status", "PENDING")}
-    except Exception:
-        pass
-    return {"status": "PENDING"}
+        res = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
+        if res.data and len(res.data) > 0:
+            return {"hw_id": hw_id, "status": res.data[0].get("status", "PENDING")}
+        return {"hw_id": hw_id, "status": "PENDING"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/register")
 async def register_client(request: Request):
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database (Supabase) connection required for real registration data.")
     try:
         data = await request.json()
         hw_id = safe_str(data.get("hw_id"), 50)
@@ -158,13 +155,10 @@ async def register_client(request: Request):
 
         client_ip = request.client.host if request.client else data.get("ip_address", "127.0.0.1")
 
-        if not supabase:
-            return {"status": "success", "client_status": "APPROVED", "mode": "offline"}
-
         current_status = "PENDING"
         try:
             existing = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
-            if existing.data:
+            if existing.data and len(existing.data) > 0:
                 current_status = safe_str(existing.data[0].get("status", "PENDING"), 50)
         except Exception:
             pass
@@ -177,26 +171,30 @@ async def register_client(request: Request):
             "last_ip": encrypt_pii(safe_str(client_ip, 30)),
             "status": current_status,
             "client_name": safe_str(data.get("client_name", data.get("hostname")), 50),
-            "model_name": safe_str(data.get("model_name", "Claude Sonnet 5"), 50),
-            "model_version": safe_str(data.get("model_version", "v3.5"), 50),
-            "thinklevl": safe_str(data.get("think_level", "Extended"), 50),
-            "interface_browser": safe_str(data.get("interface_browser", "Local Proxy Agent"), 50),
+            "model_name": safe_str(data.get("model_name", "Sonar 2 Pro"), 50),
+            "model_version": safe_str(data.get("model_version", "v2.5"), 50),
+            "thinklevl": safe_str(data.get("think_level", "High"), 50),
+            "interface_browser": safe_str(data.get("interface_browser", "Agent Client"), 50),
             "input_tokens": int(data.get("input_tokens", 0)),
             "output_tokens": int(data.get("output_tokens", 0)),
             "balance_tokens": int(data.get("balance_tokens", 12500)),
-            "subscription_status": "PRO",
+            "subscription_status": safe_str(data.get("subscription_status", "PRO"), 20),
             "country": safe_str(data.get("country", "IND"), 50),
-            "geo_location": encrypt_pii(safe_str(data.get("geo_location", "Mumbai, Maharashtra"), 40))
+            "geo_location": encrypt_pii(safe_str(data.get("geo_location", "Maharashtra"), 40))
         }
 
         supabase.table("clients_registry").upsert(client_record, on_conflict="hw_id").execute()
         return {"status": "success", "client_status": current_status}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[!] Registration Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/log-traffic")
 async def log_traffic(request: Request):
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database (Supabase) connection required to store real telemetry data.")
     try:
         data = await request.json()
     except Exception as e:
@@ -208,20 +206,19 @@ async def log_traffic(request: Request):
     if not encrypted_payload_b64 or not hw_id:
         raise HTTPException(status_code=400, detail="Missing parameters.")
 
-    if supabase:
-        try:
-            client_res = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
-            if not client_res.data:
-                raise HTTPException(status_code=404, detail="Client record unregistered.")
-            status = client_res.data[0].get("status")
-            if status == "PENDING":
-                raise HTTPException(status_code=402, detail="Client pending approval.")
-            elif status == "DENIED":
-                raise HTTPException(status_code=403, detail="Client DENIED.")
-        except HTTPException:
-            raise
-        except Exception:
-            pass
+    try:
+        client_res = supabase.table("clients_registry").select("status").eq("hw_id", hw_id).execute()
+        if not client_res.data:
+            raise HTTPException(status_code=404, detail="Client record unregistered.")
+        status = client_res.data[0].get("status")
+        if status == "PENDING":
+            raise HTTPException(status_code=402, detail="Client pending approval. Traffic blocked.")
+        elif status == "DENIED":
+            raise HTTPException(status_code=403, detail="Client access DENIED.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
     try:
         encrypted_data = base64.b64decode(encrypted_payload_b64)
@@ -237,31 +234,30 @@ async def log_traffic(request: Request):
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Decryption Failure: {str(e)}")
 
-    model_name = safe_str(payload.get("m") or payload.get("model_name", "Claude Sonnet 5"), 50)
-    version = safe_str(payload.get("v") or payload.get("model_version", "v3.5"), 50)
-    model_type = safe_str(payload.get("t") or payload.get("model_type", "Anthropic Claude"), 50)
-    think_level = safe_str(payload.get("l") or payload.get("think_level", "Extended"), 50)
-    in_tokens = int(payload.get("i") if "i" in payload else payload.get("input_tokens", 145))
-    out_tokens = int(payload.get("o") if "o" in payload else payload.get("output_tokens", 450))
-    bal_tokens = int(payload.get("b") if "b" in payload else payload.get("balance_tokens", 12150))
+    model_name = safe_str(payload.get("m") or payload.get("model_name", "Sonar 2 Pro"), 50)
+    version = safe_str(payload.get("v") or payload.get("model_version", "v2.5"), 50)
+    model_type = safe_str(payload.get("t") or payload.get("model_type", "API Gateway"), 50)
+    think_level = safe_str(payload.get("l") or payload.get("think_level", "High"), 50)
+    in_tokens = int(payload.get("i") if "i" in payload else payload.get("input_tokens", 100))
+    out_tokens = int(payload.get("o") if "o" in payload else payload.get("output_tokens", 250))
+    bal_tokens = int(payload.get("b") if "b" in payload else payload.get("balance_tokens", 12000))
     sub_status = safe_str(payload.get("s") or payload.get("subscription_status", "PRO"), 20)
 
-    if supabase:
-        try:
-            supabase.table("ai_usage_logs").insert({
-                "hw_id": hw_id,
-                "model_name": model_name,
-                "version": version,
-                "model_type": model_type,
-                "input_tokens": in_tokens,
-                "output_tokens": out_tokens,
-                "balance_tokens": bal_tokens,
-                "subscription_status": sub_status,
-                "think_level": think_level
-            }).execute()
-        except Exception as e:
-            print(f"[!] DB Log Insert Error: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+    try:
+        supabase.table("ai_usage_logs").insert({
+            "hw_id": hw_id,
+            "model_name": model_name,
+            "version": version,
+            "model_type": model_type,
+            "input_tokens": in_tokens,
+            "output_tokens": out_tokens,
+            "balance_tokens": bal_tokens,
+            "subscription_status": sub_status,
+            "think_level": think_level
+        }).execute()
+    except Exception as e:
+        print(f"[!] DB Log Insert Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
             
     return {"status": "success", "model_recorded": model_name, "subscription": sub_status}
 
@@ -271,7 +267,7 @@ async def get_dashboard_data(
     filter_mode: Optional[str] = Query("top100")
 ):
     if not supabase:
-        return {"clients": [], "logs": [], "db_status": "disconnected"}
+        raise HTTPException(status_code=500, detail="Database (Supabase) connection required for dashboard data.")
         
     try:
         raw_clients = supabase.table("clients_registry").select("*").execute().data or []
@@ -302,8 +298,8 @@ async def get_dashboard_data(
                 "ip_address": mask_ip(dec_ip),
                 "status": c.get("status", "PENDING"),
                 "subscription_status": c.get("subscription_status", "PRO"),
-                "model_name": c.get("model_name", "Claude Sonnet 5"),
-                "think_level": c.get("thinklevl", "Extended"),
+                "model_name": c.get("model_name", "Sonar 2 Pro"),
+                "think_level": c.get("thinklevl", "High"),
                 "country": c.get("country", "IND"),
                 "geo_location": dec_geo,
                 "encrypted_pii": True
@@ -316,12 +312,12 @@ async def get_dashboard_data(
             "crypto_status": "Active (RSA-2048 OAEP / AES-CTR 256)"
         }
     except Exception as e:
-        return {"clients": [], "logs": [], "error": str(e), "db_status": "error"}
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/client-action")
 async def client_action(request: Request):
     if not supabase:
-        raise HTTPException(status_code=500, detail="Database missing.")
+        raise HTTPException(status_code=500, detail="Database (Supabase) connection required for client actions.")
     
     body = await request.json()
     hw_id = safe_str(body.get("hw_id"), 50)
@@ -346,7 +342,7 @@ async def client_action(request: Request):
 @app.get("/api/verify-db", response_class=JSONResponse)
 async def verify_database():
     if not supabase:
-        return {"database_status": "Disconnected", "backend": "In-Memory"}
+        raise HTTPException(status_code=500, detail="Database (Supabase) not connected.")
     try:
         res = supabase.table("ai_usage_logs").select("id", count="exact").execute()
         clients_res = supabase.table("clients_registry").select("hw_id", count="exact").execute()
@@ -358,4 +354,4 @@ async def verify_database():
             "last_ping": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         }
     except Exception as e:
-        return {"database_status": "Error", "detail": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
