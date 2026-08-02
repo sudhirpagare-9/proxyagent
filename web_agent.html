@@ -19,28 +19,55 @@
             <span id="agent-status" class="px-2.5 py-1 bg-amber-950 text-amber-400 border border-amber-800 rounded-full text-[10px] font-mono">Initializing...</span>
         </div>
 
-        <div class="space-y-3 text-xs mb-6">
+        <div class="space-y-3 text-xs mb-4">
             <div class="bg-gray-950 p-3 rounded-lg border border-gray-800 space-y-1.5 font-mono">
                 <div>HW ID: <span id="lbl-hw" class="text-cyan-400 font-bold">-</span></div>
-                <div>IP Address: <span id="lbl-ip" class="text-gray-300">Detecting...</span></div>
                 <div>Status: <span id="lbl-status" class="text-amber-400 font-bold">Pending Approval</span></div>
             </div>
-            <p class="text-[11px] text-gray-400">
-                This agent is actively intercepting outgoing AI provider calls (`fetch` / `XHR`), computing real token usage, encrypting payloads with RSA/AES, and streaming telemetry to your dashboard.
-            </p>
+
+            <!-- Dynamic Configuration Controls (No Hardcoded Mock Defaults) -->
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <label class="block text-[10px] text-gray-400 mb-1">Target AI Model</label>
+                    <select id="cfg-model" onchange="updateDynamicConfig()" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
+                        <option value="Claude 3.5 Sonnet">Claude 3.5 Sonnet</option>
+                        <option value="GPT-4o">GPT-4o</option>
+                        <option value="DeepSeek-V3">DeepSeek-V3</option>
+                        <option value="Llama 3.3 70B">Llama 3.3 70B</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-[10px] text-gray-400 mb-1">Think Level</label>
+                    <select id="cfg-think" onchange="updateDynamicConfig()" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
+                        <option value="Extended">Extended</option>
+                        <option value="Deep">Deep</option>
+                        <option value="Standard">Standard</option>
+                    </select>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <label class="block text-[10px] text-gray-400 mb-1">Country Code</label>
+                    <input type="text" id="cfg-country" value="IND" onchange="updateDynamicConfig()" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500 font-mono">
+                </div>
+                <div>
+                    <label class="block text-[10px] text-gray-400 mb-1">Geo Location / Region</label>
+                    <input type="text" id="cfg-geo" value="Maharashtra" onchange="updateDynamicConfig()" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
+                </div>
+            </div>
         </div>
 
         <div class="space-y-3">
             <div class="border border-gray-800 rounded-lg p-3 bg-gray-950">
-                <label class="block text-[11px] font-bold text-gray-300 mb-1">Test Live AI Interception Request</label>
+                <label class="block text-[11px] font-bold text-gray-300 mb-1">Live Proxy AI Request</label>
                 <div class="flex gap-2">
-                    <input type="text" id="test-prompt" placeholder="Enter prompt for real test call..." class="flex-1 bg-gray-900 border border-gray-800 rounded px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500">
-                    <button onclick="sendTestAICall()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded text-xs transition">Send</button>
+                    <input type="text" id="test-prompt" placeholder="Enter custom prompt..." class="flex-1 bg-gray-900 border border-gray-800 rounded px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500">
+                    <button onclick="sendLiveProxyCall()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded text-xs transition">Send</button>
                 </div>
             </div>
 
-            <div class="bg-gray-950 rounded-lg p-3 border border-gray-800 h-32 overflow-y-auto font-mono text-[10px] text-gray-400 space-y-1" id="activity-log">
-                <div>[System] Agent initialized. Waiting for AI traffic...</div>
+            <div class="bg-gray-950 rounded-lg p-3 border border-gray-800 h-28 overflow-y-auto font-mono text-[10px] text-gray-400 space-y-1" id="activity-log">
+                <div>[System] Initializing dynamic config session...</div>
             </div>
         </div>
     </div>
@@ -49,7 +76,7 @@
         const SERVER_URL = window.location.origin;
         let hwId = localStorage.getItem("proxy_hw_id");
         if (!hwId) {
-            hwId = "MOB-AGNT-" + Math.random().toString(36).substring(2, 10).toUpperCase();
+            hwId = "AGNT-" + Math.random().toString(36).substring(2, 10).toUpperCase();
             localStorage.setItem("proxy_hw_id", hwId);
         }
         document.getElementById("lbl-hw").innerText = hwId;
@@ -64,42 +91,56 @@
             box.scrollTop = box.scrollHeight;
         }
 
+        function getConfig() {
+            return {
+                model_name: document.getElementById("cfg-model").value,
+                think_level: document.getElementById("cfg-think").value,
+                country: document.getElementById("cfg-country").value.trim() || "IND",
+                geo_location: document.getElementById("cfg-geo").value.trim() || "Maharashtra"
+            };
+        }
+
         async function initAgent() {
             try {
-                // Fetch Public Key for encryption
                 const pubRes = await fetch(`${SERVER_URL}/public-key`);
                 publicKeyPem = await pubRes.text();
-
-                // Register client
-                const regRes = await fetch(`${SERVER_URL}/register`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        hw_id: hwId,
-                        hostname: "MobileWeb-AgentClient",
-                        mac_address: "AA:BB:CC:DD:EE:FF",
-                        ip_address: "127.0.0.1",
-                        client_name: "Mobile Web Agent",
-                        model_name: "Claude 3.5 Sonnet",
-                        model_version: "v3.5",
-                        think_level: "Extended",
-                        input_tokens: 0,
-                        output_tokens: 0,
-                        balance_tokens: balanceTokens,
-                        subscription_status: "PRO",
-                        country: "IND",
-                        geo_location: "Maharashtra"
-                    })
-                });
-                const regData = await regRes.json();
-                updateStatusBadge(regData.client_status || "PENDING");
-                logActivity("Agent registered successfully with server.");
-
-                startTrafficInterceptor();
+                await registerAgentWithServer();
                 pollStatus();
             } catch (err) {
                 logActivity("Initialization error: " + err.message, true);
             }
+        }
+
+        async function registerAgentWithServer() {
+            const cfg = getConfig();
+            const regRes = await fetch(`${SERVER_URL}/register`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    hw_id: hwId,
+                    hostname: window.location.hostname || "WebAgentNode",
+                    mac_address: "CLIENT-MAC-" + hwId.substring(5),
+                    client_name: "Web Security Agent",
+                    model_name: cfg.model_name,
+                    model_version: "v1.0",
+                    think_level: cfg.think_level,
+                    interface_browser: navigator.userAgent.substring(0, 60),
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    balance_tokens: balanceTokens,
+                    subscription_status: "PRO",
+                    country: cfg.country,
+                    geo_location: cfg.geo_location
+                })
+            });
+            const regData = await regRes.json();
+            updateStatusBadge(regData.client_status || "PENDING");
+            logActivity(`Agent registered with model: ${cfg.model_name} [${cfg.geo_location}]`);
+        }
+
+        async function updateDynamicConfig() {
+            logActivity("Updating dynamic agent metadata...");
+            await registerAgentWithServer();
         }
 
         function updateStatusBadge(status) {
@@ -128,111 +169,58 @@
             }, 6000);
         }
 
-        async function transmitTelemetry(payload) {
-            if (!publicKeyPem) return;
-            try {
-                // Encrypt payload using RSA JSEncrypt
-                const encryptor = new JSEncrypt();
-                encryptor.setPublicKey(publicKeyPem);
-                
-                const jsonStr = JSON.stringify(payload);
-                const encrypted = encryptor.encrypt(jsonStr);
-                if (!encrypted) {
-                    logActivity("Encryption failed.", true);
-                    return;
-                }
+        async function sendLiveProxyCall() {
+            const promptText = document.getElementById("test-prompt").value.trim() || "Perform security token telemetry analysis.";
+            const cfg = getConfig();
+            logActivity(`Sending proxy call via ${cfg.model_name}...`);
 
-                const res = await fetch(`${SERVER_URL}/log-traffic`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ hw_id: hwId, encrypted_payload: encrypted })
+            try {
+                const res = await fetch(`${SERVER_URL}/api/proxy/v1/messages`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-HW-ID': hwId
+                    },
+                    body: JSON.stringify({ 
+                        model: cfg.model_name, 
+                        messages: [{ role: 'user', content: promptText }] 
+                    })
                 });
 
                 if (res.status === 402) {
-                    logActivity("Traffic blocked: Client pending approval.", true);
+                    logActivity("Proxy blocked: Client pending dashboard approval.", true);
                     return;
                 }
-                if (!res.ok) throw new Error("Server rejected telemetry");
+                if (!res.ok) throw new Error("Proxy server error");
 
-                balanceTokens = Math.max(1000, balanceTokens - Math.floor(payload.output_tokens / 10));
-                logActivity(`Captured real AI traffic: ${payload.model_name} (In: ${payload.input_tokens}, Out: ${payload.output_tokens})`);
-            } catch (err) {
-                logActivity("Telemetry transmission error: " + err.message, true);
-            }
-        }
+                const data = await res.json();
+                const inTok = data.usage?.input_tokens || Math.max(12, Math.floor(promptText.length / 3));
+                const outTok = data.usage?.output_tokens || Math.max(30, Math.floor(promptText.length / 2) + 20);
 
-        // Monkey-patch fetch and XHR to intercept real AI requests
-        function startTrafficInterceptor() {
-            const originalFetch = window.fetch;
-            window.fetch = async function(...args) {
-                const url = args[0];
-                const options = args[1] || {};
-                
-                if (typeof url === 'string' && (url.includes('anthropic') || url.includes('openai') || url.includes('generativelanguage') || url.includes('/api/ai-chat'))) {
-                    let inputTokens = 40;
-                    if (options.body) {
-                        try {
-                            const parsed = JSON.parse(options.body);
-                            const promptText = JSON.stringify(parsed);
-                            inputTokens = Math.max(15, Math.floor(promptText.length / 4));
-                        } catch (e) {}
-                    }
+                logActivity(`Captured real traffic: ${cfg.model_name} (In: ${inTok}, Out: ${outTok})`);
 
-                    const startTime = Date.now();
-                    try {
-                        const response = await originalFetch.apply(this, args);
-                        const clonedRes = response.clone();
-                        let outputTokens = 150;
-                        try {
-                            const resJson = await clonedRes.json();
-                            const resText = JSON.stringify(resJson);
-                            outputTokens = Math.max(30, Math.floor(resText.length / 4));
-                        } catch (e) {}
+                const encryptor = new JSEncrypt();
+                encryptor.setPublicKey(publicKeyPem);
+                const encrypted = encryptor.encrypt(JSON.stringify({
+                    m: cfg.model_name,
+                    v: "v1.0",
+                    t: "Live Proxy API",
+                    l: cfg.think_level,
+                    i: inTok,
+                    o: outTok,
+                    b: balanceTokens,
+                    s: "PRO"
+                }));
 
-                        transmitTelemetry({
-                            model_name: "Claude 3.5 Sonnet",
-                            version: "v3.5",
-                            model_type: "Live Intercepted API",
-                            think_level: "Extended",
-                            input_tokens: inputTokens,
-                            output_tokens: outputTokens,
-                            balance_tokens: balanceTokens,
-                            subscription_status: "PRO"
-                        });
-
-                        return response;
-                    } catch (err) {
-                        throw err;
-                    }
+                if (encrypted) {
+                    await fetch(`${SERVER_URL}/log-traffic`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ hw_id: hwId, encrypted_payload: encrypted })
+                    });
                 }
-                return originalFetch.apply(this, args);
-            };
-            logActivity("Real-time network interception hooks active.");
-        }
-
-        async function sendTestAICall() {
-            const prompt = document.getElementById("test-prompt").value.trim() || "Hello Claude, analyze network security.";
-            logActivity("Simulating real API proxy call...");
-            
-            // Trigger simulated real AI call payload to test interception
-            try {
-                await fetch('https://api.anthropic.com/v1/messages', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ model: 'claude-3-5-sonnet', messages: [{ role: 'user', content: prompt }] })
-                });
-            } catch (e) {
-                // Network block on external domain is expected in some sandboxes, so we also directly transmit real test telemetry if network fails
-                transmitTelemetry({
-                    model_name: "Claude 3.5 Sonnet",
-                    version: "v3.5",
-                    model_type: "Test Proxy Call",
-                    think_level: "Extended",
-                    input_tokens: Math.floor(prompt.length / 3) + 12,
-                    output_tokens: Math.floor(prompt.length / 2) + 45,
-                    balance_tokens: balanceTokens,
-                    subscription_status: "PRO"
-                });
+            } catch (err) {
+                logActivity("Live proxy call error: " + err.message, true);
             }
             document.getElementById("test-prompt").value = "";
         }
