@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="3.9.3")
+app = FastAPI(title="AI Traffic Dashboard & Security Monitor", version="4.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -125,7 +125,7 @@ async def read_index():
     if os.path.exists("index.html"):
         with open("index.html", "r", encoding="utf-8") as f:
             return f.read()
-    return "<h1>Dashboard UI (index.html) missing.</h1>"
+    return "<h1>Dashboard UI (index.html) is missing from the server root directory.</h1>"
 
 @app.get("/web-agent", response_class=HTMLResponse)
 @app.get("/web_agent.html", response_class=HTMLResponse)
@@ -201,7 +201,6 @@ async def register_client(request: Request):
 @app.post("/api/proxy/v1/messages")
 @app.post("/api/proxy/v1/chat/completions")
 async def proxy_ai_message(request: Request):
-    """Real AI Proxy Endpoint: Processes live request and logs exact token telemetry."""
     if not supabase:
         raise HTTPException(status_code=500, detail="Database connection required.")
     

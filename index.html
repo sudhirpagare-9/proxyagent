@@ -3,249 +3,181 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Proxy Security Agent (Live Traffic Interceptor)</title>
+    <title>AI Traffic Dashboard & Security Monitor</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsencrypt/3.3.2/jsencrypt.min.js"></script>
     <style>
         body { background-color: #0b0f17; color: #c9d1d9; font-family: ui-sans-serif, system-ui, sans-serif; }
     </style>
 </head>
-<body class="min-h-screen p-6 flex flex-col items-center justify-center">
-    <div class="max-w-md w-full bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-2xl">
-        <div class="flex items-center justify-between mb-4 border-b border-gray-800 pb-3">
-            <h1 class="text-sm font-bold text-white flex items-center gap-2">
-                🛡️ AI Traffic Interceptor Agent
+<body class="min-h-screen p-6 flex flex-col">
+    <!-- Top Header Bar -->
+    <header class="flex items-center justify-between border-b border-gray-800 pb-4 mb-6">
+        <div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2">
+                🛡️ AI Traffic Dashboard & Security Monitor
             </h1>
-            <span id="agent-status" class="px-2.5 py-1 bg-amber-950 text-amber-400 border border-amber-800 rounded-full text-[10px] font-mono">Initializing...</span>
+            <p class="text-xs text-gray-400">Real-time Asymmetric Encrypted AI Usage Telemetry & NIST/GDPR Client Management</p>
         </div>
+        <div class="flex items-center gap-3">
+            <span id="db-badge" class="px-3 py-1 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded-full text-xs font-mono">DB: Connected</span>
+            <span id="crypto-badge" class="px-3 py-1 bg-cyan-950 text-cyan-400 border border-cyan-800 rounded-full text-xs font-mono">Crypto: Active</span>
+            <button onclick="loadDashboardData()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium transition">Refresh Now</button>
+        </div>
+    </header>
 
-        <div class="space-y-3 text-xs mb-4">
-            <div class="bg-gray-950 p-3 rounded-lg border border-gray-800 space-y-1.5 font-mono">
-                <div>HW ID: <span id="lbl-hw" class="text-cyan-400 font-bold">-</span></div>
-                <div>Status: <span id="lbl-status" class="text-amber-400 font-bold">Pending Approval</span></div>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
+        <!-- Discovered Clients Column -->
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col shadow-xl">
+            <div class="flex items-center justify-between mb-4 pb-2 border-b border-gray-800">
+                <h2 class="text-xs font-bold uppercase tracking-wider text-gray-300">Discovered Clients</h2>
+                <span id="client-count" class="px-2 py-0.5 bg-gray-800 text-gray-300 rounded text-[10px] font-mono">0 Registered</span>
             </div>
-
-            <!-- Automatically populated model dropdown based on detected traffic -->
-            <div class="space-y-1">
-                <label class="block text-[10px] text-gray-400">Detected AI Model / LLM (Auto-populated from traffic)</label>
-                <select id="cfg-model" class="w-full bg-gray-950 border border-gray-800 rounded px-2.5 py-1.5 text-xs text-cyan-300 font-mono focus:outline-none focus:border-blue-500">
-                    <option value="" disabled selected>Waiting for traffic model detection...</option>
-                </select>
-            </div>
-
-            <div class="grid grid-cols-2 gap-2">
-                <div>
-                    <label class="block text-[10px] text-gray-400 mb-1">Country Code</label>
-                    <input type="text" id="cfg-country" value="IND" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1 text-xs text-white focus:outline-none font-mono">
-                </div>
-                <div>
-                    <label class="block text-[10px] text-gray-400 mb-1">Geo Location</label>
-                    <input type="text" id="cfg-geo" value="Maharashtra" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1 text-xs text-white focus:outline-none">
-                </div>
+            <div id="clients-container" class="space-y-3 overflow-y-auto flex-1 max-h-[650px] pr-1">
+                <div class="text-xs text-gray-500 text-center py-10 font-mono">Loading registered clients...</div>
             </div>
         </div>
 
-        <div class="space-y-3">
-            <div class="border border-gray-800 rounded-lg p-3 bg-gray-950">
-                <label class="block text-[11px] font-bold text-gray-300 mb-1">Test Live Proxy AI Request</label>
-                <div class="flex gap-2">
-                    <input type="text" id="test-prompt" placeholder="Enter prompt specifying model or text..." class="flex-1 bg-gray-900 border border-gray-800 rounded px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500">
-                    <button onclick="sendLiveProxyCall()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded text-xs transition">Send</button>
-                </div>
+        <!-- Client AI Traffic Logs Column -->
+        <div class="lg:col-span-2 bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col shadow-xl">
+            <div class="flex items-center justify-between mb-4 pb-2 border-b border-gray-800">
+                <h2 id="log-header-title" class="text-xs font-bold uppercase tracking-wider text-gray-300">Client AI Traffic Logs (Select a client)</h2>
+                <span id="log-count" class="px-2 py-0.5 bg-gray-800 text-gray-300 rounded text-[10px] font-mono">0 Recorded</span>
             </div>
-
-            <div class="bg-gray-950 rounded-lg p-3 border border-gray-800 h-28 overflow-y-auto font-mono text-[10px] text-gray-400 space-y-1" id="activity-log">
-                <div>[System] Interceptor active. Monitoring outgoing traffic...</div>
+            <div class="overflow-x-auto flex-1">
+                <table class="w-full text-left text-xs font-mono">
+                    <thead>
+                        <tr class="border-b border-gray-800 text-gray-400">
+                            <th class="pb-3 font-medium">Model & Version</th>
+                            <th class="pb-3 font-medium">Tier</th>
+                            <th class="pb-3 font-medium">Think</th>
+                            <th class="pb-3 font-medium">Input Token</th>
+                            <th class="pb-3 font-medium">Output Token</th>
+                            <th class="pb-3 font-medium">Balance Token</th>
+                            <th class="pb-3 font-medium">Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logs-table-body" class="divide-y divide-gray-800/50 text-gray-300">
+                        <tr>
+                            <td colspan="7" class="py-10 text-center text-gray-500">Select an approved client card on the left to inspect live telemetry.</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
 
     <script>
         const SERVER_URL = window.location.origin;
-        let hwId = localStorage.getItem("proxy_hw_id");
-        if (!hwId) {
-            hwId = "AGNT-" + Math.random().toString(36).substring(2, 10).toUpperCase();
-            localStorage.setItem("proxy_hw_id", hwId);
-        }
-        document.getElementById("lbl-hw").innerText = hwId;
+        let selectedHwId = null;
 
-        let publicKeyPem = "";
-        let balanceTokens = 12500;
-        const detectedModels = new Set();
-
-        function logActivity(msg, isError = false) {
-            const box = document.getElementById("activity-log");
-            const timeStr = new Date().toLocaleTimeString();
-            box.innerHTML += `<div class="${isError ? 'text-red-400' : 'text-emerald-400'}">[${timeStr}] ${msg}</div>`;
-            box.scrollTop = box.scrollHeight;
-        }
-
-        function registerDetectedModel(modelName) {
-            if (!modelName || detectedModels.has(modelName)) return;
-            detectedModels.add(modelName);
-
-            const select = document.getElementById("cfg-model");
-            if (select.options.length === 1 && select.options[0].disabled) {
-                select.innerHTML = ""; // Remove default prompt placeholder
-            }
-
-            const opt = document.createElement("option");
-            opt.value = modelName;
-            opt.textContent = modelName;
-            select.appendChild(opt);
-            select.value = modelName;
-
-            logActivity(`[Interceptor] Discovered & added model: ${modelName}`);
-        }
-
-        // Live Network Interceptor: Capture any fetch call containing AI models or endpoints
-        const originalFetch = window.fetch;
-        window.fetch = async function(...args) {
-            const url = args[0];
-            const options = args[1] || {};
-
-            if (typeof url === 'string' && (url.includes('proxy') || url.includes('chat') || url.includes('messages') || url.includes('openai') || url.includes('anthropic'))) {
-                if (options && options.body) {
-                    try {
-                        const parsed = JSON.parse(options.body);
-                        if (parsed.model) {
-                            registerDetectedModel(parsed.model);
-                        }
-                    } catch (e) {}
-                }
-            }
-            return originalFetch.apply(this, args);
-        };
-
-        async function initAgent() {
+        async function loadDashboardData() {
             try {
-                const pubRes = await fetch(`${SERVER_URL}/public-key`);
-                publicKeyPem = await pubRes.text();
-
-                // Seed with initial detected model if none captured yet
-                registerDetectedModel("Claude 3.5 Sonnet");
-                await registerAgentWithServer();
-                pollStatus();
-            } catch (err) {
-                logActivity("Initialization error: " + err.message, true);
-            }
-        }
-
-        async function registerAgentWithServer() {
-            const modelSelect = document.getElementById("cfg-model");
-            const activeModel = modelSelect.value || "Claude 3.5 Sonnet";
-            const country = document.getElementById("cfg-country").value.trim() || "IND";
-            const geo = document.getElementById("cfg-geo").value.trim() || "Maharashtra";
-
-            const regRes = await fetch(`${SERVER_URL}/register`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    hw_id: hwId,
-                    hostname: window.location.hostname || "WebAgentNode",
-                    mac_address: "CLIENT-MAC-" + hwId.substring(5),
-                    client_name: "Live Traffic Agent",
-                    model_name: activeModel,
-                    model_version: "v1.0",
-                    think_level: "Extended",
-                    interface_browser: navigator.userAgent.substring(0, 60),
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    balance_tokens: balanceTokens,
-                    subscription_status: "PRO",
-                    country: country,
-                    geo_location: geo
-                })
-            });
-            const regData = await regRes.json();
-            updateStatusBadge(regData.client_status || "PENDING");
-        }
-
-        function updateStatusBadge(status) {
-            const badge = document.getElementById("agent-status");
-            const lbl = document.getElementById("lbl-status");
-            lbl.innerText = status;
-            if (status === "APPROVED") {
-                badge.className = "px-2.5 py-1 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded-full text-[10px] font-mono";
-                badge.innerText = "Active & Approved";
-            } else if (status === "DENIED") {
-                badge.className = "px-2.5 py-1 bg-red-950 text-red-400 border border-red-800 rounded-full text-[10px] font-mono";
-                badge.innerText = "Access Denied";
-            } else {
-                badge.className = "px-2.5 py-1 bg-amber-950 text-amber-400 border border-amber-800 rounded-full text-[10px] font-mono";
-                badge.innerText = "Pending Approval";
-            }
-        }
-
-        async function pollStatus() {
-            setInterval(async () => {
-                try {
-                    const res = await fetch(`${SERVER_URL}/client-status?hw_id=${hwId}`);
-                    const data = await res.json();
-                    if (data.status) updateStatusBadge(data.status);
-                } catch (e) {}
-            }, 6000);
-        }
-
-        async function sendLiveProxyCall() {
-            const promptText = document.getElementById("test-prompt").value.trim() || "Analyze real-time network security parameters.";
-            const modelSelect = document.getElementById("cfg-model");
-            const activeModel = modelSelect.value || "Claude 3.5 Sonnet";
-            
-            logActivity(`Sending live proxy call for model: ${activeModel}...`);
-
-            try {
-                const res = await fetch(`${SERVER_URL}/api/proxy/v1/messages`, {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'X-HW-ID': hwId
-                    },
-                    body: JSON.stringify({ 
-                        model: activeModel, 
-                        messages: [{ role: 'user', content: promptText }] 
-                    })
-                });
-
-                if (res.status === 402) {
-                    logActivity("Proxy blocked: Client pending dashboard approval.", true);
-                    return;
-                }
-                if (!res.ok) throw new Error("Proxy server error");
-
+                const url = selectedHwId ? `${SERVER_URL}/api/dashboard-data?hw_id=${selectedHwId}` : `${SERVER_URL}/api/dashboard-data`;
+                const res = await fetch(url);
+                if (!res.ok) throw new Error("Failed to fetch dashboard telemetry");
                 const data = await res.json();
-                const inTok = data.usage?.input_tokens || Math.max(12, Math.floor(promptText.length / 3));
-                const outTok = data.usage?.output_tokens || Math.max(30, Math.floor(promptText.length / 2) + 20);
 
-                logActivity(`Captured real traffic: ${activeModel} (In: ${inTok}, Out: ${outTok})`);
-
-                const encryptor = new JSEncrypt();
-                encryptor.setPublicKey(publicKeyPem);
-                const encrypted = encryptor.encrypt(JSON.stringify({
-                    m: activeModel,
-                    v: "v1.0",
-                    t: "Live Proxy API",
-                    l: "Extended",
-                    i: inTok,
-                    o: outTok,
-                    b: balanceTokens,
-                    s: "PRO"
-                }));
-
-                if (encrypted) {
-                    await fetch(`${SERVER_URL}/log-traffic`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ hw_id: hwId, encrypted_payload: encrypted })
-                    });
+                renderClients(data.clients);
+                if (selectedHwId) {
+                    renderLogs(data.logs);
                 }
             } catch (err) {
-                logActivity("Live proxy call error: " + err.message, true);
+                console.error("Dashboard error:", err);
             }
-            document.getElementById("test-prompt").value = "";
         }
 
-        initAgent();
+        function renderClients(clients) {
+            const container = document.getElementById("clients-container");
+            document.getElementById("client-count").innerText = `${clients.length} Registered`;
+
+            if (!clients || clients.length === 0) {
+                container.innerHTML = `<div class="text-xs text-gray-500 text-center py-10 font-mono">No active clients registered yet. Open /web-agent to register.</div>`;
+                return;
+            }
+
+            container.innerHTML = "";
+            clients.forEach(c => {
+                const isSelected = selectedHwId === c.hw_id;
+                const statusColor = c.status === 'APPROVED' ? 'text-emerald-400 bg-emerald-950 border-emerald-800' : 
+                                    c.status === 'DENIED' ? 'text-red-400 bg-red-950 border-red-800' : 'text-amber-400 bg-amber-950 border-amber-800';
+
+                const card = document.createElement("div");
+                card.className = `p-4 rounded-xl border transition cursor-pointer bg-gray-950 ${isSelected ? 'border-blue-500 shadow-lg shadow-blue-950/40' : 'border-gray-800 hover:border-gray-700'}`;
+                card.onclick = () => {
+                    selectedHwId = c.hw_id;
+                    document.getElementById("log-header-title").innerText = `Client AI Traffic Logs (Filtered for HW ID: ${c.hw_id})`;
+                    loadDashboardData();
+                };
+
+                card.innerHTML = `
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="font-bold text-white font-mono text-xs">${c.hw_id}</span>
+                        <span class="px-2 py-0.5 border rounded-full text-[10px] font-mono ${statusColor}">${c.status}</span>
+                    </div>
+                    <div class="space-y-1 text-[11px] text-gray-400 font-mono mb-3">
+                        <div>📍 Location: <span class="text-gray-200">${c.geo_location}</span></div>
+                        <div>🌐 IP: <span class="text-cyan-400">${c.ip_address}</span></div>
+                        <div>💻 Host: <span class="text-gray-200">${c.hostname}</span></div>
+                    </div>
+                    <div class="flex items-center justify-between pt-2 border-t border-gray-800/80">
+                        <span class="text-[10px] text-blue-400 font-mono">Tier: ${c.subscription_status}</span>
+                        <div class="flex gap-1.5" onclick="event.stopPropagation()">
+                            <button onclick="executeAction('${c.hw_id}', 'approve')" class="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-medium">Approve</button>
+                            <button onclick="executeAction('${c.hw_id}', 'deny')" class="px-2 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-[10px] font-medium">Deny</button>
+                            <button onclick="executeAction('${c.hw_id}', 'delete')" class="px-2 py-1 bg-red-600 hover:bg-red-500 text-white rounded text-[10px] font-medium">Delete</button>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function renderLogs(logs) {
+            const tbody = document.getElementById("logs-table-body");
+            document.getElementById("log-count").innerText = `${logs.length} Recorded`;
+
+            if (!logs || logs.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="py-10 text-center text-gray-500">No traffic logs recorded for this client yet.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = "";
+            logs.forEach(l => {
+                const dateStr = new Date(l.created_at || Date.now()).toLocaleTimeString();
+                const row = document.createElement("tr");
+                row.className = "hover:bg-gray-800/30";
+                row.innerHTML = `
+                    <td class="py-3">
+                        <div class="text-blue-400 font-bold">${l.model_name || 'Dynamic Model'}</div>
+                        <div class="text-[10px] text-gray-500">${l.version || 'v1.0'}</div>
+                    </td>
+                    <td class="py-3 text-amber-400 font-bold">${l.subscription_status || 'PRO'}</td>
+                    <td class="py-3 text-gray-300">${l.think_level || 'Standard'}</td>
+                    <td class="py-3 text-emerald-400 font-bold">↑ ${l.input_tokens || 0}</td>
+                    <td class="py-3 text-rose-400 font-bold">↓ ${l.output_tokens || 0}</td>
+                    <td class="py-3 text-purple-400 font-bold">${l.balance_tokens || 12500}</td>
+                    <td class="py-3 text-gray-400 text-[11px]">${dateStr}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        async function executeAction(hwId, action) {
+            try {
+                const res = await fetch(`${SERVER_URL}/api/client-action`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ hw_id: hwId, action: action })
+                });
+                if (!res.ok) throw new Error("Action failed");
+                loadDashboardData();
+            } catch (err) {
+                alert("Error executing client action: " + err.message);
+            }
+        }
+
+        loadDashboardData();
+        setInterval(loadDashboardData, 5000);
     </script>
 </body>
 </html>
