@@ -16,7 +16,6 @@ if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 if "sqlite" in DATABASE_URL:
-    # Ensure local directory exists if running with a disk mount
     os.makedirs("/data", exist_ok=True)
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 else:
@@ -25,18 +24,21 @@ else:
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-class ClientLedgerModel(Base):
+class ClientModel(Base):
     __tablename__ = "client_ledger"
-    hw_id = Column(String(64), primary_key=True, default="cloud-user")
-    balance_tokens = Column(Integer, default=100000)
-    total_consumed = Column(Integer, default=0)
+    hw_id = Column(String(64), primary_key=True)
+    api_key = Column(String(128), unique=True, index=True)
+    status = Column(String(32), default="PENDING")
+    subscription_tier = Column(String(32), default="PRO")
+    balance_tokens = Column(Integer, default=50000)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
-class EncryptedTrafficLog(Base):
+class TrafficLogModel(Base):
     __tablename__ = "encrypted_traffic_logs"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    hw_id = Column(String(64))
-    encrypted_payload = Column(Text)
-    tokens_used = Column(Integer, default=0)
+    hw_id = Column(String(64), index=True)
+    payload_json = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 Base.metadata.create_all(bind=engine)
