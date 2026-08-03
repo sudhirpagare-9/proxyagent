@@ -4,26 +4,20 @@ import json
 import logging
 import os
 import re
-import sqlite3
 import time
 from collections import defaultdict
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from database import engine, Base
 
-@app.on_event("startup")
-def startup_event():
-    Base.metadata.create_all(bind=engine)
-# Robust Dynamic Configuration: Auto-load .env if available without crashing
 try:
-  from dotenv import load_dotenv
-
-  load_dotenv()
+    from dotenv import load_dotenv
+    load_dotenv()
 except ImportError:
-  pass
+    pass
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
-from fastapi import FastAPI, Header, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (
     HTMLResponse,
@@ -33,6 +27,8 @@ from fastapi.responses import (
 )
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from database import Base, ClientModel, SessionLocal, engine
+
 # Configure NIST-Compliant Security Audit Logging
 logging.basicConfig(
     level=logging.INFO,
@@ -40,149 +36,76 @@ logging.basicConfig(
 )
 logger = logging.getLogger("EnterpriseSecurityGateway")
 
+app = FastAPI(title="Secure Cloud Multi-Tenant AI Proxy - Enterprise Edition")
+
+
+@app.on_event("startup")
+def startup_event():
+    Base.metadata.create_all(bind=engine)
+    logger.info("Database schema verified and initialized successfully via SQLAlchemy.")
+
+
+@contextmanager
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 # Generate RSA-2048 Keys for End-to-End Encryption (E2EE)
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 public_key = private_key.public_key()
-
 public_pem = public_key.public_bytes(
     encoding=serialization.Encoding.PEM,
     format=serialization.PublicFormat.SubjectPublicKeyInfo,
 ).decode("utf-8")
 
-# Dynamic Database Configuration with Automatic Fallback
-DATABASE_URL = os.environ.get("DATABASE_URL")
-IS_POSTGRES = bool(
-    DATABASE_URL
-    and (
-        DATABASE_URL.startswith("postgres://")
-        or DATABASE_URL.startswith("postgresql://")
-    )
-)
-DB_FILE = "proxy_security_enterprise.db"
-ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "admin_secure_enterprise_key_9988")
 
-
-def get_db_connection():
-  if IS_POSTGRES:
-    import psycopg2
-
-    return psycopg2.connect(DATABASE_URL)
-  else:
-    conn = sqlite3.connect(DB_FILE, timeout=30.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    return conn
-
-
-def init_db():
-  try:
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    if IS_POSTGRES:
-      cursor.execute("""
-                CREATE TABLE IF NOT EXISTS clients (
-                    hw_id TEXT PRIMARY KEY,
-                    api_key TEXT,
-                    status TEXT DEFAULT 'PENDING',
-                    subscription_tier TEXT DEFAULT 'PRO',
-                    balance_tokens INTEGER DEFAULT 50000,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    metadata TEXT
-                )
-            """)
-      cursor.execute("""
-                CREATE TABLE IF NOT EXISTS traffic_logs (
-                    id SERIAL PRIMARY KEY,
-                    hw_id TEXT,
-                    payload_json TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-    else:
-      cursor.execute("""
-                CREATE TABLE IF NOT EXISTS clients (
-                    hw_id TEXT PRIMARY KEY,
-                    api_key TEXT,
-                    status TEXT DEFAULT 'PENDING',
-                    subscription_tier TEXT DEFAULT 'PRO',
-                    balance_tokens INTEGER DEFAULT 50000,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    metadata TEXT
-                )
-            """)
-      cursor.execute("""
-                CREATE TABLE IF NOT EXISTS traffic_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    hw_id TEXT,
-                    payload_json TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-    conn.commit()
-    cursor.close()
-    conn.close()
-    db_type = (
-        "Cloud PostgreSQL (Auto-Detected)"
-        if IS_POSTGRES
-        else "Local SQLite WAL (Auto-Fallback)"
-    )
-    logger.info(f"Database initialized successfully using engine: {db_type}")
-  except Exception as e:
-    logger.error(f"Database initialization error: {str(e)}")
-
-
-init_db()
-
-
-# PII Redaction Engine (GDPR & Privacy Compliance)
 def sanitize_pii(text: str) -> str:
-  if not isinstance(text, str):
+    if not isinstance(text, str):
+        return text
+    text = re.sub(r"[\w\.-]+@[\w\.-]+\.\w+", "[REDACTED_EMAIL]", text)
+    text = re.sub(r"\b\d{10,12}\b", "[REDACTED_PHONE]", text)
+    text = re.sub(r"sk_live_\w+|sk_test_\w+|AIzaSy\w+", "[REDACTED_SECRET]", text)
     return text
-  text = re.sub(r"[\w\.-]+@[\w\.-]+\.\w+", "[REDACTED_EMAIL]", text)
-  text = re.sub(r"\b\d{10,12}\b", "[REDACTED_PHONE]", text)
-  text = re.sub(r"sk_live_\w+|sk_test_\w+|AIzaSy\w+", "[REDACTED_SECRET]", text)
-  return text
 
 
-# NIST Hardened Security & Anti-DDoS Middleware
 class HardenedSecurityMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, rate_limit: int = 300):
+        super().__init__(app)
+        self.rate_limit = rate_limit
+        self.ip_records = defaultdict(list)
 
-  def __init__(self, app, rate_limit: int = 300):
-    super().__init__(app)
-    self.rate_limit = rate_limit
-    self.ip_records = defaultdict(list)
+    async def dispatch(self, request: Request, call_next):
+        forwarded = request.headers.get("x-forwarded-for")
+        client_ip = (
+            forwarded.split(",")[0].strip()
+            if forwarded
+            else (request.client.host if request.client else "0.0.0.0")
+        )
 
-  async def dispatch(self, request: Request, call_next):
-    forwarded = request.headers.get("x-forwarded-for")
-    client_ip = (
-        forwarded.split(",")[0].strip()
-        if forwarded
-        else (request.client.host if request.client else "0.0.0.0")
-    )
+        now = time.time()
+        self.ip_records[client_ip] = [
+            t for t in self.ip_records[client_ip] if now - t < 60
+        ]
+        if len(self.ip_records[client_ip]) >= self.rate_limit:
+            return JSONResponse(
+                status_code=429,
+                content={"error": "Security Block: Rate limit exceeded."},
+            )
+        self.ip_records[client_ip].append(now)
 
-    now = time.time()
-    self.ip_records[client_ip] = [
-        t for t in self.ip_records[client_ip] if now - t < 60
-    ]
-
-    if len(self.ip_records[client_ip]) >= self.rate_limit:
-      return JSONResponse(
-          status_code=429,
-          content={"error": "Security Block: Rate limit exceeded."},
-      )
-
-    self.ip_records[client_ip].append(now)
-
-    response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Strict-Transport-Security"] = (
-        "max-age=31536000; includeSubDomains"
-    )
-    return response
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
+        return response
 
 
-app = FastAPI(title="Secure Cloud Multi-Tenant AI Proxy - Enterprise Edition")
 app.add_middleware(HardenedSecurityMiddleware, rate_limit=350)
 app.add_middleware(
     CORSMiddleware,
@@ -195,782 +118,543 @@ app.add_middleware(
 
 @app.get("/public-key", response_class=PlainTextResponse)
 def get_public_key():
-  return public_pem
+    return public_pem
 
 
 @app.get("/api/database-info")
 def database_info():
-  db_type = (
-      "Cloud PostgreSQL (Auto-Detected)"
-      if IS_POSTGRES
-      else "SQLite (Local Persistent WAL Fallback)"
-  )
-  db_path = (
-      DATABASE_URL.split("@")[-1] if IS_POSTGRES else os.path.abspath(DB_FILE)
-  )
-  return {
-      "database_type": db_type,
-      "storage_location": db_path,
-      "isolation_mode": (
-          "Multi-Tenant Partitioning with NIST End-to-End Encryption"
-      ),
-      "status": "Online & Hardened",
-  }
+    db_url = os.environ.get("DATABASE_URL", "sqlite")
+    is_pg = "postgres" in db_url
+    db_type = (
+        "Cloud PostgreSQL (SQLAlchemy ORM)"
+        if is_pg
+        else "SQLite (Local Persistent WAL Fallback)"
+    )
+    return {
+        "database_type": db_type,
+        "storage_location": db_url.split("@")[-1] if is_pg else "proxy_security_enterprise.db",
+        "isolation_mode": "Multi-Tenant Partitioning with NIST End-to-End Encryption",
+        "status": "Online & Hardened",
+    }
 
 
 @app.post("/register")
 async def register_client(request: Request):
-  data = await request.json()
-  hw_id = data.get("hw_id")
+    data = await request.json()
+    hw_id = data.get("hw_id")
 
-  if not hw_id or not re.match(r"^[A-Z0-9\-]{8,64}$", hw_id):
-    raise HTTPException(
-        status_code=400,
-        detail="Exploit Prevention: Invalid hardware identifier format.",
+    if not hw_id or not re.match(r"^[A-Z0-9\-]{8,64}$", hw_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Exploit Prevention: Invalid hardware identifier format.",
+        )
+
+    api_key = data.get("api_key") or f"sk_tenant_{os.urandom(16).hex()}"
+    forwarded = request.headers.get("x-forwarded-for")
+    real_ip = (
+        forwarded.split(",")[0].strip()
+        if forwarded
+        else (request.client.host if request.client else "127.0.0.1")
     )
 
-  api_key = data.get("api_key") or f"sk_tenant_{os.urandom(16).hex()}"
-  forwarded = request.headers.get("x-forwarded-for")
-  real_ip = (
-      forwarded.split(",")[0].strip()
-      if forwarded
-      else (request.client.host if request.client else "127.0.0.1")
-  )
+    geo_info = {
+        "country": "India",
+        "city": "Chandrapur",
+        "region": "Maharashtra",
+        "isp": "Cloud Enterprise Node",
+    }
+    try:
+        if real_ip not in ["127.0.0.1", "localhost", "0.0.0.0"]:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                geo_resp = await client.get(
+                    f"https://ipapi.co/{real_ip}/json/", timeout=2.5
+                )
+                if geo_resp.status_code == 200:
+                    g_data = geo_resp.json()
+                    geo_info = {
+                        "country": g_data.get("country_name", "India"),
+                        "city": g_data.get("city", "Chandrapur"),
+                        "region": g_data.get("region", "Maharashtra"),
+                        "isp": g_data.get("org", "Cloud ISP"),
+                    }
+    except Exception:
+        pass
 
-  geo_info = {
-      "country": "India",
-      "city": "Chandrapur",
-      "region": "Maharashtra",
-      "isp": "Cloud Enterprise Node",
-  }
-  try:
-    if real_ip not in ["127.0.0.1", "localhost", "0.0.0.0"]:
-      import httpx
+    data["ip_address"] = real_ip
+    data["geo_location"] = geo_info
+    data["registered_at_utc"] = datetime.now(timezone.utc).strftime(
+        "%Y-%m-%d %H:%M:%S UTC"
+    )
 
-      async with httpx.AsyncClient() as client:
-        geo_resp = await client.get(
-            f"https://ipapi.co/{real_ip}/json/", timeout=2.5
-        )
-        if geo_resp.status_code == 200:
-          g_data = geo_resp.json()
-          geo_info = {
-              "country": g_data.get("country_name", "India"),
-              "city": g_data.get("city", "Chandrapur"),
-              "region": g_data.get("region", "Maharashtra"),
-              "isp": g_data.get("org", "Cloud ISP"),
-              "lat": g_data.get("latitude", 19.9615),
-              "lon": g_data.get("longitude", 79.2961),
-          }
-  except Exception:
-    pass
+    with get_db() as db:
+        client_node = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
+        if client_node:
+            api_key = client_node.api_key or api_key
+            client_node.metadata_json = json.dumps(data)
+            client_node.api_key = api_key
+            status_val = client_node.status
+            tier_val = client_node.subscription_tier
+            balance_val = client_node.balance_tokens
+        else:
+            status_val, tier_val, balance_val = "PENDING", "PRO", 50000
+            client_node = ClientModel(
+                hw_id=hw_id,
+                api_key=api_key,
+                status=status_val,
+                subscription_tier=tier_val,
+                balance_tokens=balance_val,
+                metadata_json=json.dumps(data),
+            )
+            db.add(client_node)
+        db.commit()
 
-  data["ip_address"] = real_ip
-  data["geo_location"] = geo_info
-  data["registered_at_utc"] = datetime.now(timezone.utc).strftime(
-      "%Y-%m-%d %H:%M:%S UTC"
-  )
-
-  conn = get_db_connection()
-  cursor = conn.cursor()
-  try:
-    if IS_POSTGRES:
-      cursor.execute(
-          "SELECT status, subscription_tier, balance_tokens, api_key FROM"
-          " clients WHERE hw_id = %s",
-          (hw_id,),
-      )
-      row = cursor.fetchone()
-      if row:
-        status_val, tier_val, balance_val, existing_key = row
-        api_key = existing_key or api_key
-        cursor.execute(
-            "UPDATE clients SET metadata = %s, api_key = %s WHERE hw_id = %s",
-            (json.dumps(data), api_key, hw_id),
-        )
-      else:
-        status_val, tier_val, balance_val = "PENDING", "PRO", 50000
-        cursor.execute(
-            "INSERT INTO clients (hw_id, api_key, status, subscription_tier,"
-            " balance_tokens, metadata) VALUES (%s, %s, %s, %s, %s, %s)",
-            (hw_id, api_key, status_val, tier_val, balance_val, json.dumps(data)),
-        )
-      conn.commit()
-    else:
-      cursor.execute(
-          "SELECT status, subscription_tier, balance_tokens, api_key FROM"
-          " clients WHERE hw_id = ?",
-          (hw_id,),
-      )
-      row = cursor.fetchone()
-      if row:
-        status_val, tier_val, balance_val, existing_key = (
-            row[0],
-            row[1],
-            row[2],
-            row[3],
-        )
-        api_key = existing_key or api_key
-        cursor.execute(
-            "UPDATE clients SET metadata = ?, api_key = ? WHERE hw_id = ?",
-            (json.dumps(data), api_key, hw_id),
-        )
-      else:
-        status_val, tier_val, balance_val = "PENDING", "PRO", 50000
-        cursor.execute(
-            "INSERT INTO clients (hw_id, api_key, status, subscription_tier,"
-            " balance_tokens, metadata) VALUES (?, ?, ?, ?, ?, ?)",
-            (hw_id, api_key, status_val, tier_val, balance_val, json.dumps(data)),
-        )
-      conn.commit()
-  finally:
-    cursor.close()
-    conn.close()
-
-  return {
-      "hw_id": hw_id,
-      "api_key": api_key,
-      "client_status": status_val,
-      "subscription_tier": tier_val,
-      "balance_tokens": balance_val,
-      "geo_location": geo_info,
-  }
+    return {
+        "hw_id": hw_id,
+        "api_key": api_key,
+        "client_status": status_val,
+        "subscription_tier": tier_val,
+        "balance_tokens": balance_val,
+        "geo_location": geo_info,
+    }
 
 
 @app.get("/api/tenant/data")
 def get_tenant_data(hw_id: str):
-  if not re.match(r"^[A-Z0-9\-]{8,64}$", hw_id):
-    raise HTTPException(status_code=400, detail="Invalid hardware identifier.")
-  conn = get_db_connection()
-  cursor = conn.cursor()
-  try:
-    if IS_POSTGRES:
-      cursor.execute(
-          "SELECT status, subscription_tier, balance_tokens, api_key, metadata"
-          " FROM clients WHERE hw_id = %s",
-          (hw_id,),
-      )
-    else:
-      cursor.execute(
-          "SELECT status, subscription_tier, balance_tokens, api_key, metadata"
-          " FROM clients WHERE hw_id = ?",
-          (hw_id,),
-      )
-    row = cursor.fetchone()
-  finally:
-    cursor.close()
-    conn.close()
-
-  if not row:
-    raise HTTPException(status_code=404, detail="Tenant node not found.")
-
-  meta = json.loads(row[4] or "{}")
-  return {
-      "client": {
-          "hw_id": hw_id,
-          "status": row[0],
-          "subscription_tier": row[1],
-          "balance_tokens": row[2],
-          "api_key": row[3],
-          **meta,
-      }
-  }
+    if not re.match(r"^[A-Z0-9\-]{8,64}$", hw_id):
+        raise HTTPException(status_code=400, detail="Invalid hardware identifier.")
+    with get_db() as db:
+        client_node = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
+        if not client_node:
+            raise HTTPException(status_code=404, detail="Tenant node not found.")
+        meta = json.loads(client_node.metadata_json or "{}")
+        return {
+            "client": {
+                "hw_id": hw_id,
+                "status": client_node.status,
+                "subscription_tier": client_node.subscription_tier,
+                "balance_tokens": client_node.balance_tokens,
+                "api_key": client_node.api_key,
+                **meta,
+            }
+        }
 
 
 @app.post("/log-traffic")
 async def log_traffic(request: Request):
-  data = await request.json()
-  hw_id = data.get("hw_id")
-  enc_payload = data.get("encrypted_payload")
-  if not hw_id or not enc_payload:
-    raise HTTPException(status_code=400, detail="Missing parameters")
+    data = await request.json()
+    hw_id = data.get("hw_id")
+    enc_payload = data.get("encrypted_payload")
+    if not hw_id or not enc_payload:
+        raise HTTPException(status_code=400, detail="Missing parameters")
 
-  conn = get_db_connection()
-  cursor = conn.cursor()
-  try:
-    if IS_POSTGRES:
-      cursor.execute(
-          "SELECT status, balance_tokens FROM clients WHERE hw_id = %s",
-          (hw_id,),
-      )
-    else:
-      cursor.execute(
-          "SELECT status, balance_tokens FROM clients WHERE hw_id = ?",
-          (hw_id,),
-      )
-    row = cursor.fetchone()
+    with get_db() as db:
+        client_node = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
+        if not client_node or client_node.status != "APPROVED":
+            raise HTTPException(
+                status_code=402, detail="Access denied: Node unapproved or unregistered"
+            )
 
-    if not row or row[0] != "APPROVED":
-      raise HTTPException(
-          status_code=402, detail="Access denied: Node unapproved or unregistered"
-      )
+        try:
+            decoded_bytes = base64.b64decode(enc_payload)
+            decrypted_bytes = private_key.decrypt(
+                decoded_bytes, padding.PKCS1v15()
+            )
+            payload_data = json.loads(decrypted_bytes.decode("utf-8"))
+        except Exception as e:
+            raise HTTPException(
+                status_code=400, detail=f"Decryption failure: {str(e)}"
+            )
 
-    try:
-      decoded_bytes = base64.b64decode(enc_payload)
-      decrypted_bytes = private_key.decrypt(
-          decoded_bytes, padding.PKCS1v15()
-      )
-      payload_data = json.loads(decrypted_bytes.decode("utf-8"))
-    except Exception as e:
-      raise HTTPException(
-          status_code=400, detail=f"Decryption failure: {str(e)}"
-      )
+        if "query" in payload_data:
+            payload_data["query"] = sanitize_pii(payload_data["query"])
 
-    if "query" in payload_data:
-      payload_data["query"] = sanitize_pii(payload_data["query"])
+        payload_data["timestamp_utc"] = datetime.now(timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
+        total_tokens = int(payload_data.get("i", 0)) + int(
+            payload_data.get("o", 0)
+        )
+        new_balance = max(0, client_node.balance_tokens - total_tokens)
+        client_node.balance_tokens = new_balance
 
-    payload_data["timestamp_utc"] = datetime.now(timezone.utc).strftime(
-        "%Y-%m-%d %H:%M:%S UTC"
-    )
-    total_tokens = int(payload_data.get("i", 0)) + int(
-        payload_data.get("o", 0)
-    )
-    new_balance = max(0, row[1] - total_tokens)
+        from database import TrafficLogModel
+        log_entry = TrafficLogModel(
+            hw_id=hw_id,
+            payload_json=json.dumps(payload_data)
+        )
+        db.add(log_entry)
+        db.commit()
 
-    if IS_POSTGRES:
-      cursor.execute(
-          "UPDATE clients SET balance_tokens = %s WHERE hw_id = %s",
-          (new_balance, hw_id),
-      )
-      cursor.execute(
-          "INSERT INTO traffic_logs (hw_id, payload_json) VALUES (%s, %s)",
-          (hw_id, json.dumps(payload_data)),
-      )
-      conn.commit()
-    else:
-      cursor.execute(
-          "UPDATE clients SET balance_tokens = ? WHERE hw_id = ?",
-          (new_balance, hw_id),
-      )
-      cursor.execute(
-          "INSERT INTO traffic_logs (hw_id, payload_json) VALUES (?, ?)",
-          (hw_id, json.dumps(payload_data)),
-      )
-      conn.commit()
-  finally:
-    cursor.close()
-    conn.close()
-
-  return {"status": "logged", "remaining_balance": new_balance}
+    return {"status": "logged", "remaining_balance": new_balance}
 
 
-# UNIVERSAL OPENAI-COMPATIBLE ENDPOINT FOR INSTALLED AI PROGRAMS & APPS
 @app.post("/v1/chat/completions")
 async def openai_compatible_chat_completions(request: Request):
-  auth_header = request.headers.get("Authorization", "")
-  api_key = None
-  if auth_header.startswith("Bearer "):
-    api_key = auth_header.split(" ")[1]
+    auth_header = request.headers.get("Authorization", "")
+    api_key = auth_header.split(" ")[1] if auth_header.startswith("Bearer ") else None
+    hw_id_header = request.headers.get("X-HW-ID")
 
-  hw_id_header = request.headers.get("X-HW-ID")
+    with get_db() as db:
+        if api_key:
+            client_node = db.query(ClientModel).filter(ClientModel.api_key == api_key).first()
+        elif hw_id_header:
+            client_node = db.query(ClientModel).filter(ClientModel.hw_id == hw_id_header).first()
+        else:
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication required: Provide Bearer API Key or X-HW-ID header.",
+            )
 
-  conn = get_db_connection()
-  cursor = conn.cursor()
-  try:
-    if api_key:
-      if IS_POSTGRES:
-        cursor.execute(
-            "SELECT hw_id, status, balance_tokens FROM clients WHERE api_key ="
-            " %s",
-            (api_key,),
+        if not client_node:
+            raise HTTPException(status_code=401, detail="Invalid API Key or Hardware ID.")
+
+        if client_node.status != "APPROVED":
+            raise HTTPException(
+                status_code=402,
+                detail="Tenant node pending approval or denied in Enterprise Control Plane.",
+            )
+
+        hw_id = client_node.hw_id
+        balance_tokens = client_node.balance_tokens
+
+        body = await request.json()
+        messages = body.get("messages", [])
+        model = body.get("model", "gemini-2.5-flash")
+
+        prompt = messages[-1].get("content", "") if messages else ""
+        sanitized_prompt = sanitize_pii(prompt)
+
+        gemini_key = os.environ.get("GEMINI_API_KEY")
+        groq_key = os.environ.get("GROQ_API_KEY")
+
+        text_resp = "Simulated response"
+        input_tokens = max(10, len(sanitized_prompt.split()) * 2)
+        output_tokens = 50
+        provider_used = "Installed Local App (OpenAI SDK)"
+
+        import httpx
+        async with httpx.AsyncClient() as client:
+            if gemini_key and ("gemini" in model.lower() or not groq_key):
+                try:
+                    provider_used = "Google Gemini (Installed App)"
+                    gemini_contents = [{
+                        "role": "user" if m.get("role") == "user" else "model",
+                        "parts": [{"text": sanitize_pii(m.get("content", ""))}],
+                    } for m in messages]
+                    resp = await client.post(
+                        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}",
+                        headers={"Content-Type": "application/json"},
+                        json={"contents": gemini_contents},
+                        timeout=30.0,
+                    )
+                    if resp.status_code == 200:
+                        ai_data = resp.json()
+                        candidate = ai_data.get("candidates", [{}])[0]
+                        text_resp = (
+                            candidate.get("content", {})
+                            .get("parts", [{}])[0]
+                            .get("text", "No response")
+                        )
+                        usage = ai_data.get("usageMetadata", {})
+                        input_tokens = usage.get("promptTokenCount", input_tokens)
+                        output_tokens = usage.get("candidatesTokenCount", output_tokens)
+                except Exception:
+                    pass
+            elif groq_key:
+                try:
+                    provider_used = "Groq (Installed App)"
+                    resp = await client.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {groq_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": "llama-3.3-70b-versatile",
+                            "messages": [{
+                                "role": m.get("role"),
+                                "content": sanitize_pii(m.get("content", "")),
+                            } for m in messages],
+                        },
+                        timeout=30.0,
+                    )
+                    if resp.status_code == 200:
+                        ai_data = resp.json()
+                        text_resp = ai_data["choices"][0]["message"]["content"]
+                        usage = ai_data.get("usage", {})
+                        input_tokens = usage.get("prompt_tokens", input_tokens)
+                        output_tokens = usage.get("completion_tokens", output_tokens)
+                except Exception:
+                    pass
+
+        total_tokens = input_tokens + output_tokens
+        new_balance = max(0, balance_tokens - total_tokens)
+        client_node.balance_tokens = new_balance
+
+        from database import TrafficLogModel
+        log_entry = TrafficLogModel(
+            hw_id=hw_id,
+            payload_json=json.dumps({
+                "provider": provider_used,
+                "model": model,
+                "thinking_level": "Standard",
+                "i": input_tokens,
+                "o": output_tokens,
+                "query": sanitized_prompt[:100],
+                "timestamp_utc": datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%d %H:%M:%S UTC"
+                ),
+            })
         )
-      else:
-        cursor.execute(
-            "SELECT hw_id, status, balance_tokens FROM clients WHERE api_key ="
-            " ?",
-            (api_key,),
-        )
-    elif hw_id_header:
-      if IS_POSTGRES:
-        cursor.execute(
-            "SELECT hw_id, status, balance_tokens FROM clients WHERE hw_id = %s",
-            (hw_id_header,),
-        )
-      else:
-        cursor.execute(
-            "SELECT hw_id, status, balance_tokens FROM clients WHERE hw_id = ?",
-            (hw_id_header,),
-        )
-    else:
-      raise HTTPException(
-          status_code=401,
-          detail=(
-              "Authentication required: Provide Bearer API Key or X-HW-ID"
-              " header."
-          ),
-      )
+        db.add(log_entry)
+        db.commit()
 
-    row = cursor.fetchone()
-  finally:
-    cursor.close()
-    conn.close()
-
-  if not row:
-    raise HTTPException(status_code=401, detail="Invalid API Key or Hardware ID.")
-
-  hw_id, status_val, balance_tokens = row[0], row[1], row[2]
-  if status_val != "APPROVED":
-    raise HTTPException(
-        status_code=402,
-        detail=(
-            "Tenant node pending approval or denied in Enterprise Control"
-            " Plane."
-        ),
-    )
-
-  body = await request.json()
-  messages = body.get("messages", [])
-  model = body.get("model", "gemini-2.5-flash")
-
-  prompt = messages[-1].get("content", "") if messages else ""
-  sanitized_prompt = sanitize_pii(prompt)
-
-  gemini_key = os.environ.get("GEMINI_API_KEY")
-  groq_key = os.environ.get("GROQ_API_KEY")
-
-  text_resp = "Simulated response"
-  input_tokens = max(10, len(sanitized_prompt.split()) * 2)
-  output_tokens = 50
-  provider_used = "Installed Local App (OpenAI SDK)"
-
-  import httpx
-
-  async with httpx.AsyncClient() as client:
-    if gemini_key and ("gemini" in model.lower() or not groq_key):
-      try:
-        provider_used = "Google Gemini (Installed App)"
-        gemini_contents = [{
-            "role": "user" if m.get("role") == "user" else "model",
-            "parts": [{"text": sanitize_pii(m.get("content", ""))}],
-        } for m in messages]
-        resp = await client.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}",
-            headers={"Content-Type": "application/json"},
-            json={"contents": gemini_contents},
-            timeout=30.0,
-        )
-        if resp.status_code == 200:
-          ai_data = resp.json()
-          candidate = ai_data.get("candidates", [{}])[0]
-          text_resp = (
-              candidate.get("content", {})
-              .get("parts", [{}])[0]
-              .get("text", "No response")
-          )
-          usage = ai_data.get("usageMetadata", {})
-          input_tokens = usage.get("promptTokenCount", input_tokens)
-          output_tokens = usage.get("candidatesTokenCount", output_tokens)
-      except Exception:
-        pass
-    elif groq_key:
-      try:
-        provider_used = "Groq (Installed App)"
-        resp = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {groq_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "llama-3.3-70b-versatile",
-                "messages": [{
-                    "role": m.get("role"),
-                    "content": sanitize_pii(m.get("content", "")),
-                } for m in messages],
-            },
-            timeout=30.0,
-        )
-        if resp.status_code == 200:
-          ai_data = resp.json()
-          text_resp = ai_data["choices"][0]["message"]["content"]
-          usage = ai_data.get("usage", {})
-          input_tokens = usage.get("prompt_tokens", input_tokens)
-          output_tokens = usage.get("completion_tokens", output_tokens)
-      except Exception:
-        pass
-
-  total_tokens = input_tokens + output_tokens
-  new_balance = max(0, balance_tokens - total_tokens)
-
-  conn = get_db_connection()
-  cursor = conn.cursor()
-  try:
-    if IS_POSTGRES:
-      cursor.execute(
-          "UPDATE clients SET balance_tokens = %s WHERE hw_id = %s",
-          (new_balance, hw_id),
-      )
-      cursor.execute(
-          "INSERT INTO traffic_logs (hw_id, payload_json) VALUES (%s, %s)",
-          (
-              hw_id,
-              json.dumps({
-                  "provider": provider_used,
-                  "model": model,
-                  "thinking_level": "Standard",
-                  "i": input_tokens,
-                  "o": output_tokens,
-                  "query": sanitized_prompt[:100],
-                  "timestamp_utc": datetime.now(timezone.utc).strftime(
-                      "%Y-%m-%d %H:%M:%S UTC"
-                  ),
-              }),
-          ),
-      )
-      conn.commit()
-    else:
-      cursor.execute(
-          "UPDATE clients SET balance_tokens = ? WHERE hw_id = ?",
-          (new_balance, hw_id),
-      )
-      cursor.execute(
-          "INSERT INTO traffic_logs (hw_id, payload_json) VALUES (?, ?)",
-          (
-              hw_id,
-              json.dumps({
-                  "provider": provider_used,
-                  "model": model,
-                  "thinking_level": "Standard",
-                  "i": input_tokens,
-                  "o": output_tokens,
-                  "query": sanitized_prompt[:100],
-                  "timestamp_utc": datetime.now(timezone.utc).strftime(
-                      "%Y-%m-%d %H:%M:%S UTC"
-                  ),
-              }),
-          ),
-      )
-      conn.commit()
-  finally:
-    cursor.close()
-    conn.close()
-
-  return {
-      "id": f"chatcmpl-{int(time.time())}",
-      "object": "chat.completion",
-      "created": int(time.time()),
-      "model": model,
-      "choices": [{
-          "index": 0,
-          "message": {"role": "assistant", "content": text_resp},
-          "finish_reason": "stop",
-      }],
-      "usage": {
-          "prompt_tokens": input_tokens,
-          "completion_tokens": output_tokens,
-          "total_tokens": total_tokens,
-      },
-  }
+    return {
+        "id": f"chatcmpl-{int(time.time())}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": text_resp},
+            "finish_reason": "stop",
+        }],
+        "usage": {
+            "prompt_tokens": input_tokens,
+            "completion_tokens": output_tokens,
+            "total_tokens": total_tokens,
+        },
+    }
 
 
 @app.post("/api/proxy/v1/messages")
 async def proxy_messages(request: Request):
-  hw_id = request.headers.get("X-HW-ID")
-  if not hw_id:
-    raise HTTPException(
-        status_code=400, detail="Missing security hardware signature header"
-    )
-
-  conn = get_db_connection()
-  cursor = conn.cursor()
-  try:
-    if IS_POSTGRES:
-      cursor.execute("SELECT status FROM clients WHERE hw_id = %s", (hw_id,))
-    else:
-      cursor.execute("SELECT status FROM clients WHERE hw_id = ?", (hw_id,))
-    row = cursor.fetchone()
-  finally:
-    cursor.close()
-    conn.close()
-
-  if not row or row[0] != "APPROVED":
-    raise HTTPException(
-        status_code=402, detail="Gateway routing blocked: Tenant awaiting authorization"
-    )
-
-  body = await request.json()
-  messages = body.get("messages", [])
-  prompt = messages[-1].get("content", "Query") if messages else "Query"
-  sanitized_prompt = sanitize_pii(prompt)
-
-  provider = body.get("provider", "Gemini")
-  model_name = body.get("model", "Gemini 2.5 Flash")
-  thinking_level = body.get("thinking_level", "Standard")
-
-  gemini_key = os.environ.get("GEMINI_API_KEY")
-  groq_key = os.environ.get("GROQ_API_KEY")
-
-  import httpx
-
-  async with httpx.AsyncClient() as client:
-    if provider == "Gemini" and gemini_key:
-      try:
-        gemini_contents = [{
-            "role": "user" if m.get("role") == "user" else "model",
-            "parts": [{"text": sanitize_pii(m.get("content", ""))}],
-        } for m in messages]
-        resp = await client.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}",
-            headers={"Content-Type": "application/json"},
-            json={"contents": gemini_contents},
-            timeout=30.0,
+    hw_id = request.headers.get("X-HW-ID")
+    if not hw_id:
+        raise HTTPException(
+            status_code=400, detail="Missing security hardware signature header"
         )
-        if resp.status_code == 200:
-          ai_data = resp.json()
-          candidate = ai_data.get("candidates", [{}])[0]
-          text_resp = (
-              candidate.get("content", {})
-              .get("parts", [{}])[0]
-              .get("text", "No response")
-          )
-          usage = ai_data.get(
-              "usageMetadata",
-              {
-                  "promptTokenCount": len(sanitized_prompt) // 4 + 5,
-                  "candidatesTokenCount": 50,
-              },
-          )
-          return {
-              "id": f"gemini_{int(time.time())}",
-              "provider": "Google Gemini (Browser)",
-              "model": model_name,
-              "thinking_level": thinking_level,
-              "content": [{"type": "text", "text": text_resp}],
-              "usage": {
-                  "input_tokens": usage.get("promptTokenCount", 10),
-                  "output_tokens": usage.get("candidatesTokenCount", 30),
-              },
-              "timestamp_utc": datetime.now(timezone.utc).strftime(
-                  "%Y-%m-%d %H:%M:%S UTC"
-              ),
-          }
-      except Exception:
-        pass
 
-    if provider == "Groq" and groq_key:
-      try:
-        resp = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {groq_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "llama-3.3-70b-versatile",
-                "messages": [{
-                    "role": m.get("role"),
-                    "content": sanitize_pii(m.get("content", "")),
-                } for m in messages],
-            },
-            timeout=30.0,
-        )
-        if resp.status_code == 200:
-          ai_data = resp.json()
-          text_resp = ai_data["choices"][0]["message"]["content"]
-          usage = ai_data.get(
-              "usage", {"prompt_tokens": 15, "completion_tokens": 40}
-          )
-          return {
-              "id": f"groq_{int(time.time())}",
-              "provider": "Groq (Browser)",
-              "model": model_name,
-              "thinking_level": thinking_level,
-              "content": [{"type": "text", "text": text_resp}],
-              "usage": {
-                  "input_tokens": usage.get("prompt_tokens", 15),
-                  "output_tokens": usage.get("completion_tokens", 40),
-              },
-              "timestamp_utc": datetime.now(timezone.utc).strftime(
-                  "%Y-%m-%d %H:%M:%S UTC"
-              ),
-          }
-      except Exception:
-        pass
+    with get_db() as db:
+        client_node = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
+        if not client_node or client_node.status != "APPROVED":
+            raise HTTPException(
+                status_code=402, detail="Gateway routing blocked: Tenant awaiting authorization"
+            )
 
-  simulated_output = f"[{provider} | {model_name} | Cloud NIST Secure Routing] Processed: '{sanitized_prompt[:50]}...'"
-  return {
-      "id": f"proxy_{int(time.time())}",
-      "provider": f"{provider} (Browser)",
-      "model": model_name,
-      "thinking_level": thinking_level,
-      "content": [{"type": "text", "text": simulated_output}],
-      "usage": {
-          "input_tokens": max(10, len(sanitized_prompt.split()) * 2),
-          "output_tokens": 50,
-      },
-      "timestamp_utc": datetime.now(timezone.utc).strftime(
-          "%Y-%m-%d %H:%M:%S UTC"
-      ),
-  }
+    body = await request.json()
+    messages = body.get("messages", [])
+    prompt = messages[-1].get("content", "Query") if messages else "Query"
+    sanitized_prompt = sanitize_pii(prompt)
+
+    provider = body.get("provider", "Gemini")
+    model_name = body.get("model", "Gemini 2.5 Flash")
+    thinking_level = body.get("thinking_level", "Standard")
+
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+    groq_key = os.environ.get("GROQ_API_KEY")
+
+    import httpx
+    async with httpx.AsyncClient() as client:
+        if provider == "Gemini" and gemini_key:
+            try:
+                gemini_contents = [{
+                    "role": "user" if m.get("role") == "user" else "model",
+                    "parts": [{"text": sanitize_pii(m.get("content", ""))}],
+                } for m in messages]
+                resp = await client.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}",
+                    headers={"Content-Type": "application/json"},
+                    json={"contents": gemini_contents},
+                    timeout=30.0,
+                )
+                if resp.status_code == 200:
+                    ai_data = resp.json()
+                    candidate = ai_data.get("candidates", [{}])[0]
+                    text_resp = (
+                        candidate.get("content", {})
+                        .get("parts", [{}])[0]
+                        .get("text", "No response")
+                    )
+                    usage = ai_data.get(
+                        "usageMetadata",
+                        {
+                            "promptTokenCount": len(sanitized_prompt) // 4 + 5,
+                            "candidatesTokenCount": 50,
+                        },
+                    )
+                    return {
+                        "id": f"gemini_{int(time.time())}",
+                        "provider": "Google Gemini (Browser)",
+                        "model": model_name,
+                        "thinking_level": thinking_level,
+                        "content": [{"type": "text", "text": text_resp}],
+                        "usage": {
+                            "input_tokens": usage.get("promptTokenCount", 10),
+                            "output_tokens": usage.get("candidatesTokenCount", 30),
+                        },
+                        "timestamp_utc": datetime.now(timezone.utc).strftime(
+                            "%Y-%m-%d %H:%M:%S UTC"
+                        ),
+                    }
+            except Exception:
+                pass
+
+        if provider == "Groq" and groq_key:
+            try:
+                resp = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {groq_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "llama-3.3-70b-versatile",
+                        "messages": [{
+                            "role": m.get("role"),
+                            "content": sanitize_pii(m.get("content", "")),
+                        } for m in messages],
+                    },
+                    timeout=30.0,
+                )
+                if resp.status_code == 200:
+                    ai_data = resp.json()
+                    text_resp = ai_data["choices"][0]["message"]["content"]
+                    usage = ai_data.get(
+                        "usage", {"prompt_tokens": 15, "completion_tokens": 40}
+                    )
+                    return {
+                        "id": f"groq_{int(time.time())}",
+                        "provider": "Groq (Browser)",
+                        "model": model_name,
+                        "thinking_level": thinking_level,
+                        "content": [{"type": "text", "text": text_resp}],
+                        "usage": {
+                            "input_tokens": usage.get("prompt_tokens", 15),
+                            "output_tokens": usage.get("completion_tokens", 40),
+                        },
+                        "timestamp_utc": datetime.now(timezone.utc).strftime(
+                            "%Y-%m-%d %H:%M:%S UTC"
+                        ),
+                    }
+            except Exception:
+                pass
+
+    simulated_output = f"[{provider} | {model_name} | Cloud NIST Secure Routing] Processed: '{sanitized_prompt[:50]}...'"
+    return {
+        "id": f"proxy_{int(time.time())}",
+        "provider": f"{provider} (Browser)",
+        "model": model_name,
+        "thinking_level": thinking_level,
+        "content": [{"type": "text", "text": simulated_output}],
+        "usage": {
+            "input_tokens": max(10, len(sanitized_prompt.split()) * 2),
+            "output_tokens": 50,
+        },
+        "timestamp_utc": datetime.now(timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        ),
+    }
 
 
 @app.get("/api/dashboard-data")
 def dashboard_data():
-  conn = get_db_connection()
-  cursor = conn.cursor()
-  try:
-    cursor.execute(
-        "SELECT hw_id, status, subscription_tier, balance_tokens, created_at,"
-        " metadata, api_key FROM clients"
-    )
-    client_rows = cursor.fetchall()
-    cursor.execute(
-        "SELECT id, hw_id, payload_json, created_at FROM traffic_logs ORDER BY"
-        " id DESC LIMIT 200"
-    )
-    log_rows = cursor.fetchall()
-  finally:
-    cursor.close()
-    conn.close()
+    with get_db() as db:
+        client_rows = db.query(ClientModel).all()
+        from database import TrafficLogModel
+        log_rows = db.query(TrafficLogModel).order_by(TrafficLogModel.id.desc()).limit(200).all()
 
-  clients = [
-      {
-          **json.loads(r[5] or "{}"),
-          "hw_id": r[0],
-          "status": r[1],
-          "subscription_tier": r[2],
-          "balance_tokens": r[3],
-          "created_at": str(r[4]),
-          "api_key": r[6],
-      }
-      for r in client_rows
-  ]
-  logs = [{**json.loads(lr[2] or "{}"), "id": lr[0], "hw_id": lr[1]} for lr in log_rows]
-  return {"clients": clients, "logs": logs}
+    clients = [
+        {
+            **json.loads(c.metadata_json or "{}"),
+            "hw_id": c.hw_id,
+            "status": c.status,
+            "subscription_tier": c.subscription_tier,
+            "balance_tokens": c.balance_tokens,
+            "created_at": str(c.created_at),
+            "api_key": c.api_key,
+        }
+        for c in client_rows
+    ]
+    logs = [{**json.loads(l.payload_json or "{}"), "id": l.id, "hw_id": l.hw_id} for l in log_rows]
+    return {"clients": clients, "logs": logs}
 
 
 @app.post("/api/gdpr/erase-data")
 async def gdpr_erase_data(request: Request):
-  """GDPR Compliance: Right to be Forgotten"""
-  data = await request.json()
-  hw_id = data.get("hw_id")
-  if not hw_id:
-    raise HTTPException(
-        status_code=400, detail="Missing hardware identifier for erasure."
-    )
+    data = await request.json()
+    hw_id = data.get("hw_id")
+    if not hw_id:
+        raise HTTPException(
+            status_code=400, detail="Missing hardware identifier for erasure."
+        )
 
-  conn = get_db_connection()
-  cursor = conn.cursor()
-  try:
-    if IS_POSTGRES:
-      cursor.execute("DELETE FROM clients WHERE hw_id = %s", (hw_id,))
-      cursor.execute("DELETE FROM traffic_logs WHERE hw_id = %s", (hw_id,))
-      conn.commit()
-    else:
-      cursor.execute("DELETE FROM clients WHERE hw_id = ?", (hw_id,))
-      cursor.execute("DELETE FROM traffic_logs WHERE hw_id = ?", (hw_id,))
-      conn.commit()
-    logger.info(
-        f"GDPR Article 17 Erasure executed successfully for tenant: {hw_id}"
-    )
-  finally:
-    cursor.close()
-    conn.close()
-  return {
-      "status": "success",
-      "message": (
-          f"Tenant {hw_id} and audit logs permanently scrubbed under GDPR"
-          " Article 17."
-      ),
-  }
+    with get_db() as db:
+        db.query(ClientModel).filter(ClientModel.hw_id == hw_id).delete()
+        from database import TrafficLogModel
+        db.query(TrafficLogModel).filter(TrafficLogModel.hw_id == hw_id).delete()
+        db.commit()
+        logger.info(f"GDPR Article 17 Erasure executed successfully for tenant: {hw_id}")
+
+    return {
+        "status": "success",
+        "message": f"Tenant {hw_id} and audit logs permanently scrubbed under GDPR Article 17.",
+    }
 
 
 @app.post("/api/client-action")
 async def client_action(request: Request):
-  data = await request.json()
-  hw_id = data.get("hw_id")
-  action = data.get("action")
-  tier = data.get("tier")
-  amount = int(data.get("amount", 10000))
+    data = await request.json()
+    hw_id = data.get("hw_id")
+    action = data.get("action")
+    tier = data.get("tier")
+    amount = int(data.get("amount", 10000))
 
-  conn = get_db_connection()
-  cursor = conn.cursor()
-  try:
-    if IS_POSTGRES:
-      if action == "approve":
-        cursor.execute(
-            "UPDATE clients SET status = 'APPROVED' WHERE hw_id = %s", (hw_id,)
-        )
-      elif action == "deny":
-        cursor.execute(
-            "UPDATE clients SET status = 'DENIED' WHERE hw_id = %s", (hw_id,)
-        )
-      elif action == "tier":
-        cursor.execute(
-            "UPDATE clients SET subscription_tier = %s WHERE hw_id = %s",
-            (tier, hw_id),
-        )
-      elif action == "topup":
-        cursor.execute(
-            "UPDATE clients SET balance_tokens = balance_tokens + %s WHERE"
-            " hw_id = %s",
-            (amount, hw_id),
-        )
-      elif action == "delete":
-        cursor.execute("DELETE FROM clients WHERE hw_id = %s", (hw_id,))
-        cursor.execute("DELETE FROM traffic_logs WHERE hw_id = %s", (hw_id,))
-      conn.commit()
-    else:
-      if action == "approve":
-        cursor.execute(
-            "UPDATE clients SET status = 'APPROVED' WHERE hw_id = ?", (hw_id,)
-        )
-      elif action == "deny":
-        cursor.execute(
-            "UPDATE clients SET status = 'DENIED' WHERE hw_id = ?", (hw_id,)
-        )
-      elif action == "tier":
-        cursor.execute(
-            "UPDATE clients SET subscription_tier = ? WHERE hw_id = ?",
-            (tier, hw_id),
-        )
-      elif action == "topup":
-        cursor.execute(
-            "UPDATE clients SET balance_tokens = balance_tokens + ? WHERE"
-            " hw_id = ?",
-            (amount, hw_id),
-        )
-      elif action == "delete":
-        cursor.execute("DELETE FROM clients WHERE hw_id = ?", (hw_id,))
-        cursor.execute("DELETE FROM traffic_logs WHERE hw_id = ?", (hw_id,))
-      conn.commit()
-  finally:
-    cursor.close()
-    conn.close()
-  return {"status": "success"}
+    with get_db() as db:
+        client_node = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
+        if client_node:
+            if action == "approve":
+                client_node.status = "APPROVED"
+            elif action == "deny":
+                client_node.status = "DENIED"
+            elif action == "tier":
+                client_node.subscription_tier = tier
+            elif action == "topup":
+                client_node.balance_tokens += amount
+            elif action == "delete":
+                db.delete(client_node)
+                from database import TrafficLogModel
+                db.query(TrafficLogModel).filter(TrafficLogModel.hw_id == hw_id).delete()
+            db.commit()
+
+    return {"status": "success"}
 
 
 @app.get("/api/export-audit-report")
 def export_audit_report():
-  conn = get_db_connection()
-  cursor = conn.cursor()
-  try:
-    cursor.execute(
-        "SELECT hw_id, payload_json, created_at FROM traffic_logs ORDER BY"
-        " created_at DESC"
-    )
-    rows = cursor.fetchall()
-  finally:
-    cursor.close()
-    conn.close()
+    with get_db() as db:
+        from database import TrafficLogModel
+        rows = db.query(TrafficLogModel).order_by(TrafficLogModel.created_at.desc()).all()
 
-  output = io.StringIO()
-  output.write(
-      "HardwareID,Provider,Model,ThinkingLevel,InputTokens,OutputTokens,TimestampUTC\n"
-  )
-  for r in rows:
-    p = json.loads(r[1] or "{}")
+    output = io.StringIO()
     output.write(
-        f'"{r[0]}","{p.get("provider","N/A")}","{p.get("model","N/A")}","{p.get("thinking_level","Standard")}",{p.get("i",0)},{p.get("o",0)},"{p.get("timestamp_utc","N/A")}"\n'
+        "HardwareID,Provider,Model,ThinkingLevel,InputTokens,OutputTokens,TimestampUTC\n"
     )
+    for r in rows:
+        p = json.loads(r.payload_json or "{}")
+        output.write(
+            f'"{r.hw_id}","{p.get("provider","N/A")}","{p.get("model","N/A")}","{p.get("thinking_level","Standard")}",{p.get("i",0)},{p.get("o",0)},"{p.get("timestamp_utc","N/A")}"\n'
+        )
 
-  response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
-  response.headers["Content-Disposition"] = (
-      "attachment; filename=cloud_nist_audit_report.csv"
-  )
-  return response
+    response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
+    response.headers["Content-Disposition"] = (
+        "attachment; filename=cloud_nist_audit_report.csv"
+    )
+    return response
 
 
-# EMBEDDED ADMIN CONTROL PLANE DASHBOARD HTML
+# DASHBOARD & AGENT HTML TEMPLATES (Embedded)
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1141,7 +825,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </body>
 </html>"""
 
-# EMBEDDED TENANT CHAT PLAYGROUND & INSTALLED APP CONNECTION GUIDE HTML
 WEB_AGENT_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1166,13 +849,11 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             <div>GDPR: <span class="text-purple-400 font-bold">Protected</span></div>
         </div>
 
-        <!-- TAB SELECTOR -->
         <div class="flex gap-2 mb-3 border-b border-gray-800 pb-2 text-xs font-mono">
             <button onclick="switchTab('browser')" id="btn-tab-browser" class="px-3 py-1 bg-blue-600 text-white rounded font-medium">🌐 Browser Playground</button>
             <button onclick="switchTab('installed')" id="btn-tab-installed" class="px-3 py-1 bg-gray-800 text-gray-400 rounded hover:text-white font-medium">💻 Connect Installed AI App / Python</button>
         </div>
 
-        <!-- BROWSER PLAYGROUND VIEW -->
         <div id="tab-browser" class="flex-1 flex flex-col space-y-3">
             <div class="grid grid-cols-3 gap-2">
                 <div>
@@ -1208,7 +889,6 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             </div>
         </div>
 
-        <!-- INSTALLED AI APP / PYTHON SDK CONFIG VIEW -->
         <div id="tab-installed" class="flex-1 flex flex-col space-y-3 hidden font-mono text-xs">
             <div class="p-3 bg-gray-950 rounded-lg border border-gray-800 space-y-2">
                 <div class="text-cyan-400 font-bold">🚀 Connect Any Installed Program or Python App</div>
@@ -1404,17 +1084,17 @@ print(response.choices[0].message.content)</pre>
 </body>
 </html>"""
 
+
 @app.get("/", response_class=HTMLResponse)
 def serve_dashboard():
-  return DASHBOARD_HTML
+    return DASHBOARD_HTML
 
 
 @app.get("/agent", response_class=HTMLResponse)
 def serve_agent():
-  return WEB_AGENT_HTML
+    return WEB_AGENT_HTML
 
 
 if __name__ == "__main__":
-  import uvicorn
-
-  uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
