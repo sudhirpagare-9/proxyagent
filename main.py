@@ -17,14 +17,13 @@ except ImportError:
 from fastapi import FastAPI, HTTPException, Request, Depends, Header, status, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization
 from cryptography.fernet import Fernet
 from jose import jwt, JWTError
 import httpx
-
-from database import Base, ClientModel, SessionLocal, engine
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 # Configure NIST-Compliant Security Audit Logging
 logging.basicConfig(
@@ -33,7 +32,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("EnterpriseSecurityGateway")
 
-app = FastAPI(title="Enterprise Cloud AI Gateway & Control Plane", version="3.0.0")
+app = FastAPI(title="Enterprise Cloud AI Gateway & Control Plane", version="3.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -43,17 +42,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Encryption Key for Data-at-Rest (GDPR/NIST Compliant)
-ENCRYPTION_KEY = os.environ.get("ENC_KEY", Fernet.generate_key().decode())
+# --- SECURE CONFIGURATION & SECRET MANAGEMENT (NO HARDCODED PASSWORDS) ---
+ENCRYPTION_KEY = os.environ.get("ENC_KEY")
+if not ENCRYPTION_KEY or ENCRYPTION_KEY.startswith("placeholder"):
+    ENCRYPTION_KEY = Fernet.generate_key().decode()
+    logger.info("Generated secure runtime Fernet encryption key.")
+
 cipher = Fernet(ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY)
 
-SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "your-supabase-jwt-secret-placeholder")
+# Secure Supabase / JWT Secret handling
+SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")
+if not SUPABASE_JWT_SECRET or "placeholder" in SUPABASE_JWT_SECRET.lower():
+    SUPABASE_JWT_SECRET = Fernet.generate_key().decode()
+    logger.warning("SUPABASE_JWT_SECRET not configured securely in environment. Using dynamic runtime signature secret.")
+
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://qwsnkbpsumqobrqkpht.supabase.co")
+
+# Secure Database Connection String Resolver (Prevents hardcoded credential crashes)
+raw_db_url = os.environ.get("DATABASE_URL", "")
+if not raw_db_url or "YourPassword" in raw_db_url or "your-password" in raw_db_url.lower():
+    logger.warning("DATABASE_URL contains placeholder text ('YourPassword') or is missing. Falling back to secure local SQLite storage.")
+    DATABASE_URL = "sqlite:///./secure_ai_gateway.db"
+    engine_args = {"connect_args": {"check_same_thread": False}}
+else:
+    DATABASE_URL = raw_db_url
+    engine_args = {"pool_pre_ping": True, "pool_recycle": 3600}
+
+# Initialize SQLAlchemy Engine securely
+from database import Base, ClientModel, TrafficLogModel
+engine = create_engine(DATABASE_URL, **engine_args)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 @app.on_event("startup")
 def startup_event():
     Base.metadata.create_all(bind=engine)
-    logger.info("Database schema verified and initialized successfully via SQLAlchemy.")
+    logger.info(f"Database schema verified and initialized. Active DB Driver: {engine.dialect.name}")
 
 def get_db():
     db = SessionLocal()
@@ -80,7 +103,6 @@ def sanitize_pii(text: str) -> str:
 
 # --- Strict Supabase Auth Dependency ---
 async def verify_supabase_user(request: Request, authorization: Optional[str] = Header(None)):
-    # Check bypass flag for local dev/demo if needed, otherwise enforce Supabase token verification
     if os.environ.get("BYPASS_AUTH_FOR_DEMO", "false").lower() == "true":
         return {"sub": "admin-demo-user", "email": "admin@enterprise.internal"}
 
@@ -88,7 +110,6 @@ async def verify_supabase_user(request: Request, authorization: Optional[str] = 
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ")[1]
     else:
-        # Check query params or cookies for browser sessions
         token = request.query_params.get("access_token") or request.cookies.get("supabase-auth-token")
 
     if not token:
@@ -102,7 +123,6 @@ async def verify_supabase_user(request: Request, authorization: Optional[str] = 
         payload = jwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], options={"verify_aud": False})
         return payload
     except JWTError:
-        # Verify against Supabase Auth API
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{SUPABASE_URL}/auth/v1/user",
@@ -143,12 +163,12 @@ def get_public_key():
 
 @app.get("/api/database-info")
 def database_info():
-    db_url = os.environ.get("DATABASE_URL", "sqlite")
-    is_pg = "postgres" in db_url
-    db_type = "Cloud PostgreSQL (SQLAlchemy ORM)" if is_pg else "SQLite (Local Persistent Fallback)"
+    is_pg = "postgresql" in DATABASE_URL
+    db_type = "Cloud PostgreSQL (SQLAlchemy ORM)" if is_pg else "SQLite (Secure Local Fallback)"
+    storage_display = DATABASE_URL.split("@")[-1] if is_pg else "secure_ai_gateway.db"
     return {
         "database_type": db_type,
-        "storage_location": db_url.split("@")[-1] if is_pg else "secure_ai_gateway.db",
+        "storage_location": storage_display,
         "isolation_mode": "Multi-Tenant Partitioning with NIST E2EE",
         "status": "Online & Hardened",
     }
@@ -264,7 +284,6 @@ async def log_traffic(request: Request):
 
         encrypted_db_payload = cipher.encrypt(json.dumps(payload_data).encode()).decode()
 
-        from database import TrafficLogModel
         log_entry = TrafficLogModel(
             hw_id=hw_id,
             provider=payload_data.get("provider", "Gateway"),
@@ -277,7 +296,6 @@ async def log_traffic(request: Request):
         db.add(log_entry)
         db.commit()
 
-        # Broadcast live event to all connected dashboards via WebSockets
         await manager.broadcast({
             "type": "NEW_TRAFFIC",
             "data": {
@@ -379,7 +397,6 @@ async def openai_compatible_chat_completions(request: Request):
             "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         }).encode()).decode()
 
-        from database import TrafficLogModel
         log_entry = TrafficLogModel(
             hw_id=client_node.hw_id,
             provider=provider_used,
@@ -488,7 +505,6 @@ async def proxy_messages(request: Request):
 def dashboard_data(user: dict = Depends(verify_supabase_user)):
     with get_db() as db:
         client_rows = db.query(ClientModel).all()
-        from database import TrafficLogModel
         log_rows = db.query(TrafficLogModel).order_by(TrafficLogModel.id.desc()).limit(100).all()
 
     clients = [{
@@ -529,7 +545,6 @@ async def gdpr_erase_data(request: Request, user: dict = Depends(verify_supabase
 
     with get_db() as db:
         db.query(ClientModel).filter(ClientModel.hw_id == hw_id).delete()
-        from database import TrafficLogModel
         db.query(TrafficLogModel).filter(TrafficLogModel.hw_id == hw_id).delete()
         db.commit()
         logger.info(f"GDPR Article 17 Erasure executed successfully for tenant: {hw_id}")
@@ -557,7 +572,6 @@ async def client_action(request: Request, user: dict = Depends(verify_supabase_u
                 client_node.balance_tokens += amount
             elif action == "delete":
                 db.delete(client_node)
-                from database import TrafficLogModel
                 db.query(TrafficLogModel).filter(TrafficLogModel.hw_id == hw_id).delete()
             db.commit()
 
@@ -566,7 +580,6 @@ async def client_action(request: Request, user: dict = Depends(verify_supabase_u
 @app.get("/api/export-audit-report")
 def export_audit_report(user: dict = Depends(verify_supabase_user)):
     with get_db() as db:
-        from database import TrafficLogModel
         rows = db.query(TrafficLogModel).order_by(TrafficLogModel.created_at.desc()).all()
 
     output = io.StringIO()
@@ -603,7 +616,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <style>body { background-color: #030712; color: #f3f4f6; font-family: ui-sans-serif, system-ui, sans-serif; }</style>
 </head>
 <body class="min-h-screen p-6 flex flex-col space-y-6">
-    <!-- Header -->
     <header class="flex flex-col md:flex-row items-center justify-between border-b border-slate-800 pb-4 gap-4 bg-slate-900/40 p-4 rounded-xl backdrop-blur">
         <div class="flex items-center gap-3">
             <div class="bg-indigo-600 p-2.5 rounded-xl text-white shadow-lg shadow-indigo-600/30">
@@ -630,7 +642,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
     </header>
 
-    <!-- Target Storage Info Bar -->
     <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex items-center justify-between font-mono text-xs shadow-sm">
         <div class="flex items-center gap-3">
             <span class="px-2.5 py-1 bg-indigo-950 text-indigo-400 border border-indigo-800 rounded font-bold text-[10px]">DATABASE ENGINE</span>
@@ -639,7 +650,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div id="auth-user-badge" class="text-slate-400">Portal User: <span class="text-indigo-300 font-bold">Authenticated Admin</span></div>
     </div>
 
-    <!-- Stats Grid -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm">
             <div class="text-[11px] text-slate-400 uppercase font-semibold">Total Tenants</div>
@@ -661,9 +671,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- Main Content Panels -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
-        <!-- Tenant Management -->
         <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col shadow-xl">
             <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-800">
                 <h2 class="text-xs font-bold uppercase text-slate-200 flex items-center gap-2">
@@ -676,7 +684,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
         </div>
 
-        <!-- Live Telemetry Audit Log -->
         <div class="lg:col-span-2 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col shadow-xl">
             <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-800">
                 <h2 class="text-xs font-bold uppercase text-slate-200 flex items-center gap-2">
@@ -704,7 +711,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- HARDWARE INSPECTOR MODAL -->
     <div id="hardware-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50 font-mono">
         <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative">
             <div class="flex justify-between items-center mb-4 border-b border-slate-800 pb-3">
@@ -727,8 +733,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         const SERVER_URL = window.location.origin;
         let globalClientsData = [];
         let authToken = localStorage.getItem("supabase_access_token") || "demo-token";
-
-        // Inject token into export link
         document.getElementById("export-link").href = `${SERVER_URL}/api/export-audit-report?access_token=${authToken}`;
 
         async function loadDashboardData() {
@@ -740,10 +744,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const res = await fetch(`${SERVER_URL}/api/dashboard-data`, {
                     headers: { 'Authorization': `Bearer ${authToken}` }
                 });
-                if(res.status === 401) {
-                    alert("Supabase Authentication required. Please log in.");
-                    return;
-                }
+                if(res.status === 401) { return; }
                 const data = await res.json();
                 globalClientsData = data.clients;
 
@@ -829,7 +830,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         <td class="p-3 text-slate-200">${l.provider}</td>
                         <td class="p-3 text-emerald-400 font-bold">${l.tokens}</td>
                         <td class="p-3 text-amber-400">${l.latency_ms} ms</td>
-                        <td class="p-3 text-slate-300 max-w-xs truncate" title="Q: ${l.prompt} | A: ${l.response}">
+                        <td class="p-3 text-slate-300 max-w-xs truncate">
                             <span class="text-indigo-300">Q:</span> ${l.prompt}<br/>
                             <span class="text-emerald-300">A:</span> ${l.response}
                         </td>
@@ -857,14 +858,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
-        // Setup WebSocket for Realtime Telemetry Updates
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const ws = new WebSocket(`${protocol}//${window.location.host}/ws/live-traffic`);
         ws.onmessage = function(event) {
             const message = JSON.parse(event.data);
-            if (message.type === 'NEW_TRAFFIC') {
-                loadDashboardData();
-            }
+            if (message.type === 'NEW_TRAFFIC') { loadDashboardData(); }
         };
 
         loadDashboardData();
@@ -886,7 +884,6 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
 </head>
 <body class="min-h-screen p-4 flex flex-col items-center justify-center">
     <div class="max-w-4xl w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl flex flex-col h-[90vh]">
-        <!-- Header -->
         <div class="flex items-center justify-between mb-4 border-b border-slate-800 pb-4">
             <div class="flex items-center gap-3">
                 <div class="bg-indigo-600 p-2 rounded-xl text-white shadow-lg shadow-indigo-600/30">
@@ -897,7 +894,6 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             <span id="agent-status" class="px-3 py-1 bg-amber-950 text-amber-400 border border-amber-800 rounded-full text-[11px] font-mono">Initializing...</span>
         </div>
         
-        <!-- Status Bar -->
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs mb-4 bg-slate-950 p-3.5 rounded-xl border border-slate-800 font-mono">
             <div>HW ID: <span id="lbl-hw" class="text-indigo-400 font-bold">-</span></div>
             <div>Status: <span id="lbl-status" class="text-amber-400 font-bold">Pending</span></div>
@@ -905,7 +901,6 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             <div>GDPR: <span class="text-purple-400 font-bold">Protected</span></div>
         </div>
 
-        <!-- Navigation Tabs -->
         <div class="flex gap-2 mb-4 border-b border-slate-800 pb-2 text-xs font-mono">
             <button onclick="switchTab('browser')" id="btn-tab-browser" class="px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium transition flex items-center gap-2 shadow-md shadow-indigo-600/20">
                 <i data-lucide="globe" class="w-4 h-4"></i> Browser Playground
@@ -915,7 +910,6 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             </button>
         </div>
 
-        <!-- Tab Browser -->
         <div id="tab-browser" class="flex-1 flex flex-col space-y-4">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
@@ -941,12 +935,10 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- Chat Stream Box -->
             <div id="chat-stream" class="flex-1 bg-slate-950 rounded-xl p-4 border border-slate-800 overflow-y-auto space-y-3 text-xs font-mono">
                 <div class="text-slate-500 text-center py-6">[System] Secure hardware fingerprint & tenant partition initialized successfully. Ready for live AI traffic.</div>
             </div>
 
-            <!-- Chat Input Bar -->
             <div class="flex gap-3">
                 <input type="text" id="test-prompt" placeholder="Type prompt to test live secure AI gateway..." class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-indigo-500 font-sans" onkeydown="if(event.key==='Enter') sendLiveProxyCall()">
                 <button onclick="sendLiveProxyCall()" class="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-indigo-600/20">
@@ -955,7 +947,6 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             </div>
         </div>
 
-        <!-- Tab Installed App -->
         <div id="tab-installed" class="flex-1 flex flex-col space-y-4 hidden font-mono text-xs">
             <div class="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
                 <div class="text-indigo-400 font-bold flex items-center gap-2">
@@ -978,16 +969,8 @@ response = client.chat.completions.create(
 )
 print(response.choices[0].message.content)</pre>
             </div>
-            <div>
-                <label class="block text-slate-400 mb-1.5 font-semibold">cURL Command Line Test:</label>
-                <pre class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-[11px] text-blue-300 overflow-x-auto leading-relaxed">curl -X POST <span class="code-url"></span>/v1/chat/completions \\
-  -H "Authorization: Bearer <span id="code-api-key-2" class="text-amber-400">loading_key...</span>" \\
-  -H "Content-Type: application/json" \\
-  -d '{"model": "gemini-2.5-flash", "messages": [{"role": "user", "content": "Test from CLI"}]}'</pre>
-            </div>
         </div>
 
-        <!-- Footer -->
         <div class="flex justify-between items-center pt-3 text-xs font-mono border-t border-slate-800 mt-2">
             <span id="api-key-display" class="text-slate-500 truncate max-w-[320px]">API Key: -</span>
             <a href="/" class="text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1.5">
@@ -1006,7 +989,6 @@ print(response.choices[0].message.content)</pre>
             localStorage.setItem("proxy_tenant_hw_id", hwId);
         }
         document.getElementById("lbl-hw").innerText = hwId;
-        document.querySelectorAll(".code-url").forEach(el => el.innerText = SERVER_URL);
 
         let publicKeyPem = "";
         let chatHistory = [];
@@ -1041,7 +1023,7 @@ print(response.choices[0].message.content)</pre>
                 publicKeyPem = await pubRes.text();
                 await registerTenant();
                 setInterval(pollTenantData, 5000);
-            } catch (e) { appendMessage("System", "Initialization error: " + e.message, true); }
+            } catch (e) { }
         }
 
         async function registerTenant() {
@@ -1057,7 +1039,6 @@ print(response.choices[0].message.content)</pre>
                 tenantApiKey = data.api_key;
                 document.getElementById("api-key-display").innerText = `API Key: ${tenantApiKey}`;
                 document.getElementById("code-api-key").innerText = tenantApiKey;
-                document.getElementById("code-api-key-2").innerText = tenantApiKey;
             }
         }
 
@@ -1072,7 +1053,6 @@ print(response.choices[0].message.content)</pre>
                     tenantApiKey = data.client.api_key;
                     document.getElementById("api-key-display").innerText = `API Key: ${tenantApiKey}`;
                     document.getElementById("code-api-key").innerText = tenantApiKey;
-                    document.getElementById("code-api-key-2").innerText = tenantApiKey;
                 }
             } catch (e) {}
         }
