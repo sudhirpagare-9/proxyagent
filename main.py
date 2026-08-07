@@ -58,15 +58,25 @@ if not SUPABASE_JWT_SECRET or "placeholder" in SUPABASE_JWT_SECRET.lower():
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://qwsnkbpsumqobrqkpht.supabase.co")
 
-# Secure Database Connection String Resolver (Prevents hardcoded credential crashes)
+# Secure Database Connection String Resolver (Normalized & unified with database.py)
 raw_db_url = os.environ.get("DATABASE_URL", "")
+if raw_db_url.startswith("postgres://"):
+    raw_db_url = raw_db_url.replace("postgres://", "postgresql://", 1)
+
 if not raw_db_url or "YourPassword" in raw_db_url or "your-password" in raw_db_url.lower():
     logger.warning("DATABASE_URL contains placeholder text ('YourPassword') or is missing. Falling back to secure local SQLite storage.")
-    DATABASE_URL = "sqlite:///./secure_ai_gateway.db"
+    DATABASE_URL = "sqlite:////data/secure_ai_gateway.db"
+    os.makedirs("/data", exist_ok=True)
     engine_args = {"connect_args": {"check_same_thread": False}}
 else:
     DATABASE_URL = raw_db_url
-    engine_args = {"pool_pre_ping": True, "pool_recycle": 3600}
+    if "sqlite" in DATABASE_URL:
+        engine_args = {"connect_args": {"check_same_thread": False}}
+    else:
+        if "sslmode" not in DATABASE_URL:
+            separator = "&" if "?" in DATABASE_URL else "?"
+            DATABASE_URL = f"{DATABASE_URL}{separator}sslmode=require"
+        engine_args = {"pool_pre_ping": True, "pool_size": 10, "max_overflow": 20}
 
 # Initialize SQLAlchemy Engine securely
 from database import Base, ClientModel, TrafficLogModel
