@@ -1,13 +1,12 @@
-import base64
+import os
 import io
 import json
 import logging
-import os
 import re
 import time
-from collections import defaultdict
-from contextlib import contextmanager
+import base64
 from datetime import datetime, timezone
+from typing import Optional
 
 try:
     from dotenv import load_dotenv
@@ -15,17 +14,15 @@ try:
 except ImportError:
     pass
 
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends, Header, status, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import (
-    HTMLResponse,
-    JSONResponse,
-    PlainTextResponse,
-    StreamingResponse,
-)
 from starlette.middleware.base import BaseHTTPMiddleware
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization
+from cryptography.fernet import Fernet
+from jose import jwt, JWTError
+import httpx
 
 from database import Base, ClientModel, SessionLocal, engine
 
@@ -36,23 +33,34 @@ logging.basicConfig(
 )
 logger = logging.getLogger("EnterpriseSecurityGateway")
 
-app = FastAPI(title="Secure Cloud Multi-Tenant AI Proxy - Enterprise Edition")
+app = FastAPI(title="Enterprise Cloud AI Gateway & Control Plane", version="3.0.0")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Encryption Key for Data-at-Rest (GDPR/NIST Compliant)
+ENCRYPTION_KEY = os.environ.get("ENC_KEY", Fernet.generate_key().decode())
+cipher = Fernet(ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY)
+
+SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "your-supabase-jwt-secret-placeholder")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://qwsnkbpsumqobrqkpht.supabase.co")
 
 @app.on_event("startup")
 def startup_event():
     Base.metadata.create_all(bind=engine)
     logger.info("Database schema verified and initialized successfully via SQLAlchemy.")
 
-
-@contextmanager
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
-
 
 # Generate RSA-2048 Keys for End-to-End Encryption (E2EE)
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -62,7 +70,6 @@ public_pem = public_key.public_bytes(
     format=serialization.PublicFormat.SubjectPublicKeyInfo,
 ).decode("utf-8")
 
-
 def sanitize_pii(text: str) -> str:
     if not isinstance(text, str):
         return text
@@ -71,72 +78,80 @@ def sanitize_pii(text: str) -> str:
     text = re.sub(r"sk_live_\w+|sk_test_\w+|AIzaSy\w+", "[REDACTED_SECRET]", text)
     return text
 
+# --- Strict Supabase Auth Dependency ---
+async def verify_supabase_user(request: Request, authorization: Optional[str] = Header(None)):
+    # Check bypass flag for local dev/demo if needed, otherwise enforce Supabase token verification
+    if os.environ.get("BYPASS_AUTH_FOR_DEMO", "false").lower() == "true":
+        return {"sub": "admin-demo-user", "email": "admin@enterprise.internal"}
 
-class HardenedSecurityMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, rate_limit: int = 300):
-        super().__init__(app)
-        self.rate_limit = rate_limit
-        self.ip_records = defaultdict(list)
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+    else:
+        # Check query params or cookies for browser sessions
+        token = request.query_params.get("access_token") or request.cookies.get("supabase-auth-token")
 
-    async def dispatch(self, request: Request, call_next):
-        forwarded = request.headers.get("x-forwarded-for")
-        client_ip = (
-            forwarded.split(",")[0].strip()
-            if forwarded
-            else (request.client.host if request.client else "0.0.0.0")
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required: Supabase session token missing.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-
-        now = time.time()
-        self.ip_records[client_ip] = [
-            t for t in self.ip_records[client_ip] if now - t < 60
-        ]
-        if len(self.ip_records[client_ip]) >= self.rate_limit:
-            return JSONResponse(
-                status_code=429,
-                content={"error": "Security Block: Rate limit exceeded."},
+    
+    try:
+        payload = jwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], options={"verify_aud": False})
+        return payload
+    except JWTError:
+        # Verify against Supabase Auth API
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{SUPABASE_URL}/auth/v1/user",
+                headers={"Authorization": f"Bearer {token}", "apikey": os.environ.get("SUPABASE_ANON_KEY", "")}
             )
-        self.ip_records[client_ip].append(now)
-
-        response = await call_next(request)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Strict-Transport-Security"] = (
-            "max-age=31536000; includeSubDomains"
+            if resp.status_code == 200:
+                return resp.json()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired Supabase authentication credentials."
         )
-        return response
 
+# --- Real-Time WebSocket Connection Manager ---
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
 
-app.add_middleware(HardenedSecurityMiddleware, rate_limit=350)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
 
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except:
+                pass
+
+manager = ConnectionManager()
 
 @app.get("/public-key", response_class=PlainTextResponse)
 def get_public_key():
     return public_pem
 
-
 @app.get("/api/database-info")
 def database_info():
     db_url = os.environ.get("DATABASE_URL", "sqlite")
     is_pg = "postgres" in db_url
-    db_type = (
-        "Cloud PostgreSQL (SQLAlchemy ORM)"
-        if is_pg
-        else "SQLite (Local Persistent WAL Fallback)"
-    )
+    db_type = "Cloud PostgreSQL (SQLAlchemy ORM)" if is_pg else "SQLite (Local Persistent Fallback)"
     return {
         "database_type": db_type,
-        "storage_location": db_url.split("@")[-1] if is_pg else "proxy_security_enterprise.db",
-        "isolation_mode": "Multi-Tenant Partitioning with NIST End-to-End Encryption",
+        "storage_location": db_url.split("@")[-1] if is_pg else "secure_ai_gateway.db",
+        "isolation_mode": "Multi-Tenant Partitioning with NIST E2EE",
         "status": "Online & Hardened",
     }
-
 
 @app.post("/register")
 async def register_client(request: Request):
@@ -144,32 +159,17 @@ async def register_client(request: Request):
     hw_id = data.get("hw_id")
 
     if not hw_id or not re.match(r"^[A-Z0-9\-]{8,64}$", hw_id):
-        raise HTTPException(
-            status_code=400,
-            detail="Exploit Prevention: Invalid hardware identifier format.",
-        )
+        raise HTTPException(status_code=400, detail="Invalid hardware identifier format.")
 
     api_key = data.get("api_key") or f"sk_tenant_{os.urandom(16).hex()}"
     forwarded = request.headers.get("x-forwarded-for")
-    real_ip = (
-        forwarded.split(",")[0].strip()
-        if forwarded
-        else (request.client.host if request.client else "127.0.0.1")
-    )
+    real_ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "127.0.0.1")
 
-    geo_info = {
-        "country": "India",
-        "city": "Chandrapur",
-        "region": "Maharashtra",
-        "isp": "Cloud Enterprise Node",
-    }
+    geo_info = {"country": "India", "city": "Chandrapur", "region": "Maharashtra", "isp": "Cloud Node"}
     try:
         if real_ip not in ["127.0.0.1", "localhost", "0.0.0.0"]:
-            import httpx
             async with httpx.AsyncClient() as client:
-                geo_resp = await client.get(
-                    f"https://ipapi.co/{real_ip}/json/", timeout=2.5
-                )
+                geo_resp = await client.get(f"https://ipapi.co/{real_ip}/json/", timeout=2.0)
                 if geo_resp.status_code == 200:
                     g_data = geo_resp.json()
                     geo_info = {
@@ -183,9 +183,7 @@ async def register_client(request: Request):
 
     data["ip_address"] = real_ip
     data["geo_location"] = geo_info
-    data["registered_at_utc"] = datetime.now(timezone.utc).strftime(
-        "%Y-%m-%d %H:%M:%S UTC"
-    )
+    data["registered_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     with get_db() as db:
         client_node = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
@@ -193,9 +191,7 @@ async def register_client(request: Request):
             api_key = client_node.api_key or api_key
             client_node.metadata_json = json.dumps(data)
             client_node.api_key = api_key
-            status_val = client_node.status
-            tier_val = client_node.subscription_tier
-            balance_val = client_node.balance_tokens
+            status_val, tier_val, balance_val = client_node.status, client_node.subscription_tier, client_node.balance_tokens
         else:
             status_val, tier_val, balance_val = "PENDING", "PRO", 50000
             client_node = ClientModel(
@@ -218,7 +214,6 @@ async def register_client(request: Request):
         "geo_location": geo_info,
     }
 
-
 @app.get("/api/tenant/data")
 def get_tenant_data(hw_id: str):
     if not re.match(r"^[A-Z0-9\-]{8,64}$", hw_id):
@@ -239,7 +234,6 @@ def get_tenant_data(hw_id: str):
             }
         }
 
-
 @app.post("/log-traffic")
 async def log_traffic(request: Request):
     data = await request.json()
@@ -251,43 +245,54 @@ async def log_traffic(request: Request):
     with get_db() as db:
         client_node = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
         if not client_node or client_node.status != "APPROVED":
-            raise HTTPException(
-                status_code=402, detail="Access denied: Node unapproved or unregistered"
-            )
+            raise HTTPException(status_code=402, detail="Access denied: Node unapproved")
 
         try:
             decoded_bytes = base64.b64decode(enc_payload)
-            decrypted_bytes = private_key.decrypt(
-                decoded_bytes, padding.PKCS1v15()
-            )
+            decrypted_bytes = private_key.decrypt(decoded_bytes, padding.PKCS1v15())
             payload_data = json.loads(decrypted_bytes.decode("utf-8"))
         except Exception as e:
-            raise HTTPException(
-                status_code=400, detail=f"Decryption failure: {str(e)}"
-            )
+            raise HTTPException(status_code=400, detail=f"Decryption failure: {str(e)}")
 
         if "query" in payload_data:
             payload_data["query"] = sanitize_pii(payload_data["query"])
 
-        payload_data["timestamp_utc"] = datetime.now(timezone.utc).strftime(
-            "%Y-%m-%d %H:%M:%S UTC"
-        )
-        total_tokens = int(payload_data.get("i", 0)) + int(
-            payload_data.get("o", 0)
-        )
+        payload_data["timestamp_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        total_tokens = int(payload_data.get("i", 0)) + int(payload_data.get("o", 0))
         new_balance = max(0, client_node.balance_tokens - total_tokens)
         client_node.balance_tokens = new_balance
+
+        encrypted_db_payload = cipher.encrypt(json.dumps(payload_data).encode()).decode()
 
         from database import TrafficLogModel
         log_entry = TrafficLogModel(
             hw_id=hw_id,
-            payload_json=json.dumps(payload_data)
+            provider=payload_data.get("provider", "Gateway"),
+            model=payload_data.get("m", "Flash"),
+            prompt_tokens=int(payload_data.get("i", 0)),
+            completion_tokens=int(payload_data.get("o", 0)),
+            latency_ms=int(payload_data.get("latency", 120)),
+            payload_json=encrypted_db_payload
         )
         db.add(log_entry)
         db.commit()
 
-    return {"status": "logged", "remaining_balance": new_balance}
+        # Broadcast live event to all connected dashboards via WebSockets
+        await manager.broadcast({
+            "type": "NEW_TRAFFIC",
+            "data": {
+                "id": log_entry.id,
+                "timestamp": payload_data["timestamp_utc"],
+                "tenant_id": hw_id,
+                "provider": f"{payload_data.get('provider', 'Gemini')} / {payload_data.get('m', 'Flash')}",
+                "tokens": total_tokens,
+                "latency_ms": payload_data.get("latency", 120),
+                "prompt": payload_data.get("query", "Secure payload"),
+                "response": payload_data.get("response", "Processed")
+            }
+        })
 
+    return {"status": "logged", "remaining_balance": new_balance}
 
 @app.post("/v1/chat/completions")
 async def openai_compatible_chat_completions(request: Request):
@@ -301,47 +306,31 @@ async def openai_compatible_chat_completions(request: Request):
         elif hw_id_header:
             client_node = db.query(ClientModel).filter(ClientModel.hw_id == hw_id_header).first()
         else:
-            raise HTTPException(
-                status_code=401,
-                detail="Authentication required: Provide Bearer API Key or X-HW-ID header.",
-            )
+            raise HTTPException(status_code=401, detail="Authentication required: Provide Bearer API Key or X-HW-ID.")
 
-        if not client_node:
-            raise HTTPException(status_code=401, detail="Invalid API Key or Hardware ID.")
-
-        if client_node.status != "APPROVED":
-            raise HTTPException(
-                status_code=402,
-                detail="Tenant node pending approval or denied in Enterprise Control Plane.",
-            )
-
-        hw_id = client_node.hw_id
-        balance_tokens = client_node.balance_tokens
+        if not client_node or client_node.status != "APPROVED":
+            raise HTTPException(status_code=402, detail="Tenant node unapproved or invalid credentials.")
 
         body = await request.json()
         messages = body.get("messages", [])
         model = body.get("model", "gemini-2.5-flash")
-
         prompt = messages[-1].get("content", "") if messages else ""
         sanitized_prompt = sanitize_pii(prompt)
 
         gemini_key = os.environ.get("GEMINI_API_KEY")
         groq_key = os.environ.get("GROQ_API_KEY")
 
-        text_resp = "Simulated response"
+        text_resp = "Simulated secure response"
         input_tokens = max(10, len(sanitized_prompt.split()) * 2)
         output_tokens = 50
-        provider_used = "Installed Local App (OpenAI SDK)"
+        provider_used = "Installed Local App"
+        start_time = time.time()
 
-        import httpx
         async with httpx.AsyncClient() as client:
             if gemini_key and ("gemini" in model.lower() or not groq_key):
                 try:
-                    provider_used = "Google Gemini (Installed App)"
-                    gemini_contents = [{
-                        "role": "user" if m.get("role") == "user" else "model",
-                        "parts": [{"text": sanitize_pii(m.get("content", ""))}],
-                    } for m in messages]
+                    provider_used = "Google Gemini"
+                    gemini_contents = [{"role": "user" if m.get("role") == "user" else "model", "parts": [{"text": sanitize_pii(m.get("content", ""))}]} for m in messages]
                     resp = await client.post(
                         f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}",
                         headers={"Content-Type": "application/json"},
@@ -351,11 +340,7 @@ async def openai_compatible_chat_completions(request: Request):
                     if resp.status_code == 200:
                         ai_data = resp.json()
                         candidate = ai_data.get("candidates", [{}])[0]
-                        text_resp = (
-                            candidate.get("content", {})
-                            .get("parts", [{}])[0]
-                            .get("text", "No response")
-                        )
+                        text_resp = candidate.get("content", {}).get("parts", [{}])[0].get("text", "No response")
                         usage = ai_data.get("usageMetadata", {})
                         input_tokens = usage.get("promptTokenCount", input_tokens)
                         output_tokens = usage.get("candidatesTokenCount", output_tokens)
@@ -363,20 +348,11 @@ async def openai_compatible_chat_completions(request: Request):
                     pass
             elif groq_key:
                 try:
-                    provider_used = "Groq (Installed App)"
+                    provider_used = "Groq"
                     resp = await client.post(
                         "https://api.groq.com/openai/v1/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {groq_key}",
-                            "Content-Type": "application/json",
-                        },
-                        json={
-                            "model": "llama-3.3-70b-versatile",
-                            "messages": [{
-                                "role": m.get("role"),
-                                "content": sanitize_pii(m.get("content", "")),
-                            } for m in messages],
-                        },
+                        headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                        json={"model": "llama-3.3-70b-versatile", "messages": [{"role": m.get("role"), "content": sanitize_pii(m.get("content", ""))} for m in messages]},
                         timeout=30.0,
                     )
                     if resp.status_code == 200:
@@ -388,60 +364,67 @@ async def openai_compatible_chat_completions(request: Request):
                 except Exception:
                     pass
 
+        latency = int((time.time() - start_time) * 1000) + 40
         total_tokens = input_tokens + output_tokens
-        new_balance = max(0, balance_tokens - total_tokens)
-        client_node.balance_tokens = new_balance
+        client_node.balance_tokens = max(0, client_node.balance_tokens - total_tokens)
+
+        encrypted_payload = cipher.encrypt(json.dumps({
+            "provider": provider_used,
+            "m": model,
+            "query": sanitized_prompt[:100],
+            "response": text_resp[:100],
+            "i": input_tokens,
+            "o": output_tokens,
+            "latency": latency,
+            "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        }).encode()).decode()
 
         from database import TrafficLogModel
         log_entry = TrafficLogModel(
-            hw_id=hw_id,
-            payload_json=json.dumps({
-                "provider": provider_used,
-                "model": model,
-                "thinking_level": "Standard",
-                "i": input_tokens,
-                "o": output_tokens,
-                "query": sanitized_prompt[:100],
-                "timestamp_utc": datetime.now(timezone.utc).strftime(
-                    "%Y-%m-%d %H:%M:%S UTC"
-                ),
-            })
+            hw_id=client_node.hw_id,
+            provider=provider_used,
+            model=model,
+            prompt_tokens=input_tokens,
+            completion_tokens=output_tokens,
+            latency_ms=latency,
+            payload_json=encrypted_payload
         )
         db.add(log_entry)
         db.commit()
+
+        await manager.broadcast({
+            "type": "NEW_TRAFFIC",
+            "data": {
+                "id": log_entry.id,
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+                "tenant_id": client_node.hw_id,
+                "provider": f"{provider_used} / {model}",
+                "tokens": total_tokens,
+                "latency_ms": latency,
+                "prompt": sanitized_prompt,
+                "response": text_resp
+            }
+        })
 
     return {
         "id": f"chatcmpl-{int(time.time())}",
         "object": "chat.completion",
         "created": int(time.time()),
         "model": model,
-        "choices": [{
-            "index": 0,
-            "message": {"role": "assistant", "content": text_resp},
-            "finish_reason": "stop",
-        }],
-        "usage": {
-            "prompt_tokens": input_tokens,
-            "completion_tokens": output_tokens,
-            "total_tokens": total_tokens,
-        },
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": text_resp}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": input_tokens, "completion_tokens": output_tokens, "total_tokens": total_tokens}
     }
-
 
 @app.post("/api/proxy/v1/messages")
 async def proxy_messages(request: Request):
     hw_id = request.headers.get("X-HW-ID")
     if not hw_id:
-        raise HTTPException(
-            status_code=400, detail="Missing security hardware signature header"
-        )
+        raise HTTPException(status_code=400, detail="Missing security hardware signature header")
 
     with get_db() as db:
         client_node = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
         if not client_node or client_node.status != "APPROVED":
-            raise HTTPException(
-                status_code=402, detail="Gateway routing blocked: Tenant awaiting authorization"
-            )
+            raise HTTPException(status_code=402, detail="Gateway routing blocked: Tenant awaiting authorization")
 
     body = await request.json()
     messages = body.get("messages", [])
@@ -455,14 +438,15 @@ async def proxy_messages(request: Request):
     gemini_key = os.environ.get("GEMINI_API_KEY")
     groq_key = os.environ.get("GROQ_API_KEY")
 
-    import httpx
+    text_resp = f"[{provider} | {model_name} | NIST Secure Routing] Processed: '{sanitized_prompt[:60]}'"
+    input_tokens = max(10, len(sanitized_prompt.split()) * 2)
+    output_tokens = 50
+    start_time = time.time()
+
     async with httpx.AsyncClient() as client:
         if provider == "Gemini" and gemini_key:
             try:
-                gemini_contents = [{
-                    "role": "user" if m.get("role") == "user" else "model",
-                    "parts": [{"text": sanitize_pii(m.get("content", ""))}],
-                } for m in messages]
+                gemini_contents = [{"role": "user" if m.get("role") == "user" else "model", "parts": [{"text": sanitize_pii(m.get("content", ""))}]} for m in messages]
                 resp = await client.post(
                     f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}",
                     headers={"Content-Type": "application/json"},
@@ -472,123 +456,76 @@ async def proxy_messages(request: Request):
                 if resp.status_code == 200:
                     ai_data = resp.json()
                     candidate = ai_data.get("candidates", [{}])[0]
-                    text_resp = (
-                        candidate.get("content", {})
-                        .get("parts", [{}])[0]
-                        .get("text", "No response")
-                    )
-                    usage = ai_data.get(
-                        "usageMetadata",
-                        {
-                            "promptTokenCount": len(sanitized_prompt) // 4 + 5,
-                            "candidatesTokenCount": 50,
-                        },
-                    )
-                    return {
-                        "id": f"gemini_{int(time.time())}",
-                        "provider": "Google Gemini (Browser)",
-                        "model": model_name,
-                        "thinking_level": thinking_level,
-                        "content": [{"type": "text", "text": text_resp}],
-                        "usage": {
-                            "input_tokens": usage.get("promptTokenCount", 10),
-                            "output_tokens": usage.get("candidatesTokenCount", 30),
-                        },
-                        "timestamp_utc": datetime.now(timezone.utc).strftime(
-                            "%Y-%m-%d %H:%M:%S UTC"
-                        ),
-                    }
+                    text_resp = candidate.get("content", {}).get("parts", [{}])[0].get("text", "No response")
             except Exception:
                 pass
-
-        if provider == "Groq" and groq_key:
+        elif provider == "Groq" and groq_key:
             try:
                 resp = await client.post(
                     "https://api.groq.com/openai/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {groq_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": "llama-3.3-70b-versatile",
-                        "messages": [{
-                            "role": m.get("role"),
-                            "content": sanitize_pii(m.get("content", "")),
-                        } for m in messages],
-                    },
+                    headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                    json={"model": "llama-3.3-70b-versatile", "messages": [{"role": m.get("role"), "content": sanitize_pii(m.get("content", ""))} for m in messages]},
                     timeout=30.0,
                 )
                 if resp.status_code == 200:
                     ai_data = resp.json()
                     text_resp = ai_data["choices"][0]["message"]["content"]
-                    usage = ai_data.get(
-                        "usage", {"prompt_tokens": 15, "completion_tokens": 40}
-                    )
-                    return {
-                        "id": f"groq_{int(time.time())}",
-                        "provider": "Groq (Browser)",
-                        "model": model_name,
-                        "thinking_level": thinking_level,
-                        "content": [{"type": "text", "text": text_resp}],
-                        "usage": {
-                            "input_tokens": usage.get("prompt_tokens", 15),
-                            "output_tokens": usage.get("completion_tokens", 40),
-                        },
-                        "timestamp_utc": datetime.now(timezone.utc).strftime(
-                            "%Y-%m-%d %H:%M:%S UTC"
-                        ),
-                    }
             except Exception:
                 pass
 
-    simulated_output = f"[{provider} | {model_name} | Cloud NIST Secure Routing] Processed: '{sanitized_prompt[:50]}...'"
+    latency = int((time.time() - start_time) * 1000) + 35
     return {
         "id": f"proxy_{int(time.time())}",
         "provider": f"{provider} (Browser)",
         "model": model_name,
         "thinking_level": thinking_level,
-        "content": [{"type": "text", "text": simulated_output}],
-        "usage": {
-            "input_tokens": max(10, len(sanitized_prompt.split()) * 2),
-            "output_tokens": 50,
-        },
-        "timestamp_utc": datetime.now(timezone.utc).strftime(
-            "%Y-%m-%d %H:%M:%S UTC"
-        ),
+        "content": [{"type": "text", "text": text_resp}],
+        "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens, "latency": latency},
+        "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     }
 
-
 @app.get("/api/dashboard-data")
-def dashboard_data():
+def dashboard_data(user: dict = Depends(verify_supabase_user)):
     with get_db() as db:
         client_rows = db.query(ClientModel).all()
         from database import TrafficLogModel
-        log_rows = db.query(TrafficLogModel).order_by(TrafficLogModel.id.desc()).limit(200).all()
+        log_rows = db.query(TrafficLogModel).order_by(TrafficLogModel.id.desc()).limit(100).all()
 
-    clients = [
-        {
-            **json.loads(c.metadata_json or "{}"),
-            "hw_id": c.hw_id,
-            "status": c.status,
-            "subscription_tier": c.subscription_tier,
-            "balance_tokens": c.balance_tokens,
-            "created_at": str(c.created_at),
-            "api_key": c.api_key,
-        }
-        for c in client_rows
-    ]
-    logs = [{**json.loads(l.payload_json or "{}"), "id": l.id, "hw_id": l.hw_id} for l in log_rows]
-    return {"clients": clients, "logs": logs}
+    clients = [{
+        **json.loads(c.metadata_json or "{}"),
+        "hw_id": c.hw_id,
+        "status": c.status,
+        "subscription_tier": c.subscription_tier,
+        "balance_tokens": c.balance_tokens,
+        "created_at": str(c.created_at),
+        "api_key": c.api_key,
+    } for c in client_rows]
 
+    logs = []
+    for l in log_rows:
+        try:
+            payload = json.loads(cipher.decrypt(l.payload_json.encode()).decode())
+        except:
+            payload = {"query": "Encrypted Log", "response": "Encrypted Response"}
+        logs.append({
+            "id": l.id,
+            "hw_id": l.hw_id,
+            "timestamp_utc": payload.get("timestamp_utc", str(l.created_at)),
+            "provider": f"{l.provider} / {l.model}",
+            "tokens": (l.prompt_tokens or 0) + (l.completion_tokens or 0),
+            "latency_ms": l.latency_ms,
+            "prompt": payload.get("query", ""),
+            "response": payload.get("response", "")
+        })
+
+    return {"clients": clients, "logs": logs, "authenticated_user": user.get("email", "Admin")}
 
 @app.post("/api/gdpr/erase-data")
-async def gdpr_erase_data(request: Request):
+async def gdpr_erase_data(request: Request, user: dict = Depends(verify_supabase_user)):
     data = await request.json()
     hw_id = data.get("hw_id")
     if not hw_id:
-        raise HTTPException(
-            status_code=400, detail="Missing hardware identifier for erasure."
-        )
+        raise HTTPException(status_code=400, detail="Missing hardware identifier for erasure.")
 
     with get_db() as db:
         db.query(ClientModel).filter(ClientModel.hw_id == hw_id).delete()
@@ -597,14 +534,10 @@ async def gdpr_erase_data(request: Request):
         db.commit()
         logger.info(f"GDPR Article 17 Erasure executed successfully for tenant: {hw_id}")
 
-    return {
-        "status": "success",
-        "message": f"Tenant {hw_id} and audit logs permanently scrubbed under GDPR Article 17.",
-    }
-
+    return {"status": "success", "message": f"Tenant {hw_id} permanently scrubbed under GDPR Article 17."}
 
 @app.post("/api/client-action")
-async def client_action(request: Request):
+async def client_action(request: Request, user: dict = Depends(verify_supabase_user)):
     data = await request.json()
     hw_id = data.get("hw_id")
     action = data.get("action")
@@ -630,31 +563,35 @@ async def client_action(request: Request):
 
     return {"status": "success"}
 
-
 @app.get("/api/export-audit-report")
-def export_audit_report():
+def export_audit_report(user: dict = Depends(verify_supabase_user)):
     with get_db() as db:
         from database import TrafficLogModel
         rows = db.query(TrafficLogModel).order_by(TrafficLogModel.created_at.desc()).all()
 
     output = io.StringIO()
-    output.write(
-        "HardwareID,Provider,Model,ThinkingLevel,InputTokens,OutputTokens,TimestampUTC\n"
-    )
+    output.write("HardwareID,Provider,Model,InputTokens,OutputTokens,LatencyMS,TimestampUTC\n")
     for r in rows:
-        p = json.loads(r.payload_json or "{}")
-        output.write(
-            f'"{r.hw_id}","{p.get("provider","N/A")}","{p.get("model","N/A")}","{p.get("thinking_level","Standard")}",{p.get("i",0)},{p.get("o",0)},"{p.get("timestamp_utc","N/A")}"\n'
-        )
+        try:
+            p = json.loads(cipher.decrypt(r.payload_json.encode()).decode())
+        except:
+            p = {}
+        output.write(f'"{r.hw_id}","{r.provider}","{r.model}",{r.prompt_tokens},{r.completion_tokens},{r.latency_ms},"{p.get("timestamp_utc","N/A")}"\n')
 
     response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
-    response.headers["Content-Disposition"] = (
-        "attachment; filename=cloud_nist_audit_report.csv"
-    )
+    response.headers["Content-Disposition"] = "attachment; filename=cloud_nist_audit_report.csv"
     return response
 
+@app.websocket("/ws/live-traffic")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
-# DASHBOARD & AGENT HTML TEMPLATES (Embedded)
+# --- DASHBOARD & AGENT HTML TEMPLATES ---
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -662,73 +599,137 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Enterprise Cloud AI Gateway & Control Plane</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>body { background-color: #0b0f17; color: #c9d1d9; font-family: ui-sans-serif, system-ui, sans-serif; }</style>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>body { background-color: #030712; color: #f3f4f6; font-family: ui-sans-serif, system-ui, sans-serif; }</style>
 </head>
-<body class="min-h-screen p-6 flex flex-col">
-    <header class="flex flex-col md:flex-row items-center justify-between border-b border-gray-800 pb-4 mb-6 gap-4">
-        <div>
-            <h1 class="text-lg font-bold text-white flex items-center gap-2">🛡️ Enterprise Cloud AI Gateway & Control Plane</h1>
-            <p class="text-xs text-gray-400">NIST & GDPR Compliant Multi-Tenant Routing Engine (Supports Browser & Installed AI Programs)</p>
+<body class="min-h-screen p-6 flex flex-col space-y-6">
+    <!-- Header -->
+    <header class="flex flex-col md:flex-row items-center justify-between border-b border-slate-800 pb-4 gap-4 bg-slate-900/40 p-4 rounded-xl backdrop-blur">
+        <div class="flex items-center gap-3">
+            <div class="bg-indigo-600 p-2.5 rounded-xl text-white shadow-lg shadow-indigo-600/30">
+                <i data-lucide="shield-check" class="w-6 h-6"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold text-white">Enterprise Cloud AI Gateway & Control Plane</h1>
+                <p class="text-xs text-indigo-400">NIST & GDPR Compliant Multi-Tenant Routing Engine | Supabase Authenticated Portal</p>
+            </div>
         </div>
         <div class="flex items-center gap-3 flex-wrap">
-            <span class="px-3 py-1 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded-full text-xs font-mono">Cloud Node: Secure</span>
-            <a href="/agent" target="_blank" class="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white rounded-lg text-xs font-medium transition">🤖 Tenant Playground</a>
-            <a href="/api/export-audit-report" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-medium transition">📥 Export Audit CSV</a>
-            <button onclick="loadDashboardData()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium transition">Refresh Now</button>
+            <span class="px-3 py-1 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded-full text-xs font-mono flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Supabase Secure
+            </span>
+            <a href="/agent" target="_blank" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5 shadow-md shadow-indigo-600/20">
+                <i data-lucide="cpu" class="w-4 h-4"></i> Tenant Playground
+            </a>
+            <a href="/api/export-audit-report" id="export-link" class="px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5">
+                <i data-lucide="download" class="w-4 h-4"></i> Export Audit CSV
+            </a>
+            <button onclick="loadDashboardData()" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition flex items-center gap-1.5">
+                <i data-lucide="refresh-cw" class="w-4 h-4"></i> Refresh Now
+            </button>
         </div>
     </header>
 
-    <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-6 flex flex-col md:flex-row items-center justify-between gap-3 shadow-md font-mono text-xs">
+    <!-- Target Storage Info Bar -->
+    <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex items-center justify-between font-mono text-xs shadow-sm">
         <div class="flex items-center gap-3">
-            <span class="px-2 py-1 bg-blue-950 text-blue-400 border border-blue-800 rounded text-[10px]">DATABASE ENGINE</span>
-            <div>
-                <span class="text-gray-400">Target Storage:</span> <span id="db-path-display" class="text-emerald-400 font-bold">Connecting to database...</span>
+            <span class="px-2.5 py-1 bg-indigo-950 text-indigo-400 border border-indigo-800 rounded font-bold text-[10px]">DATABASE ENGINE</span>
+            <div><span class="text-slate-400">Target Storage:</span> <span id="db-path-display" class="text-emerald-400 font-bold">Connecting...</span></div>
+        </div>
+        <div id="auth-user-badge" class="text-slate-400">Portal User: <span class="text-indigo-300 font-bold">Authenticated Admin</span></div>
+    </div>
+
+    <!-- Stats Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm">
+            <div class="text-[11px] text-slate-400 uppercase font-semibold">Total Tenants</div>
+            <div id="stat-total-clients" class="text-2xl font-extrabold text-white font-mono mt-1">0</div>
+        </div>
+        <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm">
+            <div class="text-[11px] text-slate-400 uppercase font-semibold">Approved Nodes</div>
+            <div id="stat-approved-clients" class="text-2xl font-extrabold text-emerald-400 font-mono mt-1">0</div>
+        </div>
+        <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm">
+            <div class="text-[11px] text-slate-400 uppercase font-semibold">Realtime Tokens Routed</div>
+            <div id="stat-total-tokens" class="text-2xl font-extrabold text-indigo-400 font-mono mt-1">0</div>
+        </div>
+        <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm">
+            <div class="text-[11px] text-slate-400 uppercase font-semibold">Live Stream</div>
+            <div class="text-2xl font-extrabold text-purple-400 font-mono mt-1 flex items-center gap-2">
+                <span class="w-3 h-3 rounded-full bg-emerald-500 animate-ping"></span> Active WebSocket
             </div>
         </div>
     </div>
 
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 shadow-md"><div class="text-[11px] text-gray-400 uppercase font-mono">Total Tenants</div><div id="stat-total-clients" class="text-xl font-bold text-white font-mono mt-1">0</div></div>
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 shadow-md"><div class="text-[11px] text-gray-400 uppercase font-mono">Approved Nodes</div><div id="stat-approved-clients" class="text-xl font-bold text-emerald-400 font-mono mt-1">0</div></div>
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 shadow-md"><div class="text-[11px] text-gray-400 uppercase font-mono">Total Tokens Routed</div><div id="stat-total-in" class="text-xl font-bold text-blue-400 font-mono mt-1">0</div></div>
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 shadow-md"><div class="text-[11px] text-gray-400 uppercase font-mono">GDPR Compliance</div><div id="stat-compliance" class="text-xl font-bold text-purple-400 font-mono mt-1">Active</div></div>
-    </div>
-
+    <!-- Main Content Panels -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col shadow-xl">
-            <div class="flex items-center justify-between mb-4 pb-2 border-b border-gray-800"><h2 class="text-xs font-bold uppercase text-gray-300">Tenant Management</h2><span id="client-count" class="px-2 py-0.5 bg-gray-800 text-gray-300 rounded text-[10px] font-mono">0 Registered</span></div>
-            <div id="clients-container" class="space-y-3 overflow-y-auto flex-1 max-h-[500px] pr-1"><div class="text-xs text-gray-500 text-center py-10 font-mono">Loading tenants...</div></div>
+        <!-- Tenant Management -->
+        <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col shadow-xl">
+            <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-800">
+                <h2 class="text-xs font-bold uppercase text-slate-200 flex items-center gap-2">
+                    <i data-lucide="users" class="w-4 h-4 text-indigo-400"></i> Tenant Management
+                </h2>
+                <span id="client-count" class="px-2.5 py-0.5 bg-slate-800 text-slate-300 rounded-full text-[10px] font-mono">0 Registered</span>
+            </div>
+            <div id="clients-container" class="space-y-3 overflow-y-auto flex-1 max-h-[520px] pr-1">
+                <div class="text-xs text-slate-500 text-center py-12 font-mono">Loading tenants...</div>
+            </div>
         </div>
-        <div class="lg:col-span-2 bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col shadow-xl">
-            <div class="flex items-center justify-between mb-4 pb-2 border-b border-gray-800"><h2 class="text-xs font-bold uppercase text-gray-300">Global Telemetry Audit Log</h2><span id="log-count" class="px-2 py-0.5 bg-gray-800 text-gray-300 rounded text-[10px] font-mono">0 Recorded</span></div>
-            <div class="overflow-x-auto flex-1 max-h-[500px] overflow-y-auto">
+
+        <!-- Live Telemetry Audit Log -->
+        <div class="lg:col-span-2 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col shadow-xl">
+            <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-800">
+                <h2 class="text-xs font-bold uppercase text-slate-200 flex items-center gap-2">
+                    <i data-lucide="activity" class="w-4 h-4 text-emerald-400"></i> Live AI Traffic Telemetry & Audit Log
+                </h2>
+                <span id="log-count" class="px-2.5 py-0.5 bg-slate-800 text-slate-300 rounded-full text-[10px] font-mono">0 Recorded</span>
+            </div>
+            <div class="overflow-x-auto flex-1 max-h-[520px] overflow-y-auto">
                 <table class="w-full text-left text-xs font-mono">
-                    <thead class="sticky top-0 bg-gray-900 border-b border-gray-800 text-gray-400">
-                        <tr><th class="pb-3 pt-2">Timestamp (UTC)</th><th class="pb-3 pt-2">Tenant ID</th><th class="pb-3 pt-2">Provider / Model</th><th class="pb-3 pt-2">Thinking</th><th class="pb-3 pt-2">Tokens (In/Out)</th></tr>
+                    <thead class="sticky top-0 bg-slate-950 border-b border-slate-800 text-slate-400 uppercase tracking-wider">
+                        <tr>
+                            <th class="p-3">Timestamp (UTC)</th>
+                            <th class="p-3">Tenant ID</th>
+                            <th class="p-3">Provider / Model</th>
+                            <th class="p-3">Tokens</th>
+                            <th class="p-3">Latency</th>
+                            <th class="p-3">Prompt & Response Preview</th>
+                        </tr>
                     </thead>
-                    <tbody id="logs-table-body" class="divide-y divide-gray-800/50 text-gray-300"><tr><td colspan="5" class="py-10 text-center text-gray-500">Loading live telemetry logs...</td></tr></tbody>
+                    <tbody id="logs-table-body" class="divide-y divide-slate-800/60 text-slate-300">
+                        <tr><td colspan="6" class="py-12 text-center text-slate-500">Listening for live AI traffic...</td></tr>
+                    </tbody>
                 </table>
             </div>
         </div>
     </div>
 
     <!-- HARDWARE INSPECTOR MODAL -->
-    <div id="hardware-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4 z-50 font-mono">
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative">
-            <div class="flex justify-between items-center mb-4 border-b border-gray-800 pb-3">
-                <h3 class="text-sm font-bold text-white flex items-center gap-2">🖥️ Client Hardware & Network Telemetry</h3>
-                <button onclick="closeHardwareModal()" class="text-gray-400 hover:text-white text-base">✕</button>
+    <div id="hardware-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50 font-mono">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative">
+            <div class="flex justify-between items-center mb-4 border-b border-slate-800 pb-3">
+                <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                    <i data-lucide="server" class="w-4 h-4 text-indigo-400"></i> Client Hardware & Network Telemetry
+                </h3>
+                <button onclick="closeHardwareModal()" class="text-slate-400 hover:text-white p-1 rounded">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
             </div>
-            <div id="hardware-modal-content" class="space-y-3 text-xs text-gray-300"></div>
-            <div class="mt-6 pt-3 border-t border-gray-800 flex justify-end">
-                <button onclick="closeHardwareModal()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs">Close</button>
+            <div id="hardware-modal-content" class="space-y-3 text-xs text-slate-300"></div>
+            <div class="mt-6 pt-3 border-t border-slate-800 flex justify-end">
+                <button onclick="closeHardwareModal()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold">Close</button>
             </div>
         </div>
     </div>
 
     <script>
+        lucide.createIcons();
         const SERVER_URL = window.location.origin;
         let globalClientsData = [];
+        let authToken = localStorage.getItem("supabase_access_token") || "demo-token";
+
+        // Inject token into export link
+        document.getElementById("export-link").href = `${SERVER_URL}/api/export-audit-report?access_token=${authToken}`;
 
         async function loadDashboardData() {
             try {
@@ -736,38 +737,54 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const dbInfo = await dbRes.json();
                 document.getElementById("db-path-display").innerText = `[${dbInfo.database_type}] ${dbInfo.storage_location}`;
 
-                const res = await fetch(`${SERVER_URL}/api/dashboard-data`);
+                const res = await fetch(`${SERVER_URL}/api/dashboard-data`, {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+                if(res.status === 401) {
+                    alert("Supabase Authentication required. Please log in.");
+                    return;
+                }
                 const data = await res.json();
                 globalClientsData = data.clients;
 
                 document.getElementById("stat-total-clients").innerText = data.clients.length;
                 document.getElementById("stat-approved-clients").innerText = data.clients.filter(c => c.status === 'APPROVED').length;
+                
                 let totalTokens = 0;
-                data.logs.forEach(l => totalTokens += ((l.i||0) + (l.o||0)));
-                document.getElementById("stat-total-in").innerText = totalTokens.toLocaleString();
+                data.logs.forEach(l => totalTokens += (l.tokens || 0));
+                document.getElementById("stat-total-tokens").innerText = totalTokens.toLocaleString();
 
                 renderClients(data.clients);
                 renderLogs(data.logs);
-            } catch (err) { console.error(err); }
+            } catch (err) { console.error("Telemetry fetch error:", err); }
         }
 
         function renderClients(clients) {
             const container = document.getElementById("clients-container");
             document.getElementById("client-count").innerText = `${clients.length} Registered`;
-            if (!clients.length) { container.innerHTML = `<div class="text-xs text-gray-500 text-center py-10 font-mono">No tenants registered yet.</div>`; return; }
+            if (!clients.length) { 
+                container.innerHTML = `<div class="text-xs text-slate-500 text-center py-12 font-mono">No tenant nodes registered yet.</div>`; 
+                return; 
+            }
             container.innerHTML = "";
             clients.forEach(c => {
                 const statusColor = c.status === 'APPROVED' ? 'text-emerald-400 bg-emerald-950 border-emerald-800' : 'text-amber-400 bg-amber-950 border-amber-800';
                 const card = document.createElement("div");
-                card.className = `p-4 rounded-xl border border-gray-800 bg-gray-950 space-y-2 font-mono`;
+                card.className = `p-4 rounded-xl border border-slate-800 bg-slate-950/80 space-y-2.5 font-mono shadow-sm`;
                 card.innerHTML = `
-                    <div class="flex justify-between items-center"><span class="font-bold text-white text-xs">${c.hw_id}</span><span class="px-2 py-0.5 border rounded-full text-[10px] ${statusColor}">${c.status}</span></div>
-                    <div class="text-[11px] text-gray-400">Tier: <span class="text-cyan-400 font-bold">${c.subscription_tier || 'PRO'}</span> | Balance: <span class="text-emerald-400 font-bold">${(c.balance_tokens||0).toLocaleString()}</span></div>
-                    <div class="flex justify-between pt-2 border-t border-gray-800 flex-wrap gap-1">
-                        <button onclick="inspectHardware('${c.hw_id}')" class="px-2 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded text-[10px]">🖥️ HW Specs</button>
-                        <button onclick="executeAction('${c.hw_id}', 'approve')" class="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px]">Approve</button>
-                        <button onclick="executeAction('${c.hw_id}', 'deny')" class="px-2 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-[10px]">Deny</button>
-                        <button onclick="eraseGdprData('${c.hw_id}')" class="px-2 py-1 bg-red-600 hover:bg-red-500 text-white rounded text-[10px]" title="GDPR Article 17 Erase">🗑️ GDPR</button>
+                    <div class="flex justify-between items-center">
+                        <span class="font-bold text-indigo-400 text-xs">${c.hw_id}</span>
+                        <span class="px-2.5 py-0.5 border rounded-full text-[10px] font-bold ${statusColor}">${c.status}</span>
+                    </div>
+                    <div class="flex justify-between text-[11px] text-slate-400">
+                        <span>Tier: <strong class="text-slate-200">${c.subscription_tier || 'PRO'}</strong></span>
+                        <span>Tokens: <strong class="text-emerald-400">${(c.balance_tokens||0).toLocaleString()}</strong></span>
+                    </div>
+                    <div class="flex gap-1.5 pt-2 border-t border-slate-800/80 flex-wrap">
+                        <button onclick="inspectHardware('${c.hw_id}')" class="flex-1 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-800/80 rounded py-1 px-2 text-[10px] font-semibold transition">Specs</button>
+                        <button onclick="executeAction('${c.hw_id}', 'approve')" class="flex-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-800/80 rounded py-1 px-2 text-[10px] font-semibold transition">Approve</button>
+                        <button onclick="executeAction('${c.hw_id}', 'deny')" class="flex-1 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-800/80 rounded py-1 px-2 text-[10px] font-semibold transition">Deny</button>
+                        <button onclick="eraseGdprData('${c.hw_id}')" class="bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-800/80 rounded py-1 px-2 text-[10px] font-semibold transition" title="GDPR Article 17 Erase">🗑️</button>
                     </div>`;
                 container.appendChild(card);
             });
@@ -779,12 +796,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const geo = client.geo_location || {};
             const content = document.getElementById("hardware-modal-content");
             content.innerHTML = `
-                <div class="p-3 bg-gray-950 rounded-lg border border-gray-800 space-y-2">
-                    <div class="flex justify-between border-b border-gray-800 pb-1"><span class="text-gray-400">Hardware ID:</span> <span class="text-cyan-400 font-bold">${client.hw_id}</span></div>
-                    <div class="flex justify-between border-b border-gray-800 pb-1"><span class="text-gray-400">API Key:</span> <span class="text-amber-400 text-[10px]">${client.api_key || 'N/A'}</span></div>
-                    <div class="flex justify-between border-b border-gray-800 pb-1"><span class="text-gray-400">IP Address:</span> <span class="text-emerald-400">${client.ip_address || '127.0.0.1'}</span></div>
-                    <div class="flex justify-between border-b border-gray-800 pb-1"><span class="text-gray-400">Location:</span> <span class="text-purple-400">${geo.city || 'Chandrapur'}, ${geo.region || 'Maharashtra'}</span></div>
-                    <div class="flex justify-between"><span class="text-gray-400">Registered:</span> <span class="text-gray-300">${client.registered_at_utc || client.created_at}</span></div>
+                <div class="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-2.5">
+                    <div class="flex justify-between border-b border-slate-800 pb-1.5"><span class="text-slate-400">Hardware ID:</span> <span class="text-indigo-400 font-bold">${client.hw_id}</span></div>
+                    <div class="flex justify-between border-b border-slate-800 pb-1.5"><span class="text-slate-400">Tenant API Key:</span> <span class="text-amber-400 text-[10px]">${client.api_key || 'N/A'}</span></div>
+                    <div class="flex justify-between border-b border-slate-800 pb-1.5"><span class="text-slate-400">Client IP:</span> <span class="text-emerald-400">${client.ip_address || '127.0.0.1'}</span></div>
+                    <div class="flex justify-between border-b border-slate-800 pb-1.5"><span class="text-slate-400">Geo Location:</span> <span class="text-purple-400">${geo.city || 'Chandrapur'}, ${geo.region || 'Maharashtra'} (${geo.country || 'India'})</span></div>
+                    <div class="flex justify-between"><span class="text-slate-400">Registered At:</span> <span class="text-slate-300">${client.registered_at_utc || client.created_at}</span></div>
                 </div>
             `;
             document.getElementById("hardware-modal").classList.remove("hidden");
@@ -799,28 +816,59 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         function renderLogs(logs) {
             const tbody = document.getElementById("logs-table-body");
             document.getElementById("log-count").innerText = `${logs.length} Recorded`;
-            if (!logs.length) { tbody.innerHTML = `<tr><td colspan="5" class="py-10 text-center text-gray-500">No telemetry logs recorded yet.</td></tr>`; return; }
+            if (!logs.length) { 
+                tbody.innerHTML = `<tr><td colspan="6" class="py-12 text-center text-slate-500">No telemetry records found.</td></tr>`; 
+                return; 
+            }
             tbody.innerHTML = "";
             logs.forEach(l => {
-                const timeStr = l.timestamp_utc || new Date().toISOString();
-                tbody.innerHTML += `<tr class="hover:bg-gray-800/30"><td class="py-3 text-gray-400 font-mono text-[10px]">${timeStr}</td><td class="py-3 text-cyan-400">${l.hw_id}</td><td class="py-3 text-white">${l.provider || 'Gemini'} / ${l.model || 'Flash'}</td><td class="py-3 text-purple-400">${l.thinking_level || 'Standard'}</td><td class="py-3 text-blue-400">${l.i || 0} / ${l.o || 0}</td></tr>`;
+                tbody.innerHTML += `
+                    <tr class="hover:bg-slate-800/40 transition">
+                        <td class="p-3 text-slate-400 text-[11px]">${l.timestamp_utc}</td>
+                        <td class="p-3 text-indigo-400 font-bold">${l.hw_id}</td>
+                        <td class="p-3 text-slate-200">${l.provider}</td>
+                        <td class="p-3 text-emerald-400 font-bold">${l.tokens}</td>
+                        <td class="p-3 text-amber-400">${l.latency_ms} ms</td>
+                        <td class="p-3 text-slate-300 max-w-xs truncate" title="Q: ${l.prompt} | A: ${l.response}">
+                            <span class="text-indigo-300">Q:</span> ${l.prompt}<br/>
+                            <span class="text-emerald-300">A:</span> ${l.response}
+                        </td>
+                    </tr>`;
             });
         }
 
         async function executeAction(hwId, action) {
-            await fetch(`${SERVER_URL}/api/client-action`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hw_id: hwId, action: action }) });
+            await fetch(`${SERVER_URL}/api/client-action`, { 
+                method: "POST", 
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` }, 
+                body: JSON.stringify({ hw_id: hwId, action: action }) 
+            });
             loadDashboardData();
         }
 
         async function eraseGdprData(hwId) {
-            if(confirm(`Permanently erase all data for tenant ${hwId} under GDPR Article 17?`)) {
-                await fetch(`${SERVER_URL}/api/gdpr/erase-data`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hw_id: hwId }) });
+            if(confirm(`Permanently erase all logs and records for tenant ${hwId} under GDPR Article 17?`)) {
+                await fetch(`${SERVER_URL}/api/gdpr/erase-data`, { 
+                    method: "POST", 
+                    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` }, 
+                    body: JSON.stringify({ hw_id: hwId }) 
+                });
                 loadDashboardData();
             }
         }
 
+        // Setup WebSocket for Realtime Telemetry Updates
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${protocol}//${window.location.host}/ws/live-traffic`);
+        ws.onmessage = function(event) {
+            const message = JSON.parse(event.data);
+            if (message.type === 'NEW_TRAFFIC') {
+                loadDashboardData();
+            }
+        };
+
         loadDashboardData();
-        setInterval(loadDashboardData, 5000);
+        setInterval(loadDashboardData, 10000);
     </script>
 </body>
 </html>"""
@@ -830,73 +878,94 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tenant AI Chat Playground & Installed App Integration</title>
+    <title>Tenant AI Playground & Installed App Gateway</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jsencrypt/3.3.2/jsencrypt.min.js"></script>
-    <style>body { background-color: #0b0f17; color: #c9d1d9; font-family: ui-sans-serif, system-ui, sans-serif; }</style>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>body { background-color: #030712; color: #f3f4f6; font-family: ui-sans-serif, system-ui, sans-serif; }</style>
 </head>
 <body class="min-h-screen p-4 flex flex-col items-center justify-center">
-    <div class="max-w-3xl w-full bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-2xl flex flex-col h-[88vh]">
-        <div class="flex items-center justify-between mb-4 border-b border-gray-800 pb-3">
-            <h1 class="text-sm font-bold text-white flex items-center gap-2">🛡️ Tenant AI Playground & Installed App Gateway</h1>
-            <span id="agent-status" class="px-2.5 py-1 bg-amber-950 text-amber-400 border border-amber-800 rounded-full text-[10px] font-mono">Initializing</span>
+    <div class="max-w-4xl w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl flex flex-col h-[90vh]">
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-4 border-b border-slate-800 pb-4">
+            <div class="flex items-center gap-3">
+                <div class="bg-indigo-600 p-2 rounded-xl text-white shadow-lg shadow-indigo-600/30">
+                    <i data-lucide="cpu" class="w-5 h-5"></i>
+                </div>
+                <h1 class="text-sm font-bold text-white tracking-wide">Tenant AI Playground & Installed App Gateway</h1>
+            </div>
+            <span id="agent-status" class="px-3 py-1 bg-amber-950 text-amber-400 border border-amber-800 rounded-full text-[11px] font-mono">Initializing...</span>
         </div>
         
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mb-3 bg-gray-950 p-3 rounded-lg border border-gray-800 font-mono">
-            <div>HW ID: <span id="lbl-hw" class="text-cyan-400 font-bold">-</span></div>
+        <!-- Status Bar -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs mb-4 bg-slate-950 p-3.5 rounded-xl border border-slate-800 font-mono">
+            <div>HW ID: <span id="lbl-hw" class="text-indigo-400 font-bold">-</span></div>
             <div>Status: <span id="lbl-status" class="text-amber-400 font-bold">Pending</span></div>
             <div>Tokens: <span id="lbl-balance" class="text-emerald-400 font-bold">50,000</span></div>
             <div>GDPR: <span class="text-purple-400 font-bold">Protected</span></div>
         </div>
 
-        <div class="flex gap-2 mb-3 border-b border-gray-800 pb-2 text-xs font-mono">
-            <button onclick="switchTab('browser')" id="btn-tab-browser" class="px-3 py-1 bg-blue-600 text-white rounded font-medium">🌐 Browser Playground</button>
-            <button onclick="switchTab('installed')" id="btn-tab-installed" class="px-3 py-1 bg-gray-800 text-gray-400 rounded hover:text-white font-medium">💻 Connect Installed AI App / Python</button>
+        <!-- Navigation Tabs -->
+        <div class="flex gap-2 mb-4 border-b border-slate-800 pb-2 text-xs font-mono">
+            <button onclick="switchTab('browser')" id="btn-tab-browser" class="px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium transition flex items-center gap-2 shadow-md shadow-indigo-600/20">
+                <i data-lucide="globe" class="w-4 h-4"></i> Browser Playground
+            </button>
+            <button onclick="switchTab('installed')" id="btn-tab-installed" class="px-4 py-2 bg-slate-800 text-slate-400 rounded-lg hover:text-white font-medium transition flex items-center gap-2">
+                <i data-lucide="terminal" class="w-4 h-4"></i> Connect Installed AI App / Python
+            </button>
         </div>
 
-        <div id="tab-browser" class="flex-1 flex flex-col space-y-3">
-            <div class="grid grid-cols-3 gap-2">
+        <!-- Tab Browser -->
+        <div id="tab-browser" class="flex-1 flex flex-col space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
-                    <label class="block text-[10px] font-bold text-gray-400 mb-1">AI Provider</label>
-                    <select id="ai-provider" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none">
+                    <label class="block text-[11px] font-bold text-slate-400 mb-1">AI Provider</label>
+                    <select id="ai-provider" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
                         <option value="Gemini">Google Gemini</option>
                         <option value="Groq">Groq (Open Source)</option>
                     </select>
                 </div>
                 <div>
-                    <label class="block text-[10px] font-bold text-gray-400 mb-1">Model Type</label>
-                    <select id="ai-model" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none">
+                    <label class="block text-[11px] font-bold text-slate-400 mb-1">Model Type</label>
+                    <select id="ai-model" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
                         <option value="Gemini 2.5 Flash">Gemini 2.5 Flash</option>
                         <option value="Llama 3.3 70B">Llama 3.3 70B (Groq)</option>
                     </select>
                 </div>
                 <div>
-                    <label class="block text-[10px] font-bold text-gray-400 mb-1">Thinking Level</label>
-                    <select id="thinking-level" class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none">
+                    <label class="block text-[11px] font-bold text-slate-400 mb-1">Thinking Level</label>
+                    <select id="thinking-level" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
                         <option value="Standard">Standard</option>
                         <option value="Deep Reasoning">Deep Reasoning</option>
                     </select>
                 </div>
             </div>
 
-            <div id="chat-stream" class="flex-1 bg-gray-950 rounded-lg p-4 border border-gray-800 overflow-y-auto space-y-3 text-xs">
-                <div class="text-gray-500 font-mono text-center py-4">[System] Generating secure hardware fingerprint & registering tenant partition...</div>
+            <!-- Chat Stream Box -->
+            <div id="chat-stream" class="flex-1 bg-slate-950 rounded-xl p-4 border border-slate-800 overflow-y-auto space-y-3 text-xs font-mono">
+                <div class="text-slate-500 text-center py-6">[System] Secure hardware fingerprint & tenant partition initialized successfully. Ready for live AI traffic.</div>
             </div>
 
-            <div class="flex gap-2">
-                <input type="text" id="test-prompt" placeholder="Ask AI in browser securely..." class="flex-1 bg-gray-950 border border-gray-800 rounded px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-600" onkeydown="if(event.key==='Enter') sendLiveProxyCall()">
-                <button onclick="sendLiveProxyCall()" class="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded text-xs transition">Send</button>
+            <!-- Chat Input Bar -->
+            <div class="flex gap-3">
+                <input type="text" id="test-prompt" placeholder="Type prompt to test live secure AI gateway..." class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-indigo-500 font-sans" onkeydown="if(event.key==='Enter') sendLiveProxyCall()">
+                <button onclick="sendLiveProxyCall()" class="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-indigo-600/20">
+                    <span>Send</span> <i data-lucide="send" class="w-4 h-4"></i>
+                </button>
             </div>
         </div>
 
-        <div id="tab-installed" class="flex-1 flex flex-col space-y-3 hidden font-mono text-xs">
-            <div class="p-3 bg-gray-950 rounded-lg border border-gray-800 space-y-2">
-                <div class="text-cyan-400 font-bold">🚀 Connect Any Installed Program or Python App</div>
-                <p class="text-gray-400 text-[11px]">Your gateway exposes a standard OpenAI-compatible API endpoint at <code class="text-emerald-400">/v1/chat/completions</code>. Any local AI script, desktop client, or CLI tool configured with your Tenant API Key will automatically route traffic and log telemetry to the control plane dashboard.</p>
+        <!-- Tab Installed App -->
+        <div id="tab-installed" class="flex-1 flex flex-col space-y-4 hidden font-mono text-xs">
+            <div class="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
+                <div class="text-indigo-400 font-bold flex items-center gap-2">
+                    <i data-lucide="code" class="w-4 h-4"></i> Connect Any Installed Program or Python App
+                </div>
+                <p class="text-slate-400 text-[11px] leading-relaxed">Your gateway exposes a standard OpenAI-compatible API endpoint at <code class="text-emerald-400 font-bold">/v1/chat/completions</code>. Any local AI script or desktop client configured with your Tenant API Key will automatically route traffic and log live telemetry to the control plane dashboard.</p>
             </div>
             <div>
-                <label class="block text-gray-400 mb-1">Python SDK Configuration Example:</label>
-                <pre class="bg-gray-950 p-3 rounded border border-gray-800 text-[11px] text-purple-300 overflow-x-auto">from openai import OpenAI
+                <label class="block text-slate-400 mb-1.5 font-semibold">Python SDK Configuration Example:</label>
+                <pre class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-[11px] text-purple-300 overflow-x-auto leading-relaxed">from openai import OpenAI
 
 client = OpenAI(
     api_key="<span id="code-api-key" class="text-amber-400">loading_key...</span>",
@@ -910,21 +979,25 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)</pre>
             </div>
             <div>
-                <label class="block text-gray-400 mb-1">cURL Command Line Test:</label>
-                <pre class="bg-gray-950 p-3 rounded border border-gray-800 text-[11px] text-blue-300 overflow-x-auto">curl -X POST <span class="code-url"></span>/v1/chat/completions \\
+                <label class="block text-slate-400 mb-1.5 font-semibold">cURL Command Line Test:</label>
+                <pre class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-[11px] text-blue-300 overflow-x-auto leading-relaxed">curl -X POST <span class="code-url"></span>/v1/chat/completions \\
   -H "Authorization: Bearer <span id="code-api-key-2" class="text-amber-400">loading_key...</span>" \\
   -H "Content-Type: application/json" \\
   -d '{"model": "gemini-2.5-flash", "messages": [{"role": "user", "content": "Test from CLI"}]}'</pre>
             </div>
         </div>
 
-        <div class="flex justify-between items-center pt-2 text-xs font-mono border-t border-gray-800 mt-2">
-            <span id="api-key-display" class="text-gray-500 truncate max-w-[300px]">API Key: -</span>
-            <a href="/" class="text-blue-400 hover:underline">← Return to Admin Control Plane</a>
+        <!-- Footer -->
+        <div class="flex justify-between items-center pt-3 text-xs font-mono border-t border-slate-800 mt-2">
+            <span id="api-key-display" class="text-slate-500 truncate max-w-[320px]">API Key: -</span>
+            <a href="/" class="text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1.5">
+                <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i> Return to Admin Control Plane
+            </a>
         </div>
     </div>
 
     <script>
+        lucide.createIcons();
         const SERVER_URL = window.location.origin;
         let hwId = localStorage.getItem("proxy_tenant_hw_id");
         if (!hwId) {
@@ -952,13 +1025,13 @@ print(response.choices[0].message.content)</pre>
             if (tab === 'browser') {
                 document.getElementById('tab-browser').classList.remove('hidden');
                 document.getElementById('tab-installed').classList.add('hidden');
-                document.getElementById('btn-tab-browser').className = 'px-3 py-1 bg-blue-600 text-white rounded font-medium';
-                document.getElementById('btn-tab-installed').className = 'px-3 py-1 bg-gray-800 text-gray-400 rounded hover:text-white font-medium';
+                document.getElementById('btn-tab-browser').className = 'px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium transition flex items-center gap-2 shadow-md shadow-indigo-600/20';
+                document.getElementById('btn-tab-installed').className = 'px-4 py-2 bg-slate-800 text-slate-400 rounded-lg hover:text-white font-medium transition flex items-center gap-2';
             } else {
                 document.getElementById('tab-browser').classList.add('hidden');
                 document.getElementById('tab-installed').classList.remove('hidden');
-                document.getElementById('btn-tab-browser').className = 'px-3 py-1 bg-gray-800 text-gray-400 rounded font-medium';
-                document.getElementById('btn-tab-installed').className = 'px-3 py-1 bg-blue-600 text-white rounded font-medium';
+                document.getElementById('btn-tab-browser').className = 'px-4 py-2 bg-slate-800 text-slate-400 rounded-lg hover:text-white font-medium transition flex items-center gap-2';
+                document.getElementById('btn-tab-installed').className = 'px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium transition flex items-center gap-2 shadow-md shadow-indigo-600/20';
             }
         }
 
@@ -1007,9 +1080,9 @@ print(response.choices[0].message.content)</pre>
         function appendMessage(sender, text, isErr = false, usage = null) {
             const stream = document.getElementById("chat-stream");
             const div = document.createElement("div");
-            div.className = `p-3 rounded-xl border ${sender === 'You' ? 'bg-gray-900 border-gray-800 ml-6' : (isErr ? 'bg-red-950/40 border-red-900' : 'bg-gray-950 border-gray-800 mr-6')}`;
-            let usageHtml = usage ? `<div class="mt-1 text-[10px] font-mono text-blue-400">Tokens | In: ${usage.input_tokens} | Out: ${usage.output_tokens}</div>` : '';
-            div.innerHTML = `<div class="flex justify-between items-center mb-1 font-mono text-[10px] text-gray-400"><span>${sender}</span><span>${new Date().toLocaleTimeString()} UTC</span></div><div class="text-gray-200 text-xs whitespace-pre-wrap">${text}</div>${usageHtml}`;
+            div.className = `p-3.5 rounded-xl border ${sender === 'You' ? 'bg-slate-900 border-slate-800 ml-8' : (isErr ? 'bg-rose-950/40 border-rose-900' : 'bg-slate-950 border-slate-800 mr-8')}`;
+            let usageHtml = usage ? `<div class="mt-2 text-[10px] font-mono text-indigo-400 flex gap-4 pt-1 border-t border-slate-800/60"><span>In: ${usage.input_tokens}</span><span>Out: ${usage.output_tokens}</span><span>Latency: ${usage.latency || 120}ms</span></div>` : '';
+            div.innerHTML = `<div class="flex justify-between items-center mb-1.5 font-mono text-[10px] text-slate-400"><span class="font-bold text-slate-300">${sender}</span><span>${new Date().toLocaleTimeString()} UTC</span></div><div class="text-slate-200 text-xs whitespace-pre-wrap leading-relaxed">${text}</div>${usageHtml}`;
             stream.appendChild(div);
             stream.scrollTop = stream.scrollHeight;
         }
@@ -1019,11 +1092,11 @@ print(response.choices[0].message.content)</pre>
             const lbl = document.getElementById("lbl-status");
             lbl.innerText = status;
             if (status === "APPROVED") {
-                badge.className = "px-2.5 py-1 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded-full text-[10px] font-mono";
-                badge.innerText = "Approved";
+                badge.className = "px-3 py-1 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded-full text-[11px] font-mono font-semibold";
+                badge.innerText = "Approved & Active";
             } else if (status === "DENIED") {
-                badge.className = "px-2.5 py-1 bg-red-950 text-red-400 border border-red-800 rounded-full text-[10px] font-mono";
-                badge.innerText = "Denied";
+                badge.className = "px-3 py-1 bg-rose-950 text-rose-400 border border-rose-800 rounded-full text-[11px] font-mono font-semibold";
+                badge.innerText = "Access Denied";
             }
         }
 
@@ -1063,7 +1136,10 @@ print(response.choices[0].message.content)</pre>
                     m: data.model, 
                     thinking_level: data.thinking_level,
                     i: data.usage.input_tokens, 
-                    o: data.usage.output_tokens 
+                    o: data.usage.output_tokens,
+                    latency: data.usage.latency,
+                    query: promptText,
+                    response: replyText
                 }));
 
                 if(encrypted) {
@@ -1084,16 +1160,13 @@ print(response.choices[0].message.content)</pre>
 </body>
 </html>"""
 
-
 @app.get("/", response_class=HTMLResponse)
 def serve_dashboard():
     return DASHBOARD_HTML
 
-
 @app.get("/agent", response_class=HTMLResponse)
 def serve_agent():
     return WEB_AGENT_HTML
-
 
 if __name__ == "__main__":
     import uvicorn
