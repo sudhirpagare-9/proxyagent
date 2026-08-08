@@ -9,8 +9,8 @@ from sqlalchemy.orm import sessionmaker
 ENCRYPTION_KEY = os.environ.get("ENC_KEY", Fernet.generate_key().decode())
 cipher = Fernet(ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY)
 
-# Dynamic URL: Checks Render environment for Supabase PostgreSQL or defaults to local persistent storage
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:////data/secure_ai_gateway.db")
+# Database URL configuration and normalization
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./secure_ai_gateway.db")
 
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)

@@ -42,7 +42,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- SECURE CONFIGURATION & SECRET MANAGEMENT (NO HARDCODED PASSWORDS) ---
+# --- SECURE CONFIGURATION & SECRET MANAGEMENT ---
 ENCRYPTION_KEY = os.environ.get("ENC_KEY")
 if not ENCRYPTION_KEY or ENCRYPTION_KEY.startswith("placeholder"):
     ENCRYPTION_KEY = Fernet.generate_key().decode()
@@ -50,7 +50,6 @@ if not ENCRYPTION_KEY or ENCRYPTION_KEY.startswith("placeholder"):
 
 cipher = Fernet(ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY)
 
-# Secure Supabase / JWT Secret handling
 SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")
 if not SUPABASE_JWT_SECRET or "placeholder" in SUPABASE_JWT_SECRET.lower():
     SUPABASE_JWT_SECRET = Fernet.generate_key().decode()
@@ -58,15 +57,13 @@ if not SUPABASE_JWT_SECRET or "placeholder" in SUPABASE_JWT_SECRET.lower():
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://qwsnkbpsumqobrqkpht.supabase.co")
 
-# Secure Database Connection String Resolver (Normalized & unified with database.py)
 raw_db_url = os.environ.get("DATABASE_URL", "")
 if raw_db_url.startswith("postgres://"):
     raw_db_url = raw_db_url.replace("postgres://", "postgresql://", 1)
 
 if not raw_db_url or "YourPassword" in raw_db_url or "your-password" in raw_db_url.lower():
-    logger.warning("DATABASE_URL contains placeholder text ('YourPassword') or is missing. Falling back to secure local SQLite storage.")
-    DATABASE_URL = "sqlite:////data/secure_ai_gateway.db"
-    os.makedirs("/data", exist_ok=True)
+    logger.warning("DATABASE_URL contains placeholder text or is missing. Falling back to secure local SQLite storage.")
+    DATABASE_URL = "sqlite:///./secure_ai_gateway.db"
     engine_args = {"connect_args": {"check_same_thread": False}}
 else:
     DATABASE_URL = raw_db_url
@@ -78,7 +75,6 @@ else:
             DATABASE_URL = f"{DATABASE_URL}{separator}sslmode=require"
         engine_args = {"pool_pre_ping": True, "pool_size": 10, "max_overflow": 20}
 
-# Initialize SQLAlchemy Engine securely
 from database import Base, ClientModel, TrafficLogModel
 engine = create_engine(DATABASE_URL, **engine_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -111,7 +107,6 @@ def sanitize_pii(text: str) -> str:
     text = re.sub(r"sk_live_\w+|sk_test_\w+|AIzaSy\w+", "[REDACTED_SECRET]", text)
     return text
 
-# --- Strict Supabase Auth Dependency ---
 async def verify_supabase_user(request: Request, authorization: Optional[str] = Header(None)):
     if os.environ.get("BYPASS_AUTH_FOR_DEMO", "false").lower() == "true":
         return {"sub": "admin-demo-user", "email": "admin@enterprise.internal"}
@@ -145,7 +140,6 @@ async def verify_supabase_user(request: Request, authorization: Optional[str] = 
             detail="Invalid or expired Supabase authentication credentials."
         )
 
-# --- Real-Time WebSocket Connection Manager ---
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
@@ -614,7 +608,7 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-# --- DASHBOARD & AGENT HTML TEMPLATES ---
+# --- HTML TEMPLATES ---
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
