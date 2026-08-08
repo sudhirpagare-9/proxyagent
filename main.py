@@ -17,25 +17,88 @@ except ImportError:
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from cryptography.hazmat.primitives.asymmetric import rsa
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from jose import JWTError, jwt
-import httpx
-from sqlalchemy.orm import Session
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, create_engine, text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.sql import func
 
-from database import Base, SessionLocal, ClientModel, TrafficLogModel, cipher, engine, init_db
-
+# --- Logging Setup ---
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] [NIST-CLOUD-SECURE] %(message)s",
 )
 logger = logging.getLogger("EnterpriseSecurityGateway")
 
+# --- Database Setup ---
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./enterprise_gateway.db")
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+ENCRYPTION_KEY = os.environ.get("ENC_KEY")
+if not ENCRYPTION_KEY or ENCRYPTION_KEY.startswith("placeholder"):
+    ENCRYPTION_KEY = Fernet.generate_key()
+else:
+    ENCRYPTION_KEY = ENCRYPTION_KEY.encode()
+
+cipher = Fernet(ENCRYPTION_KEY)
+
+class ClientModel(Base):
+    __tablename__ = "clients"
+    id = Column(Integer, primary_key=True, index=True)
+    hw_id = Column(String, unique=True, index=True)
+    api_key = Column(String, unique=True, index=True)
+    status = Column(String, default="PENDING")  # PENDING, APPROVED, DENIED, DELETED
+    subscription_tier = Column(String, default="ENTERPRISE_PRO")
+    balance_tokens = Column(Integer, default=250000)
+    metadata_json = Column(Text, nullable=True)
+    is_deleted = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class TrafficLogModel(Base):
+    __tablename__ = "traffic_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    hw_id = Column(String, index=True)
+    provider = Column(String)
+    model = Column(String)
+    prompt_tokens = Column(Integer, default=0)
+    completion_tokens = Column(Integer, default=0)
+    latency_ms = Column(Integer, default=0)
+    payload_json = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+def init_db():
+    Base.metadata.create_all(bind=engine)
+    with engine.connect() as conn:
+        for col_name, col_type in [("is_deleted", "BOOLEAN DEFAULT 0"), ("metadata_json", "TEXT")]:
+            try:
+                conn.execute(text(f"ALTER TABLE clients ADD COLUMN {col_name} {col_type}"))
+                conn.commit()
+            except Exception:
+                pass
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# --- FastAPI App ---
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
-    version="4.3.2",
+    version="4.4.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -56,13 +119,6 @@ public_pem = public_key.public_bytes(
     encoding=serialization.Encoding.PEM,
     format=serialization.PublicFormat.SubjectPublicKeyInfo,
 ).decode("utf-8")
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 @app.on_event("startup")
 def startup_event():
@@ -114,6 +170,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# --- Routes ---
 @app.get("/", response_class=HTMLResponse)
 def serve_dashboard():
     return DASHBOARD_HTML
@@ -201,7 +258,7 @@ async def soft_delete_client(hw_id: str, user: dict = Depends(verify_supabase_us
     client.is_deleted = True
     client.status = "DELETED"
     db.commit()
-    return {"status": "success", "message": f"Client {hw_id} soft-deleted. Retained for analytics and reports."}
+    return {"status": "success", "message": f"Client {hw_id} soft-deleted."}
 
 @app.post("/log-traffic")
 @app.post("/api/telemetry")
@@ -241,7 +298,6 @@ async def log_traffic(request: Request, db: Session = Depends(get_db)):
 
         total_tokens = payload_data["i"] + payload_data["o"]
         client.balance_tokens = max(0, client.balance_tokens - total_tokens)
-
         encrypted_db_payload = cipher.encrypt(json.dumps(payload_data).encode()).decode()
         
         log_entry = TrafficLogModel(
@@ -436,6 +492,7 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
+# --- Frontend HTML ---
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -458,7 +515,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
         </div>
         <div class="flex items-center gap-3 flex-wrap">
-            <span class="px-3 py-1 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded-full text-xs font-mono flex items-center gap-1.5">
+            <span id="connection-badge" class="px-3 py-1 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded-full text-xs font-mono flex items-center gap-1.5">
                 <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Connected
             </span>
             <a href="/agent" target="_blank" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5 shadow-md">
@@ -487,9 +544,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div id="stat-total-tokens" class="text-2xl font-extrabold text-indigo-400 font-mono mt-1">0</div>
         </div>
         <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm">
-            <div class="text-[11px] text-slate-400 uppercase font-semibold">Live Stream</div>
+            <div class="text-[11px] text-slate-400 uppercase font-semibold">Sync Engine</div>
             <div class="text-2xl font-extrabold text-purple-400 font-mono mt-1 flex items-center gap-2">
-                <span class="w-3 h-3 rounded-full bg-emerald-500 animate-ping"></span> Active WebSocket
+                <span class="w-3 h-3 rounded-full bg-emerald-500 animate-ping"></span> Live Polling Active
             </div>
         </div>
     </div>
@@ -498,7 +555,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col shadow-xl">
             <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-800">
                 <h2 class="text-xs font-bold uppercase text-slate-200 flex items-center gap-2">
-                    <i data-lucide="users" class="w-4 h-4 text-indigo-400"></i> Tenant Management (Approve/Deny/Delete)
+                    <i data-lucide="users" class="w-4 h-4 text-indigo-400"></i> Tenant Management
                 </h2>
                 <span id="client-count" class="px-2.5 py-0.5 bg-slate-800 text-slate-300 rounded-full text-[10px] font-mono">0 Registered</span>
             </div>
@@ -632,15 +689,23 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             });
         }
 
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const ws = new WebSocket(`${protocol}//${window.location.host}/ws/live-traffic`);
-        ws.onmessage = function(event) {
-            const message = JSON.parse(event.data);
-            if (message.type === 'NEW_TRAFFIC') { loadDashboardData(); }
-        };
+        // Resilient WebSocket with automatic HTTP fallback
+        function initRealtime() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const ws = new WebSocket(`${protocol}//${window.location.host}/ws/live-traffic`);
+            ws.onmessage = function(event) {
+                const message = JSON.parse(event.data);
+                if (message.type === 'NEW_TRAFFIC') { loadDashboardData(); }
+            };
+            ws.onerror = function() {
+                console.warn("WebSocket proxy handshake failed. Relying on high-speed auto-polling.");
+                document.getElementById("connection-badge").innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> Polling Mode`;
+            };
+        }
 
         loadDashboardData();
-        setInterval(loadDashboardData, 5000);
+        initRealtime();
+        setInterval(loadDashboardData, 3000); // High-speed polling sync
     </script>
 </body>
 </html>"""
