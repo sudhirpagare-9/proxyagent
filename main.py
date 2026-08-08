@@ -35,7 +35,7 @@ logger = logging.getLogger("EnterpriseSecurityGateway")
 
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
-    version="4.3.1",
+    version="4.3.2",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -180,7 +180,7 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
 @app.post("/api/clients/{hw_id}/status")
 async def update_client_status(hw_id: str, request: Request, user: dict = Depends(verify_supabase_user), db: Session = Depends(get_db)):
     body = await request.json()
-    new_status = body.get("status")  # APPROVED or DENIED
+    new_status = body.get("status")
     if new_status not in ["APPROVED", "DENIED", "PENDING"]:
         raise HTTPException(status_code=400, detail="Invalid status value.")
     
@@ -271,6 +271,8 @@ async def log_traffic(request: Request, db: Session = Depends(get_db)):
         })
 
         return {"status": "logged", "remaining_balance": client.balance_tokens}
+    except HTTPException as he:
+        raise he
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -365,38 +367,50 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
 
 @app.get("/api/dashboard-data")
 def dashboard_data(user: dict = Depends(verify_supabase_user), db: Session = Depends(get_db)):
-    client_rows = db.query(ClientModel).all()
-    log_rows = db.query(TrafficLogModel).order_by(TrafficLogModel.id.desc()).limit(150).all()
+    try:
+        client_rows = db.query(ClientModel).all()
+        log_rows = db.query(TrafficLogModel).order_by(TrafficLogModel.id.desc()).limit(150).all()
 
-    clients = [{
-        **json.loads(c.metadata_json or "{}"),
-        "hw_id": c.hw_id,
-        "status": c.status,
-        "subscription_tier": c.subscription_tier,
-        "balance_tokens": c.balance_tokens,
-        "is_deleted": c.is_deleted,
-        "created_at": str(c.created_at),
-        "api_key": c.api_key,
-    } for c in client_rows]
+        clients = []
+        for c in client_rows:
+            meta = {}
+            if c.metadata_json:
+                try:
+                    meta = json.loads(c.metadata_json)
+                except:
+                    meta = {}
+            clients.append({
+                **meta,
+                "hw_id": c.hw_id,
+                "status": c.status,
+                "subscription_tier": c.subscription_tier,
+                "balance_tokens": c.balance_tokens,
+                "is_deleted": bool(c.is_deleted),
+                "created_at": str(c.created_at),
+                "api_key": c.api_key,
+            })
 
-    logs = []
-    for l in log_rows:
-        try:
-            payload = json.loads(cipher.decrypt(l.payload_json.encode()).decode())
-        except:
-            payload = {"query": "Encrypted Log", "response": "Encrypted Response"}
-        logs.append({
-            "id": l.id,
-            "hw_id": l.hw_id,
-            "timestamp_utc": payload.get("timestamp_utc", str(l.created_at)),
-            "provider": f"{l.provider} / {l.model}",
-            "tokens": (l.prompt_tokens or 0) + (l.completion_tokens or 0),
-            "latency_ms": l.latency_ms,
-            "prompt": payload.get("query", ""),
-            "response": payload.get("response", "")
-        })
+        logs = []
+        for l in log_rows:
+            try:
+                payload = json.loads(cipher.decrypt(l.payload_json.encode()).decode())
+            except:
+                payload = {"query": "Encrypted Log", "response": "Encrypted Response"}
+            logs.append({
+                "id": l.id,
+                "hw_id": l.hw_id,
+                "timestamp_utc": payload.get("timestamp_utc", str(l.created_at)),
+                "provider": f"{l.provider} / {l.model}",
+                "tokens": (l.prompt_tokens or 0) + (l.completion_tokens or 0),
+                "latency_ms": l.latency_ms,
+                "prompt": payload.get("query", ""),
+                "response": payload.get("response", "")
+            })
 
-    return {"clients": clients, "logs": logs, "authenticated_user": user.get("email", "Admin")}
+        return {"clients": clients, "logs": logs, "authenticated_user": user.get("email", "Admin")}
+    except Exception as e:
+        logger.error(f"Error in dashboard_data: {e}")
+        return JSONResponse(status_code=500, content={"detail": str(e)})
 
 @app.get("/api/export-audit-report")
 def export_audit_report(user: dict = Depends(verify_supabase_user), db: Session = Depends(get_db)):

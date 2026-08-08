@@ -50,10 +50,11 @@ class TrafficLogModel(Base):
 
 def init_db():
     Base.metadata.create_all(bind=engine)
-    # Automatic safe migration for existing databases missing new columns
+    # Safe auto-migration to ensure columns exist on existing production DBs without failure
     with engine.connect() as conn:
-        try:
-            conn.execute(text("ALTER TABLE clients ADD COLUMN is_deleted BOOLEAN DEFAULT 0"))
-            conn.commit()
-        except Exception:
-            pass # Column already exists or table freshly created
+        for col_name, col_type in [("is_deleted", "BOOLEAN DEFAULT 0"), ("metadata_json", "TEXT")]:
+            try:
+                conn.execute(text(f"ALTER TABLE clients ADD COLUMN {col_name} {col_type}"))
+                conn.commit()
+            except Exception:
+                pass
