@@ -35,7 +35,7 @@ logger = logging.getLogger("EnterpriseSecurityGateway")
 
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
-    version="4.3.0",
+    version="4.3.1",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -149,7 +149,7 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
             client = ClientModel(
                 hw_id=hw_id,
                 api_key=api_key,
-                status="PENDING",  # New registrations start as pending until approved by admin
+                status="PENDING",
                 subscription_tier="ENTERPRISE_PRO",
                 balance_tokens=250000,
                 is_deleted=False,
@@ -365,7 +365,6 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
 
 @app.get("/api/dashboard-data")
 def dashboard_data(user: dict = Depends(verify_supabase_user), db: Session = Depends(get_db)):
-    # Include soft-deleted clients as well so they can be utilized for analytics and reports
     client_rows = db.query(ClientModel).all()
     log_rows = db.query(TrafficLogModel).order_by(TrafficLogModel.id.desc()).limit(150).all()
 

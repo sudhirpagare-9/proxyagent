@@ -1,6 +1,6 @@
 import os
 from cryptography.fernet import Fernet
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, create_engine
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import func
@@ -50,3 +50,10 @@ class TrafficLogModel(Base):
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    # Automatic safe migration for existing databases missing new columns
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE clients ADD COLUMN is_deleted BOOLEAN DEFAULT 0"))
+            conn.commit()
+        except Exception:
+            pass # Column already exists or table freshly created
