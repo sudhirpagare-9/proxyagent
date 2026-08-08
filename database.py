@@ -16,12 +16,7 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-ENCRYPTION_KEY = os.environ.get("ENC_KEY")
-if not ENCRYPTION_KEY or ENCRYPTION_KEY.startswith("placeholder"):
-    ENCRYPTION_KEY = Fernet.generate_key()
-else:
-    ENCRYPTION_KEY = ENCRYPTION_KEY.encode()
-
+ENCRYPTION_KEY = os.environ.get("ENC_KEY", Fernet.generate_key().decode()).encode()
 cipher = Fernet(ENCRYPTION_KEY)
 
 class ClientModel(Base):
@@ -31,7 +26,7 @@ class ClientModel(Base):
     api_key = Column(String, unique=True, index=True)
     status = Column(String, default="APPROVED")
     subscription_tier = Column(String, default="PRO")
-    balance_tokens = Column(Integer, default=100000)
+    balance_tokens = Column(Integer, default=50000)
     metadata_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
