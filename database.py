@@ -1,9 +1,12 @@
 import os
+import logging
 from datetime import datetime
 from cryptography.fernet import Fernet
 from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+
+logger = logging.getLogger("NIST-CLOUD-SECURE")
 
 # Secure data-at-rest encryption key configuration
 ENCRYPTION_KEY = os.environ.get("ENC_KEY", Fernet.generate_key().decode())
@@ -15,15 +18,33 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./secure_ai_gateway.db"
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-if "sqlite" in DATABASE_URL:
+engine = None
+try:
+    if "sqlite" in DATABASE_URL:
+        os.makedirs("/data", exist_ok=True)
+        engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+    else:
+        # Ensure secure SSL connection for Supabase cloud PostgreSQL
+        if "sslmode" not in DATABASE_URL:
+            separator = "&" if "?" in DATABASE_URL else "?"
+            DATABASE_URL = f"{DATABASE_URL}{separator}sslmode=require"
+        
+        temp_engine = create_engine(
+            DATABASE_URL, 
+            pool_pre_ping=True, 
+            pool_size=10, 
+            max_overflow=20,
+            connect_args={"connect_timeout": 5}
+        )
+        # Test connection validity on startup
+        with temp_engine.connect() as conn:
+            pass
+        engine = temp_engine
+except Exception as e:
+    logger.warning(f"Failed to connect to remote database ({e}). Falling back to local SQLite storage.")
+    DATABASE_URL = "sqlite:///./secure_ai_gateway.db"
     os.makedirs("/data", exist_ok=True)
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-else:
-    # Ensure secure SSL connection for Supabase cloud PostgreSQL
-    if "sslmode" not in DATABASE_URL:
-        separator = "&" if "?" in DATABASE_URL else "?"
-        DATABASE_URL = f"{DATABASE_URL}{separator}sslmode=require"
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=10, max_overflow=20)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
