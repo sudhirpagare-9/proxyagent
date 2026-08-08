@@ -35,7 +35,7 @@ logger = logging.getLogger("EnterpriseSecurityGateway")
 
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
-    version="4.0.0",
+    version="4.2.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -133,7 +133,7 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
         body = await request.json()
         hw_id = body.get("hw_id")
         if not hw_id:
-            raise HTTPException(status_code=400, detail="Missing hardware identifier.")
+            raise HTTPException(status_code=400, detail="Missing hardware/device identifier.")
 
         client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
         forwarded = request.headers.get("x-forwarded-for")
@@ -198,7 +198,7 @@ async def log_traffic(request: Request, db: Session = Depends(get_db)):
             db.commit()
 
         payload_data = {
-            "provider": body.get("provider", "Universal Local Interceptor"),
+            "provider": body.get("provider", "Universal Multi-Platform Interceptor"),
             "m": body.get("model", "gemini-2.5-flash"),
             "query": sanitize_pii(body.get("payload", "")),
             "response": "Secure AI Gateway processed response",
@@ -248,7 +248,7 @@ async def log_traffic(request: Request, db: Session = Depends(get_db)):
 async def openai_compatible_chat_completions(request: Request, db: Session = Depends(get_db)):
     auth_header = request.headers.get("Authorization", "")
     api_key = auth_header.split(" ")[1] if auth_header.startswith("Bearer ") else None
-    hw_id_header = request.headers.get("X-HW-ID", "HW-CLIENT-DEFAULT")
+    hw_id_header = request.headers.get("X-HW-ID", "HW-MULTIPLATFORM-CLIENT")
 
     client_node = None
     if api_key:
@@ -272,16 +272,16 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
     prompt = messages[-1].get("content", "") if messages else ""
     sanitized_prompt = sanitize_pii(prompt)
 
-    text_resp = f"Enterprise Cloud AI Gateway processed: {sanitized_prompt[:50]}"
+    text_resp = f"Enterprise Cloud AI Gateway routed response: {sanitized_prompt[:45]}"
     input_tokens = max(15, len(sanitized_prompt.split()) * 2)
     output_tokens = 50
-    latency = 78
+    latency = 68
     total_tokens = input_tokens + output_tokens
 
     client_node.balance_tokens = max(0, client_node.balance_tokens - total_tokens)
 
     payload_data = {
-        "provider": "Universal Local Interceptor",
+        "provider": "Multi-Platform Proxy Client",
         "m": model,
         "query": sanitized_prompt,
         "response": text_resp,
@@ -295,7 +295,7 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
 
     log_entry = TrafficLogModel(
         hw_id=client_node.hw_id,
-        provider="Universal Local Interceptor",
+        provider="Multi-Platform Proxy Client",
         model=model,
         prompt_tokens=input_tokens,
         completion_tokens=output_tokens,
@@ -311,7 +311,7 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
             "id": log_entry.id,
             "timestamp": payload_data["timestamp_utc"],
             "tenant_id": client_node.hw_id,
-            "provider": f"Universal Local Interceptor / {model}",
+            "provider": f"Multi-Platform Proxy Client / {model}",
             "tokens": total_tokens,
             "latency_ms": latency,
             "prompt": sanitized_prompt,
@@ -367,7 +367,7 @@ async def gdpr_erase_data(request: Request, user: dict = Depends(verify_supabase
     data = await request.json()
     hw_id = data.get("hw_id")
     if not hw_id:
-        raise HTTPException(status_code=400, detail="Missing hardware identifier.")
+        raise HTTPException(status_code=400, detail="Missing hardware/device identifier.")
     db.query(ClientModel).filter(ClientModel.hw_id == hw_id).delete()
     db.query(TrafficLogModel).filter(TrafficLogModel.hw_id == hw_id).delete()
     db.commit()
@@ -415,7 +415,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
             <div>
                 <h1 class="text-lg font-bold text-white">Enterprise Cloud AI Gateway & Control Plane</h1>
-                <p class="text-xs text-indigo-400">NIST & GDPR Compliant Multi-Tenant Routing Engine | Live Telemetry Active</p>
+                <p class="text-xs text-indigo-400">NIST & GDPR Compliant Multi-Platform Routing Engine | PC & Mobile Active</p>
             </div>
         </div>
         <div class="flex items-center gap-3 flex-wrap">
@@ -436,7 +436,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm">
-            <div class="text-[11px] text-slate-400 uppercase font-semibold">Total Tenants</div>
+            <div class="text-[11px] text-slate-400 uppercase font-semibold">Total Tenants / Clients</div>
             <div id="stat-total-clients" class="text-2xl font-extrabold text-white font-mono mt-1">0</div>
         </div>
         <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm">
@@ -459,12 +459,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col shadow-xl">
             <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-800">
                 <h2 class="text-xs font-bold uppercase text-slate-200 flex items-center gap-2">
-                    <i data-lucide="users" class="w-4 h-4 text-indigo-400"></i> Tenant Management
+                    <i data-lucide="users" class="w-4 h-4 text-indigo-400"></i> Tenant Management (PC & Mobile)
                 </h2>
                 <span id="client-count" class="px-2.5 py-0.5 bg-slate-800 text-slate-300 rounded-full text-[10px] font-mono">0 Registered</span>
             </div>
             <div id="clients-container" class="space-y-3 overflow-y-auto flex-1 max-h-[520px] pr-1">
-                <div class="text-xs text-slate-500 text-center py-12 font-mono">Loading tenants...</div>
+                <div class="text-xs text-slate-500 text-center py-12 font-mono">Loading clients...</div>
             </div>
         </div>
 
@@ -480,7 +480,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <thead class="sticky top-0 bg-slate-950 border-b border-slate-800 text-slate-400 uppercase tracking-wider">
                         <tr>
                             <th class="p-3">Timestamp (UTC)</th>
-                            <th class="p-3">Hardware ID</th>
+                            <th class="p-3">Hardware ID / Device</th>
                             <th class="p-3">Provider / Model</th>
                             <th class="p-3">Tokens</th>
                             <th class="p-3">Latency</th>
@@ -521,7 +521,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const container = document.getElementById("clients-container");
             document.getElementById("client-count").innerText = `${clients.length} Registered`;
             if (!clients.length) { 
-                container.innerHTML = `<div class="text-xs text-slate-500 text-center py-12 font-mono">No tenant nodes registered yet. Run local proxy daemon.</div>`; 
+                container.innerHTML = `<div class="text-xs text-slate-500 text-center py-12 font-mono">No nodes registered yet. Run local proxy daemon on PC or Mobile.</div>`; 
                 return; 
             }
             container.innerHTML = "";
@@ -534,7 +534,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         <span class="px-2.5 py-0.5 border rounded-full text-[10px] font-bold text-emerald-400 bg-emerald-950 border-emerald-800">${c.status}</span>
                     </div>
                     <div class="flex justify-between text-[11px] text-slate-400">
-                        <span>Tier: <strong class="text-slate-200">ENTERPRISE_PRO</strong></span>
+                        <span>Tier: <strong class="text-slate-200">${c.subscription_tier || 'ENTERPRISE_PRO'}</strong></span>
                         <span>Tokens: <strong class="text-emerald-400">${(c.balance_tokens||0).toLocaleString()}</strong></span>
                     </div>`;
                 container.appendChild(card);
@@ -583,7 +583,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tenant AI Playground</title>
+    <title>Tenant AI Playground - Multi-Platform Gateway</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>body { background-color: #030712; color: #f3f4f6; font-family: ui-sans-serif, system-ui, sans-serif; }</style>
@@ -591,33 +591,42 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
 <body class="min-h-screen p-4 flex flex-col items-center justify-center">
     <div class="max-w-4xl w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl flex flex-col h-[85vh]">
         <div class="flex items-center justify-between mb-4 border-b border-slate-800 pb-4">
-            <h1 class="text-sm font-bold text-white flex items-center gap-2">
-                <i data-lucide="cpu" class="w-4 h-4 text-indigo-400"></i> Tenant AI Playground Gateway
-            </h1>
+            <div>
+                <h1 class="text-sm font-bold text-white flex items-center gap-2">
+                    <i data-lucide="cpu" class="w-4 h-4 text-indigo-400"></i> Tenant AI Playground & Multi-Platform Gateway
+                </h1>
+                <p id="device-mode-label" class="text-[11px] text-indigo-400 font-mono mt-0.5">Device Mode: Detecting Client...</p>
+            </div>
             <a href="/" class="text-indigo-400 text-xs font-mono hover:underline">&larr; Back to Dashboard</a>
         </div>
         <div id="chat-stream" class="flex-1 bg-slate-950 rounded-xl p-4 border border-slate-800 overflow-y-auto space-y-3 text-xs font-mono mb-4">
-            <div class="text-slate-500 text-center py-6">Ready for AI traffic simulation & live telemetry testing.</div>
+            <div class="text-slate-500 text-center py-6">Ready for AI traffic simulation & cross-platform telemetry testing.</div>
         </div>
         <div class="flex gap-3">
-            <input type="text" id="test-prompt" placeholder="Type message to test gateway..." class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-indigo-500" onkeydown="if(event.key==='Enter') sendCall()">
+            <input type="text" id="test-prompt" placeholder="Type message to test proxy gateway..." class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-indigo-500" onkeydown="if(event.key==='Enter') sendCall()">
             <button onclick="sendCall()" class="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl text-xs transition shadow-lg shadow-indigo-600/30">Send</button>
         </div>
     </div>
     <script>
         lucide.createIcons();
+        
+        // Determine if client is Mobile or PC
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        const clientHwId = isMobile ? "HW-MOBILE-CLIENT-" + Math.floor(Math.random()*90000+10000) : "HW-PC-BROWSER-AGENT";
+        document.getElementById("device-mode-label").innerText = `Device Mode: ${isMobile ? 'Mobile Smartphone/Tablet' : 'PC Desktop'} | Assigned ID: ${clientHwId}`;
+
         async function sendCall() {
             const input = document.getElementById("test-prompt");
             const text = input.value.trim();
             if(!text) return;
             input.value = "";
             const stream = document.getElementById("chat-stream");
-            stream.innerHTML += `<div class="p-3 bg-slate-900 rounded-xl border border-slate-800"><b>You:</b> ${text}</div>`;
+            stream.innerHTML += `<div class="p-3 bg-slate-900 rounded-xl border border-slate-800"><b>You (${isMobile ? 'Mobile' : 'PC'}):</b> ${text}</div>`;
             try {
                 const res = await fetch('/v1/chat/completions', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-HW-ID': 'HW-BROWSER-PLAYGROUND' },
-                    body: JSON.stringify({ messages: [{role: 'user', content: text}] })
+                    headers: { 'Content-Type': 'application/json', 'X-HW-ID': clientHwId },
+                    body: jsonStringifyMessages(text)
                 });
                 const data = await res.json();
                 const reply = data.choices[0].message.content;
@@ -626,6 +635,10 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                 stream.innerHTML += `<div class="p-3 bg-red-950/50 border border-red-800 rounded-xl text-red-400"><b>Error:</b> Failed to communicate with gateway.</div>`;
             }
             stream.scrollTop = stream.scrollHeight;
+        }
+
+        function jsonStringifyMessages(text) {
+            return JSON.stringify({ messages: [{role: 'user', content: text}], model: "gemini-2.5-flash" });
         }
     </script>
 </body>
