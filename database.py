@@ -1,6 +1,6 @@
 import os
 from cryptography.fernet import Fernet
-from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import func
@@ -29,10 +29,11 @@ class ClientModel(Base):
     id = Column(Integer, primary_key=True, index=True)
     hw_id = Column(String, unique=True, index=True)
     api_key = Column(String, unique=True, index=True)
-    status = Column(String, default="APPROVED")
+    status = Column(String, default="PENDING")  # PENDING, APPROVED, DENIED, DELETED
     subscription_tier = Column(String, default="ENTERPRISE_PRO")
     balance_tokens = Column(Integer, default=250000)
     metadata_json = Column(Text, nullable=True)
+    is_deleted = Column(Boolean, default=False)  # Soft delete flag for analytics & reporting
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class TrafficLogModel(Base):

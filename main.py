@@ -35,7 +35,7 @@ logger = logging.getLogger("EnterpriseSecurityGateway")
 
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
-    version="4.2.0",
+    version="4.3.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -149,14 +149,15 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
             client = ClientModel(
                 hw_id=hw_id,
                 api_key=api_key,
-                status="APPROVED",
+                status="PENDING",  # New registrations start as pending until approved by admin
                 subscription_tier="ENTERPRISE_PRO",
                 balance_tokens=250000,
+                is_deleted=False,
                 metadata_json=json.dumps(body)
             )
             db.add(client)
         else:
-            client.status = "APPROVED"
+            client.is_deleted = False
             client.metadata_json = json.dumps(body)
             if not client.api_key:
                 client.api_key = f"sk_tenant_{secrets.token_hex(16)}"
@@ -176,6 +177,32 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/clients/{hw_id}/status")
+async def update_client_status(hw_id: str, request: Request, user: dict = Depends(verify_supabase_user), db: Session = Depends(get_db)):
+    body = await request.json()
+    new_status = body.get("status")  # APPROVED or DENIED
+    if new_status not in ["APPROVED", "DENIED", "PENDING"]:
+        raise HTTPException(status_code=400, detail="Invalid status value.")
+    
+    client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found.")
+    
+    client.status = new_status
+    db.commit()
+    return {"status": "success", "hw_id": hw_id, "new_status": new_status}
+
+@app.post("/api/clients/{hw_id}/delete")
+async def soft_delete_client(hw_id: str, user: dict = Depends(verify_supabase_user), db: Session = Depends(get_db)):
+    client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found.")
+    
+    client.is_deleted = True
+    client.status = "DELETED"
+    db.commit()
+    return {"status": "success", "message": f"Client {hw_id} soft-deleted. Retained for analytics and reports."}
+
 @app.post("/log-traffic")
 @app.post("/api/telemetry")
 async def log_traffic(request: Request, db: Session = Depends(get_db)):
@@ -190,12 +217,16 @@ async def log_traffic(request: Request, db: Session = Depends(get_db)):
             client = ClientModel(
                 hw_id=hw_id,
                 api_key=f"sk_tenant_{secrets.token_hex(16)}",
-                status="APPROVED",
+                status="PENDING",
                 subscription_tier="ENTERPRISE_PRO",
-                balance_tokens=250000
+                balance_tokens=250000,
+                is_deleted=False
             )
             db.add(client)
             db.commit()
+        
+        if client.status == "DENIED" or client.is_deleted:
+            raise HTTPException(status_code=403, detail="Client node is denied or inactive.")
 
         payload_data = {
             "provider": body.get("provider", "Universal Multi-Platform Interceptor"),
@@ -259,12 +290,16 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         client_node = ClientModel(
             hw_id=hw_id_header,
             api_key=f"sk_tenant_{secrets.token_hex(16)}",
-            status="APPROVED",
+            status="PENDING",
             subscription_tier="ENTERPRISE_PRO",
-            balance_tokens=250000
+            balance_tokens=250000,
+            is_deleted=False
         )
         db.add(client_node)
         db.commit()
+
+    if client_node.status == "DENIED" or client_node.is_deleted:
+        raise HTTPException(status_code=403, detail="Client tenant node is denied or disabled.")
 
     body = await request.json()
     messages = body.get("messages", [])
@@ -330,6 +365,7 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
 
 @app.get("/api/dashboard-data")
 def dashboard_data(user: dict = Depends(verify_supabase_user), db: Session = Depends(get_db)):
+    # Include soft-deleted clients as well so they can be utilized for analytics and reports
     client_rows = db.query(ClientModel).all()
     log_rows = db.query(TrafficLogModel).order_by(TrafficLogModel.id.desc()).limit(150).all()
 
@@ -339,6 +375,7 @@ def dashboard_data(user: dict = Depends(verify_supabase_user), db: Session = Dep
         "status": c.status,
         "subscription_tier": c.subscription_tier,
         "balance_tokens": c.balance_tokens,
+        "is_deleted": c.is_deleted,
         "created_at": str(c.created_at),
         "api_key": c.api_key,
     } for c in client_rows]
@@ -361,17 +398,6 @@ def dashboard_data(user: dict = Depends(verify_supabase_user), db: Session = Dep
         })
 
     return {"clients": clients, "logs": logs, "authenticated_user": user.get("email", "Admin")}
-
-@app.post("/api/gdpr/erase-data")
-async def gdpr_erase_data(request: Request, user: dict = Depends(verify_supabase_user), db: Session = Depends(get_db)):
-    data = await request.json()
-    hw_id = data.get("hw_id")
-    if not hw_id:
-        raise HTTPException(status_code=400, detail="Missing hardware/device identifier.")
-    db.query(ClientModel).filter(ClientModel.hw_id == hw_id).delete()
-    db.query(TrafficLogModel).filter(TrafficLogModel.hw_id == hw_id).delete()
-    db.commit()
-    return {"status": "success", "message": f"Tenant {hw_id} permanently scrubbed under GDPR Article 17."}
 
 @app.get("/api/export-audit-report")
 def export_audit_report(user: dict = Depends(verify_supabase_user), db: Session = Depends(get_db)):
@@ -459,7 +485,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col shadow-xl">
             <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-800">
                 <h2 class="text-xs font-bold uppercase text-slate-200 flex items-center gap-2">
-                    <i data-lucide="users" class="w-4 h-4 text-indigo-400"></i> Tenant Management (PC & Mobile)
+                    <i data-lucide="users" class="w-4 h-4 text-indigo-400"></i> Tenant Management (Approve/Deny/Delete)
                 </h2>
                 <span id="client-count" class="px-2.5 py-0.5 bg-slate-800 text-slate-300 rounded-full text-[10px] font-mono">0 Registered</span>
             </div>
@@ -505,8 +531,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if(!res.ok) return;
                 const data = await res.json();
                 
-                document.getElementById("stat-total-clients").innerText = data.clients.length;
-                document.getElementById("stat-approved-clients").innerText = data.clients.filter(c => c.status === 'APPROVED').length;
+                document.getElementById("stat-total-clients").innerText = data.clients.filter(c => !c.is_deleted).length;
+                document.getElementById("stat-approved-clients").innerText = data.clients.filter(c => c.status === 'APPROVED' && !c.is_deleted).length;
                 
                 let totalTokens = 0;
                 data.logs.forEach(l => totalTokens += (l.tokens || 0));
@@ -517,25 +543,53 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             } catch (err) { console.error("Telemetry fetch error:", err); }
         }
 
+        async function updateClientStatus(hwId, status) {
+            try {
+                const res = await fetch(`${SERVER_URL}/api/clients/${encodeURIComponent(hwId)}/status`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ status })
+                });
+                if(res.ok) { loadDashboardData(); }
+            } catch(e) { console.error(e); }
+        }
+
+        async function softDeleteClient(hwId) {
+            if(!confirm(`Are you sure you want to soft delete tenant ${hwId}? Data will be retained for analytics and reports.`)) return;
+            try {
+                const res = await fetch(`${SERVER_URL}/api/clients/${encodeURIComponent(hwId)}/delete`, {
+                    method: 'POST'
+                });
+                if(res.ok) { loadDashboardData(); }
+            } catch(e) { console.error(e); }
+        }
+
         function renderClients(clients) {
             const container = document.getElementById("clients-container");
-            document.getElementById("client-count").innerText = `${clients.length} Registered`;
-            if (!clients.length) { 
-                container.innerHTML = `<div class="text-xs text-slate-500 text-center py-12 font-mono">No nodes registered yet. Run local proxy daemon on PC or Mobile.</div>`; 
+            const activeClients = clients.filter(c => !c.is_deleted);
+            document.getElementById("client-count").innerText = `${activeClients.length} Registered`;
+            if (!activeClients.length) { 
+                container.innerHTML = `<div class="text-xs text-slate-500 text-center py-12 font-mono">No active nodes registered.</div>`; 
                 return; 
             }
             container.innerHTML = "";
-            clients.forEach(c => {
+            activeClients.forEach(c => {
+                let badgeColor = c.status === 'APPROVED' ? 'text-emerald-400 bg-emerald-950 border-emerald-800' : (c.status === 'DENIED' ? 'text-red-400 bg-red-950 border-red-800' : 'text-amber-400 bg-amber-950 border-amber-800');
                 const card = document.createElement("div");
-                card.className = `p-4 rounded-xl border border-slate-800 bg-slate-950/80 space-y-2.5 font-mono shadow-sm`;
+                card.className = `p-4 rounded-xl border border-slate-800 bg-slate-950/85 space-y-3 font-mono shadow-sm`;
                 card.innerHTML = `
                     <div class="flex justify-between items-center">
-                        <span class="font-bold text-indigo-400 text-xs truncate max-w-[220px]" title="${c.hw_id}">${c.hw_id}</span>
-                        <span class="px-2.5 py-0.5 border rounded-full text-[10px] font-bold text-emerald-400 bg-emerald-950 border-emerald-800">${c.status}</span>
+                        <span class="font-bold text-indigo-400 text-xs truncate max-w-[200px]" title="${c.hw_id}">${c.hw_id}</span>
+                        <span class="px-2.5 py-0.5 border rounded-full text-[10px] font-bold ${badgeColor}">${c.status}</span>
                     </div>
                     <div class="flex justify-between text-[11px] text-slate-400">
                         <span>Tier: <strong class="text-slate-200">${c.subscription_tier || 'ENTERPRISE_PRO'}</strong></span>
                         <span>Tokens: <strong class="text-emerald-400">${(c.balance_tokens||0).toLocaleString()}</strong></span>
+                    </div>
+                    <div class="flex items-center justify-end gap-2 pt-1 border-t border-slate-800/80">
+                        <button onclick="updateClientStatus('${c.hw_id}', 'APPROVED')" class="px-2 py-1 bg-emerald-900/40 hover:bg-emerald-900 text-emerald-300 rounded text-[10px] font-semibold transition border border-emerald-800">Approve</button>
+                        <button onclick="updateClientStatus('${c.hw_id}', 'DENIED')" class="px-2 py-1 bg-amber-900/40 hover:bg-amber-900 text-amber-300 rounded text-[10px] font-semibold transition border border-amber-800">Deny</button>
+                        <button onclick="softDeleteClient('${c.hw_id}')" class="px-2 py-1 bg-red-900/40 hover:bg-red-900 text-red-300 rounded text-[10px] font-semibold transition border border-red-800">Delete</button>
                     </div>`;
                 container.appendChild(card);
             });
@@ -610,10 +664,13 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
     <script>
         lucide.createIcons();
         
-        // Determine if client is Mobile or PC
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-        const clientHwId = isMobile ? "HW-MOBILE-CLIENT-" + Math.floor(Math.random()*90000+10000) : "HW-PC-BROWSER-AGENT";
-        document.getElementById("device-mode-label").innerText = `Device Mode: ${isMobile ? 'Mobile Smartphone/Tablet' : 'PC Desktop'} | Assigned ID: ${clientHwId}`;
+        let clientHwId = localStorage.getItem("enterprise_hw_id");
+        if (!clientHwId) {
+            clientHwId = (isMobile ? "HW-MOBILE-" : "HW-VIRTUAL-PC-") + Math.random().toString(36).substring(2, 10).toUpperCase() + "-" + Date.now().toString(36).toUpperCase();
+            localStorage.setItem("enterprise_hw_id", clientHwId);
+        }
+        document.getElementById("device-mode-label").innerText = `Device Mode: ${isMobile ? 'Mobile Smartphone/Tablet' : 'Virtual / Physical PC'} | Unique HW ID: ${clientHwId}`;
 
         async function sendCall() {
             const input = document.getElementById("test-prompt");
@@ -621,24 +678,24 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             if(!text) return;
             input.value = "";
             const stream = document.getElementById("chat-stream");
-            stream.innerHTML += `<div class="p-3 bg-slate-900 rounded-xl border border-slate-800"><b>You (${isMobile ? 'Mobile' : 'PC'}):</b> ${text}</div>`;
+            stream.innerHTML += `<div class="p-3 bg-slate-900 rounded-xl border border-slate-800"><b>You:</b> ${text}</div>`;
             try {
                 const res = await fetch('/v1/chat/completions', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-HW-ID': clientHwId },
-                    body: jsonStringifyMessages(text)
+                    body: JSON.stringify({ messages: [{role: 'user', content: text}], model: "gemini-2.5-flash" })
                 });
                 const data = await res.json();
+                if(!res.ok) {
+                    stream.innerHTML += `<div class="p-3 bg-red-950/50 border border-red-800 rounded-xl text-red-400"><b>Access Denied / Error:</b> ${data.detail || 'Gateway rejected request.'}</div>`;
+                    return;
+                }
                 const reply = data.choices[0].message.content;
                 stream.innerHTML += `<div class="p-3 bg-slate-950 rounded-xl border border-slate-800 text-indigo-300"><b>AI Gateway:</b> ${reply}</div>`;
             } catch (err) {
                 stream.innerHTML += `<div class="p-3 bg-red-950/50 border border-red-800 rounded-xl text-red-400"><b>Error:</b> Failed to communicate with gateway.</div>`;
             }
             stream.scrollTop = stream.scrollHeight;
-        }
-
-        function jsonStringifyMessages(text) {
-            return JSON.stringify({ messages: [{role: 'user', content: text}], model: "gemini-2.5-flash" });
         }
     </script>
 </body>
