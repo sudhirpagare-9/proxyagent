@@ -98,7 +98,7 @@ def get_db():
 # --- FastAPI App ---
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
-    version="4.5.0",
+    version="4.6.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -110,8 +110,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", Fernet.generate_key().decode())
 
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 public_key = private_key.public_key()
@@ -220,7 +218,8 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
         }
     except Exception as e:
         db.rollback()
-        return {"status": "success", "hw_id": hw_id, "api_key": f"sk_tenant_{secrets.token_hex(16)}", "client_status": "PENDING"}
+        logger.error(f"Registration error: {e}")
+        return {"status": "error", "message": str(e)}
 
 @app.post("/api/clients/{hw_id}/status")
 async def update_client_status(hw_id: str, request: Request, user: dict = Depends(verify_supabase_user), db: Session = Depends(get_db)):
@@ -263,7 +262,8 @@ async def log_traffic(request: Request, db: Session = Depends(get_db)):
                 status="PENDING",
                 subscription_tier="ENTERPRISE_PRO",
                 balance_tokens=250000,
-                is_deleted=False
+                is_deleted=False,
+                metadata_json=json.dumps({"hw_id": hw_id, "source": "telemetry"})
             )
             db.add(client)
             db.commit()
@@ -316,7 +316,8 @@ async def log_traffic(request: Request, db: Session = Depends(get_db)):
         return {"status": "logged", "remaining_balance": client.balance_tokens}
     except Exception as e:
         db.rollback()
-        return {"status": "logged", "remaining_balance": 250000}
+        logger.error(f"Log traffic error: {e}")
+        return {"status": "error", "message": str(e)}
 
 @app.post("/v1/chat/completions")
 async def openai_compatible_chat_completions(request: Request, db: Session = Depends(get_db)):
@@ -342,7 +343,8 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
                 status="PENDING",
                 subscription_tier="ENTERPRISE_PRO",
                 balance_tokens=250000,
-                is_deleted=False
+                is_deleted=False,
+                metadata_json=json.dumps({"hw_id": hw_id_header, "source": "chat_playground"})
             )
             db.add(client_node)
             db.commit()
@@ -402,6 +404,7 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
             }
         })
     except Exception as ex:
+        db.rollback()
         logger.error(f"Chat completion logging error: {ex}")
 
     return {
@@ -464,7 +467,7 @@ def dashboard_data(user: dict = Depends(verify_supabase_user), db: Session = Dep
         return {"clients": clients, "logs": logs, "authenticated_user": "admin@enterprise.internal"}
     except Exception as e:
         logger.error(f"Error in dashboard_data: {e}")
-        return {"clients": [], "logs": [], "authenticated_user": "admin@enterprise.internal"}
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.get("/api/export-audit-report")
 def export_audit_report(user: dict = Depends(verify_supabase_user), db: Session = Depends(get_db)):
@@ -478,7 +481,10 @@ def export_audit_report(user: dict = Depends(verify_supabase_user), db: Session 
         p = {}
         try:
             if r.payload_json:
-                p = json.loads(cipher.decrypt(r.payload_json.encode()).decode())
+                try:
+                    p = json.loads(cipher.decrypt(r.payload_json.encode()).decode())
+                except:
+                    p = json.loads(r.payload_json)
         except:
             pass
         output.write(f'"{r.hw_id}","{r.provider}","{r.model}",{r.prompt_tokens},{r.completion_tokens},{r.latency_ms},"{p.get("timestamp_utc","N/A")}"\n')
