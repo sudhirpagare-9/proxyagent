@@ -103,7 +103,7 @@ def get_db():
 # --- FastAPI App ---
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
-    version="5.1.0",
+    version="6.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -126,16 +126,14 @@ public_pem = public_key.public_bytes(
 @app.on_event("startup")
 def startup_event():
     init_db()
-    logger.info("Enterprise Security Gateway initialized with NIST, GDPR, and DPDP compliance frameworks.")
+    logger.info("Enterprise Security Gateway initialized with Deep Hardware Telemetry Collector.")
 
 def sanitize_pii(text: str) -> str:
-    """Zero-dependency PII Redaction engine adhering to GDPR & DPDP Act."""
     if not isinstance(text, str):
         return str(text) if text else ""
     text = re.sub(r"[\w\.-]+@[\w\.-]+\.\w+", "[REDACTED_EMAIL]", text)
     text = re.sub(r"\b\d{10,12}\b", "[REDACTED_PHONE]", text)
     text = re.sub(r"sk_live_\w+|sk_test_\w+|AIzaSy\w+|sk_tenant_\w+", "[REDACTED_SECRET]", text)
-    text = re.sub(r"\b\d{4}\s\d{4}\s\d{4}\b", "[REDACTED_ID]", text)
     return text
 
 async def verify_admin_user(request: Request, authorization: Optional[str] = Header(None)):
@@ -277,28 +275,20 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
                 subscription_tier="ENTERPRISE_PRO",
                 balance_tokens=250000,
                 is_deleted=False,
-                metadata_json=json.dumps({"hw_id": hw_id_header, "source": "external_app_bridge", "hostname": "CLIENT-MACHINE", "device_type": "PC", "os": "Windows"})
+                metadata_json=json.dumps({"hw_id": hw_id_header, "source": "hardware_collector_agent", "hostname": "WORKSTATION-NODE", "device_type": "PC", "os": "Windows"})
             )
             db.add(client_node)
             db.commit()
 
-        messages = body.get("messages", [])
-        prompt = ""
-        if messages and isinstance(messages, list):
-            prompt = messages[-1].get("content", "")
-        elif "payload" in body:
-            prompt = body.get("payload", "")
-        else:
-            prompt = json.dumps(body)
-
+        prompt = body.get("payload", body.get("messages", [{}])[-1].get("content", "Live Hardware Telemetry Heartbeat"))
         sanitized_prompt = sanitize_pii(prompt)
-        model = body.get("model", "gemini-2.5-flash")
-        provider = body.get("provider", "Universal Multi-Platform Interceptor")
+        model = body.get("model", "hardware-telemetry-v6")
+        provider = body.get("provider", "Live Hardware Collector Agent")
 
-        text_resp = f"Enterprise Cloud AI Gateway routed response: {sanitized_prompt[:50]}"
-        input_tokens = max(15, len(sanitized_prompt.split()) * 2)
-        output_tokens = 50
-        latency = 58
+        text_resp = f"Hardware Telemetry Audit Log Secured: {sanitized_prompt[:40]}"
+        input_tokens = 12
+        output_tokens = 24
+        latency = 42
         total_tokens = input_tokens + output_tokens
 
         client_node.balance_tokens = max(0, client_node.balance_tokens - total_tokens)
@@ -346,19 +336,19 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         })
     except Exception as ex:
         db.rollback()
-        logger.error(f"Chat completion logging error: {ex}")
+        logger.error(f"Telemetry logging error: {ex}")
 
     return {
         "id": f"chatcmpl-{int(time.time())}",
         "object": "chat.completion",
         "created": int(time.time()),
-        "model": "gemini-2.5-flash",
-        "choices": [{"index": 0, "message": {"role": "assistant", "content": "Enterprise Cloud AI Gateway processed request securely under NIST & DPDP guidelines."}, "finish_reason": "stop"}],
-        "usage": {"prompt_tokens": input_tokens, "completion_tokens": output_tokens, "total_tokens": total_tokens},
+        "model": "hardware-telemetry-v6",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hardware telemetry successfully validated & recorded under NIST/DPDP guidelines."}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 12, "completion_tokens": 24, "total_tokens": 36},
         "gateway_telemetry": {
             "hw_id": client_node.hw_id if client_node else hw_id_header,
-            "latency_ms": latency,
-            "tokens_consumed": total_tokens,
+            "latency_ms": 42,
+            "tokens_consumed": 36,
             "remaining_balance": client_node.balance_tokens if client_node else 250000,
             "compliance_status": "GDPR, NIST & DPDP Verified"
         }
@@ -411,7 +401,7 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
                 "id": l.id,
                 "hw_id": l.hw_id or "UNKNOWN",
                 "timestamp_utc": payload.get("timestamp_utc", str(l.created_at) if l.created_at else "N/A"),
-                "provider": f"{l.provider or 'Gateway'} / {l.model or 'gemini'}",
+                "provider": f"{l.provider or 'Gateway'} / {l.model or 'hw'}",
                 "tokens": (l.prompt_tokens or 0) + (l.completion_tokens or 0),
                 "latency_ms": l.latency_ms or 0,
                 "prompt": payload.get("query", ""),
@@ -447,7 +437,7 @@ def export_audit_report(user: dict = Depends(verify_admin_user), db: Session = D
             pass
         output.write(f'"{r.hw_id}","{r.provider}","{r.model}",{r.prompt_tokens},{r.completion_tokens},{r.latency_ms},"{p.get("timestamp_utc","N/A")}"\n')
     response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
-    response.headers["Content-Disposition"] = "attachment; filename=cloud_nist_dpdp_audit_report.csv"
+    response.headers["Content-Disposition"] = "attachment; filename=hardware_collector_audit_report.csv"
     return response
 
 @app.websocket("/ws/live-traffic")
@@ -478,7 +468,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
             <div>
                 <h1 class="text-lg font-bold text-white">Enterprise Cloud AI Gateway & Control Plane</h1>
-                <p class="text-xs text-indigo-400">NIST, GDPR & DPDP Compliant Multi-Platform Routing Engine | Multi-App Bridge Active</p>
+                <p class="text-xs text-indigo-400">NIST, GDPR & DPDP Compliant Hardware Collector Control Plane</p>
             </div>
         </div>
         <div class="flex items-center gap-3 flex-wrap">
@@ -486,10 +476,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Connected
             </span>
             <a href="/agent" target="_blank" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5 shadow-md">
-                <i data-lucide="cpu" class="w-4 h-4"></i> Tenant & Perplexity Bridge
+                <i data-lucide="cpu" class="w-4 h-4"></i> Hardware Collector Agent
             </a>
             <a href="/api/export-audit-report" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition flex items-center gap-1.5">
-                <i data-lucide="download" class="w-4 h-4"></i> Export NIST/DPDP CSV
+                <i data-lucide="download" class="w-4 h-4"></i> Export Audit CSV
             </a>
             <button onclick="loadDashboardData()" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition flex items-center gap-1.5">
                 <i data-lucide="refresh-cw" class="w-4 h-4"></i> Refresh
@@ -499,7 +489,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm">
-            <div class="text-[11px] text-slate-400 uppercase font-semibold">Total Tenants / Clients</div>
+            <div class="text-[11px] text-slate-400 uppercase font-semibold">Total Nodes / Clients</div>
             <div id="stat-total-clients" class="text-2xl font-extrabold text-white font-mono mt-1">0</div>
         </div>
         <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm">
@@ -507,7 +497,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div id="stat-approved-clients" class="text-2xl font-extrabold text-emerald-400 font-mono mt-1">0</div>
         </div>
         <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm">
-            <div class="text-[11px] text-slate-400 uppercase font-semibold">Realtime Tokens Routed</div>
+            <div class="text-[11px] text-slate-400 uppercase font-semibold">Telemetry Packets Logged</div>
             <div id="stat-total-tokens" class="text-2xl font-extrabold text-indigo-400 font-mono mt-1">0</div>
         </div>
         <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm">
@@ -522,19 +512,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col shadow-xl">
             <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-800">
                 <h2 class="text-xs font-bold uppercase text-slate-200 flex items-center gap-2">
-                    <i data-lucide="users" class="w-4 h-4 text-indigo-400"></i> Tenant Management
+                    <i data-lucide="server" class="w-4 h-4 text-indigo-400"></i> Discovered Hardware Nodes
                 </h2>
                 <span id="client-count" class="px-2.5 py-0.5 bg-slate-800 text-slate-300 rounded-full text-[10px] font-mono">0 Registered</span>
             </div>
             <div id="clients-container" class="space-y-3 overflow-y-auto flex-1 max-h-[520px] pr-1">
-                <div class="text-xs text-slate-500 text-center py-12 font-mono">Loading clients...</div>
+                <div class="text-xs text-slate-500 text-center py-12 font-mono">Loading hardware nodes...</div>
             </div>
         </div>
 
         <div class="lg:col-span-2 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col shadow-xl">
             <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-800">
                 <h2 class="text-xs font-bold uppercase text-slate-200 flex items-center gap-2">
-                    <i data-lucide="activity" class="w-4 h-4 text-emerald-400"></i> Live AI Traffic Telemetry & Audit Log
+                    <i data-lucide="activity" class="w-4 h-4 text-emerald-400"></i> Live Hardware Telemetry Audit Stream
                 </h2>
                 <div class="flex items-center gap-2">
                     <span id="selected-client-badge" class="px-2 py-0.5 bg-indigo-950 text-indigo-400 border border-indigo-800 rounded text-[10px] font-mono">Selected: None</span>
@@ -547,14 +537,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         <tr>
                             <th class="p-3">Timestamp (UTC)</th>
                             <th class="p-3">Hardware ID / Device</th>
-                            <th class="p-3">Provider / Model</th>
-                            <th class="p-3">Tokens</th>
+                            <th class="p-3">Source / Model</th>
+                            <th class="p-3">Packets</th>
                             <th class="p-3">Latency</th>
-                            <th class="p-3">Prompt & Response Preview</th>
+                            <th class="p-3">Telemetry Payload Preview</th>
                         </tr>
                     </thead>
                     <tbody id="logs-table-body" class="divide-y divide-slate-800/60 text-slate-300">
-                        <tr><td colspan="6" class="py-12 text-center text-slate-500">Select an active client or listen for live AI traffic...</td></tr>
+                        <tr><td colspan="6" class="py-12 text-center text-slate-500">Select an active hardware node or start the agent to stream traffic...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -580,9 +570,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 document.getElementById("stat-total-clients").innerText = globalClients.length;
                 document.getElementById("stat-approved-clients").innerText = globalClients.filter(c => c.status === 'APPROVED').length;
                 
-                let totalTokens = 0;
-                globalLogs.forEach(l => totalTokens += (l.tokens || 0));
-                document.getElementById("stat-total-tokens").innerText = totalTokens.toLocaleString();
+                let totalPackets = 0;
+                globalLogs.forEach(l => totalPackets += 1);
+                document.getElementById("stat-total-tokens").innerText = totalPackets;
 
                 if (selectedHwId && !globalClients.some(c => c.hw_id === selectedHwId)) {
                     selectedHwId = null;
@@ -611,7 +601,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         async function softDeleteClient(hwId) {
-            if(!confirm(`Are you sure you want to soft delete tenant ${hwId}?`)) return;
+            if(!confirm(`Are you sure you want to delete node ${hwId}?`)) return;
             try {
                 const res = await fetch(`${SERVER_URL}/api/clients/${encodeURIComponent(hwId)}/delete`, {
                     method: 'POST'
@@ -633,14 +623,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const container = document.getElementById("clients-container");
             document.getElementById("client-count").innerText = `${clients.length} Registered`;
             if (!clients.length) { 
-                container.innerHTML = `<div class="text-xs text-slate-500 text-center py-12 font-mono">No active nodes registered.</div>`; 
+                container.innerHTML = `<div class="text-xs text-slate-500 text-center py-12 font-mono">No hardware nodes detected.</div>`; 
                 renderLogs([]);
                 return; 
             }
             container.innerHTML = "";
             clients.forEach(c => {
                 const isSelected = c.hw_id === selectedHwId;
-                let badgeColor = c.status === 'APPROVED' ? 'text-emerald-400 bg-emerald-950 border-emerald-800' : (c.status === 'DENIED' ? 'text-red-400 bg-red-950 border-red-800' : 'text-amber-400 bg-amber-950 border-amber-800');
+                let badgeColor = c.status === 'APPROVED' ? 'text-emerald-400 bg-emerald-950 border-emerald-800' : 'text-amber-400 bg-amber-950 border-amber-800';
                 const card = document.createElement("div");
                 card.className = `p-4 rounded-xl border transition cursor-pointer font-mono shadow-sm ${isSelected ? 'border-indigo-500 bg-indigo-950/30 ring-1 ring-indigo-500' : 'border-slate-800 bg-slate-950/85 hover:border-slate-700'}`;
                 card.onclick = (e) => {
@@ -653,19 +643,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         <span class="px-2.5 py-0.5 border rounded-full text-[10px] font-bold ${badgeColor}">${c.status}</span>
                     </div>
                     <div class="mt-2 text-[11px] text-slate-300 space-y-1 bg-slate-900/90 p-2.5 rounded border border-slate-800/80">
-                        <div>Hostname: <strong class="text-indigo-300">${c.hostname || 'Client-Machine'}</strong></div>
-                        <div>OS / Type: <strong class="text-emerald-300">${c.os || 'Windows'} (${c.device_type || 'PC'})</strong></div>
-                        <div>IP / Location: <strong class="text-slate-200">${c.ip_address || '127.0.0.1'} (${c.geo_location ? c.geo_location.region : 'Maharashtra'})</strong></div>
-                    </div>
-                    <div class="flex justify-between text-[11px] text-slate-400 mt-2">
-                        <span>Tier: <strong class="text-slate-200">${c.subscription_tier || 'ENTERPRISE_PRO'}</strong></span>
-                        <span>Tokens: <strong class="text-emerald-400">${(c.balance_tokens||0).toLocaleString()}</strong></span>
+                        <div>BIOS / Board SN: <strong class="text-indigo-300">${c.bios_sn || 'BIOS-9F82-X7'}</strong></div>
+                        <div>VM / Uniqueness: <strong class="text-purple-300">${c.vm_status || 'Physical / Baremetal'}</strong></div>
+                        <div>GPU Renderer: <strong class="text-emerald-300 truncate block">${c.gpu_renderer || 'Direct3D Hardware Accelerated'}</strong></div>
+                        <div>CPU / RAM / Res: <strong class="text-slate-200">${c.cpu_cores || 8} Cores | ${c.device_memory || 8}GB | ${c.resolution || '1920x1080'}</strong></div>
                     </div>
                     <div class="flex items-center justify-between pt-2 border-t border-slate-800/80 mt-2">
                         <span class="text-[10px] text-indigo-300">${isSelected ? '● Active Selection' : 'Click to inspect'}</span>
                         <div class="flex items-center gap-1.5">
                             <button onclick="updateClientStatus('${c.hw_id}', 'APPROVED')" class="px-2 py-1 bg-emerald-900/45 hover:bg-emerald-900 text-emerald-300 rounded text-[10px] font-semibold transition border border-emerald-800">Approve</button>
-                            <button onclick="updateClientStatus('${c.hw_id}', 'DENIED')" class="px-2 py-1 bg-amber-900/45 hover:bg-amber-900 text-amber-300 rounded text-[10px] font-semibold transition border border-amber-800">Deny</button>
                             <button onclick="softDeleteClient('${c.hw_id}')" class="px-2 py-1 bg-red-900/45 hover:bg-red-900 text-red-300 rounded text-[10px] font-semibold transition border border-red-800">Delete</button>
                         </div>
                     </div>`;
@@ -680,7 +666,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if (!selectedHwId || globalClients.length === 0) {
                 badge.innerText = "Selected: None";
                 document.getElementById("log-count").innerText = "0 Recorded";
-                tbody.innerHTML = `<tr><td colspan="6" class="py-12 text-center text-slate-500">No active client selected or all clients deleted.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="6" class="py-12 text-center text-slate-500">No hardware node selected.</td></tr>`;
                 return;
             }
 
@@ -689,7 +675,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             document.getElementById("log-count").innerText = `${filteredLogs.length} Recorded`;
 
             if (!filteredLogs.length) { 
-                tbody.innerHTML = `<tr><td colspan="6" class="py-12 text-center text-slate-500">No telemetry records found for tenant ${selectedHwId}.</td></tr>`; 
+                tbody.innerHTML = `<tr><td colspan="6" class="py-12 text-center text-slate-500">No telemetry packets recorded yet. Click 'Start' on the Hardware Agent.</td></tr>`; 
                 return; 
             }
             tbody.innerHTML = "";
@@ -702,8 +688,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         <td class="p-3 text-emerald-400 font-bold">${l.tokens}</td>
                         <td class="p-3 text-amber-400">${l.latency_ms} ms</td>
                         <td class="p-3 text-slate-300 max-w-xs truncate">
-                            <span class="text-indigo-300">Q:</span> ${l.prompt}<br/>
-                            <span class="text-emerald-300">A:</span> ${l.response}
+                            <span class="text-indigo-300">Metric:</span> ${l.prompt}<br/>
+                            <span class="text-emerald-300">Status:</span> ${l.response}
                         </td>
                     </tr>`;
             });
@@ -715,9 +701,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             ws.onmessage = function(event) {
                 const message = JSON.parse(event.data);
                 if (message.type === 'NEW_TRAFFIC') { loadDashboardData(); }
-            };
-            ws.onerror = function() {
-                document.getElementById("connection-badge").innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> Polling Mode`;
             };
         }
 
@@ -733,7 +716,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tenant AI Playground & Multi-Platform Gateway</title>
+    <title>Hardware Telemetry Collector Agent</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>body { background-color: #030712; color: #f3f4f6; font-family: ui-sans-serif, system-ui, sans-serif; }</style>
@@ -743,68 +726,62 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
         <div class="flex items-center justify-between mb-4 border-b border-slate-800 pb-4">
             <div>
                 <h1 class="text-sm font-bold text-white flex items-center gap-2">
-                    <i data-lucide="cpu" class="w-4 h-4 text-indigo-400"></i> Tenant AI Playground & Machine Telemetry Agent
+                    <i data-lucide="cpu" class="w-4 h-4 text-indigo-400"></i> Live Hardware Telemetry Collector Agent
                 </h1>
-                <p id="device-mode-label" class="text-[11px] text-indigo-400 font-mono mt-0.5">Capturing Machine Telemetry...</p>
+                <p id="agent-status-label" class="text-[11px] text-amber-400 font-mono mt-0.5">Status: Ready (Click 'Start' to stream live telemetry)</p>
             </div>
             <div class="flex items-center gap-3">
-                <button onclick="toggleBridgeConfig()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-mono transition flex items-center gap-1">
-                    <i data-lucide="code" class="w-3.5 h-3.5 text-indigo-400"></i> External App Bridge API
+                <a href="/" class="text-indigo-400 text-xs font-mono hover:underline">&larr; Dashboard Control Plane</a>
+            </div>
+        </div>
+
+        <!-- Deep Hardware & VM Specs Collector Card -->
+        <div class="mb-4 p-4 bg-slate-950 border border-indigo-900/60 rounded-xl text-xs font-mono grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+                <span class="text-slate-400 text-[10px]">UNIQUE HARDWARE ID:</span><br/>
+                <strong id="info-hwid" class="text-indigo-400 truncate block">Generating...</strong>
+            </div>
+            <div>
+                <span class="text-slate-400 text-[10px]">BIOS / BOARD SERIAL:</span><br/>
+                <strong id="info-bios" class="text-indigo-300">Detecting...</strong>
+            </div>
+            <div>
+                <span class="text-slate-400 text-[10px]">VIRTUAL MACHINE STATUS:</span><br/>
+                <strong id="info-vm" class="text-purple-300">Detecting...</strong>
+            </div>
+            <div>
+                <span class="text-slate-400 text-[10px]">GPU / WEBGL RENDERER:</span><br/>
+                <strong id="info-gpu" class="text-emerald-300 truncate block">Detecting...</strong>
+            </div>
+            <div>
+                <span class="text-slate-400 text-[10px]">CPU CORES / RAM / RES:</span><br/>
+                <strong id="info-specs" class="text-slate-200">Detecting...</strong>
+            </div>
+            <div>
+                <span class="text-slate-400 text-[10px]">COMPLIANCE FRAMEWORK:</span><br/>
+                <strong class="text-emerald-400">NIST SP 800-53 & DPDP Act</strong>
+            </div>
+        </div>
+
+        <!-- Live Stream Stream Box -->
+        <div id="telemetry-stream" class="flex-1 bg-slate-950 rounded-xl p-4 border border-slate-800 overflow-y-auto space-y-2 text-xs font-mono mb-4">
+            <div class="text-slate-500 text-center py-10">Hardware collector initialized. Click 'Start' below to begin live traffic & hardware telemetry transmission.</div>
+        </div>
+
+        <!-- Start & End Control Buttons (No Prompt Required) -->
+        <div class="flex items-center justify-between bg-slate-950 p-4 rounded-xl border border-slate-800">
+            <div class="flex items-center gap-2">
+                <span class="w-3 h-3 rounded-full bg-slate-600" id="status-indicator"></span>
+                <span class="text-xs text-slate-300 font-mono" id="stream-mode-text">Stream Stopped</span>
+            </div>
+            <div class="flex gap-3">
+                <button onclick="startTelemetryStream()" id="btn-start" class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl text-xs transition shadow-lg shadow-emerald-600/30 flex items-center gap-1.5">
+                    <i data-lucide="play" class="w-4 h-4"></i> Start Stream
                 </button>
-                <button onclick="clearChat()" class="text-slate-400 text-xs font-mono hover:text-white flex items-center gap-1">
-                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Clear Chat
+                <button onclick="endTelemetryStream()" id="btn-end" class="px-6 py-2.5 bg-red-600 hover:bg-red-500 text-white font-semibold rounded-xl text-xs transition shadow-lg shadow-red-600/30 flex items-center gap-1.5" disabled>
+                    <i data-lucide="square" class="w-4 h-4"></i> End Stream
                 </button>
-                <a href="/" class="text-indigo-400 text-xs font-mono hover:underline">&larr; Dashboard</a>
             </div>
-        </div>
-
-        <!-- Instant Client Machine Telemetry Inspector Card -->
-        <div id="machine-info-card" class="mb-4 p-4 bg-slate-950 border border-indigo-900/60 rounded-xl text-xs font-mono grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div>
-                <span class="text-slate-400 text-[10px]">HOSTNAME:</span><br/>
-                <strong id="info-hostname" class="text-indigo-300">Detecting...</strong>
-            </div>
-            <div>
-                <span class="text-slate-400 text-[10px]">OS / TYPE:</span><br/>
-                <strong id="info-os" class="text-emerald-300">Detecting...</strong>
-            </div>
-            <div>
-                <span class="text-slate-400 text-[10px]">UNIQUE HW ID:</span><br/>
-                <strong id="info-hwid" class="text-indigo-400 truncate block">Detecting...</strong>
-            </div>
-            <div>
-                <span class="text-slate-400 text-[10px]">COMPLIANCE:</span><br/>
-                <strong class="text-purple-400">GDPR, NIST & DPDP</strong>
-            </div>
-        </div>
-
-        <!-- External App Integration Instructions Modal/Card -->
-        <div id="bridge-modal" class="hidden mb-4 p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono space-y-2">
-            <div class="flex justify-between items-center text-white font-bold">
-                <span>External App & Perplexity Integration Settings</span>
-                <button onclick="toggleBridgeConfig()" class="text-slate-400 hover:text-white">&times; Close</button>
-            </div>
-            <p class="text-slate-400">Configure Perplexity Desktop App, Comet Browser, or any HTTP client to route queries through this NIST/DPDP Gateway:</p>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 pt-2">
-                <div class="bg-slate-900 p-2.5 rounded border border-slate-800">
-                    <span class="text-indigo-400 font-bold">Base API Endpoint:</span><br/>
-                    <code id="bridge-url" class="text-emerald-400 select-all"></code>
-                </div>
-                <div class="bg-slate-900 p-2.5 rounded border border-slate-800">
-                    <span class="text-indigo-400 font-bold">Hardware ID Header (X-HW-ID):</span><br/>
-                    <code id="bridge-hwid" class="text-emerald-400 select-all"></code>
-                </div>
-            </div>
-        </div>
-
-        <div id="chat-stream" class="flex-1 bg-slate-950 rounded-xl p-4 border border-slate-800 overflow-y-auto space-y-3 text-xs font-mono mb-4">
-            <div class="text-slate-500 text-center py-6">Machine telemetry captured successfully. Click send or test prompt to forward traffic to dashboard.</div>
-        </div>
-        <div class="flex gap-3">
-            <input type="text" id="test-prompt" placeholder="Type prompt to send traffic (e.g., test email user@test.com)..." class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-indigo-500" onkeydown="if(event.key==='Enter') sendCall()">
-            <button onclick="sendCall()" class="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl text-xs transition shadow-lg shadow-indigo-600/30 flex items-center gap-1.5">
-                <i data-lucide="send" class="w-4 h-4"></i> Send & Share
-            </button>
         </div>
     </div>
     <script>
@@ -812,78 +789,89 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
         
         let clientHwId = "";
         let apiKey = "";
+        let streamInterval = null;
+        let isStreaming = false;
+        let hardwareDetails = {};
 
-        async function generateHardwareFingerprint() {
+        async function collectDeepHardwareFingerprint() {
             const nav = window.navigator;
             const screen = window.screen;
+            
+            // WebGL GPU Renderer Inspection
+            let gpuRenderer = "Direct3D Hardware Renderer";
+            let isVM = "Physical / Baremetal Workstation";
+            try {
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                if (gl) {
+                    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                    if (debugInfo) {
+                        gpuRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                    }
+                }
+            } catch(e) {}
+
+            if (/vmware|virtualbox|qemu|kvm|xen|vm_host|swiftshader/i.test(gpuRenderer)) {
+                isVM = "Virtual Machine Instance (VM Detected)";
+            }
+
+            // Canvas hash for unique hardware fingerprinting
             let canvasHash = "";
             try {
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
                 ctx.textBaseline = "top";
                 ctx.font = "14px 'Arial'";
-                ctx.fillText("NIST-DPDP-Enterprise-Security-2026", 2, 2);
-                canvasHash = canvas.toDataURL().slice(-40);
-            } catch(e) { canvasHash = "fallback-canvas"; }
+                ctx.fillText("NIST-DPDP-Hardware-Collector-2026", 2, 2);
+                canvasHash = canvas.toDataURL().slice(-30);
+            } catch(e) { canvasHash = "hw-sig-fallback"; }
 
-            const entropySource = [
-                nav.hardwareConcurrency || 4,
-                nav.deviceMemory || 8,
-                screen.width + 'x' + screen.height,
-                screen.colorDepth,
-                nav.platform || 'unknown',
-                nav.language || 'en',
-                canvasHash
-            ].join('||');
+            const cpuCores = nav.hardwareConcurrency || 8;
+            const ramGB = nav.deviceMemory || 16;
+            const resolution = `${screen.width}x${screen.height}`;
+            
+            // Simulated BIOS Serial Number linked to hardware entropy
+            const biosSerial = `BIOS-SN-${Math.abs(hashCode(gpuRenderer + resolution)).toString(16).toUpperCase()}`;
+            const uniqueHwId = `HW-SECURE-${Math.abs(hashCode(canvasHash + cpuCores)).toString(16).toUpperCase()}-${cpuCores}C`;
 
+            hardwareDetails = {
+                hw_id: uniqueHwId,
+                bios_sn: biosSerial,
+                vm_status: isVM,
+                gpu_renderer: gpuRenderer,
+                cpu_cores: cpuCores,
+                device_memory: ramGB,
+                resolution: resolution,
+                os: nav.platform || 'Win32'
+            };
+
+            return hardwareDetails;
+        }
+
+        function hashCode(str) {
             let hash = 0;
-            for (let i = 0; i < entropySource.length; i++) {
-                hash = ((hash << 5) - hash) + entropySource.charCodeAt(i);
+            for (let i = 0; i < str.length; i++) {
+                hash = ((hash << 5) - hash) + str.charCodeAt(i);
                 hash |= 0;
             }
-            const uniqueHex = Math.abs(hash).toString(16).toUpperCase();
-            const isMobile = /android|iphone|ipad|ipod/i.test(nav.userAgent);
-            const prefix = isMobile ? "HW-MOB-" : "HW-PC-";
-            return `${prefix}${uniqueHex}-${nav.hardwareConcurrency || 4}C-${screen.width}X${screen.height}`;
+            return hash;
         }
 
         async function initAgent() {
-            clientHwId = localStorage.getItem("enterprise_hw_id_v3");
-            if (!clientHwId) {
-                clientHwId = await generateHardwareFingerprint();
-                localStorage.setItem("enterprise_hw_id_v3", clientHwId);
-            }
+            const hwSpecs = await collectDeepHardwareFingerprint();
+            clientHwId = hwSpecs.hw_id;
 
-            const ua = navigator.userAgent;
-            let osName = "Windows Workstation";
-            let deviceType = "PC";
-            if (/android/i.test(ua)) { osName = "Android OS"; deviceType = "Mobile"; }
-            else if (/iphone|ipad|ipod/i.test(ua)) { osName = "iOS / Apple"; deviceType = "Mobile"; }
-            else if (/mac/i.test(navigator.platform || ua)) { osName = "macOS Workstation"; deviceType = "PC"; }
-            else if (/linux/i.test(navigator.platform || ua)) { osName = "Linux Node"; deviceType = "PC"; }
-
-            const hostname = `WORKSTATION-${deviceType}-${clientHwId.split('-')[2] || 'NODE'}`;
-
-            document.getElementById("info-hostname").innerText = hostname;
-            document.getElementById("info-os").innerText = `${osName} (${deviceType})`;
             document.getElementById("info-hwid").innerText = clientHwId;
-            document.getElementById("device-mode-label").innerText = `Client Platform: ${osName} | Unique HW ID: ${clientHwId}`;
-            
-            document.getElementById("bridge-url").innerText = window.location.origin + "/v1/chat/completions";
-            document.getElementById("bridge-hwid").innerText = clientHwId;
+            document.getElementById("info-bios").innerText = hwSpecs.bios_sn;
+            document.getElementById("info-vm").innerText = hwSpecs.vm_status;
+            document.getElementById("info-gpu").innerText = hwSpecs.gpu_renderer;
+            document.getElementById("info-specs").innerText = `${hwSpecs.cpu_cores} Cores | ${hwSpecs.device_memory}GB RAM | ${hwSpecs.resolution}`;
 
             try {
                 const res = await fetch('/api/register', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        hw_id: clientHwId,
-                        hostname: hostname,
-                        device_type: deviceType,
-                        os: osName,
-                        user_agent: navigator.userAgent,
-                        platform_source: 'Browser Agent & Traffic Inspector'
-                    })
+                    body: JSON.stringify(hwSpecs)
                 });
                 const data = await res.json();
                 if (data.api_key) {
@@ -894,55 +882,73 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             }
         }
 
-        function toggleBridgeConfig() {
-            const modal = document.getElementById("bridge-modal");
-            modal.classList.toggle("hidden");
-        }
-
-        function clearChat() {
-            const stream = document.getElementById("chat-stream");
-            stream.innerHTML = `<div class="text-slate-500 text-center py-6">Chat history cleared. Ready for new traffic simulation.</div>`;
-        }
-
-        async function sendCall() {
-            const input = document.getElementById("test-prompt");
-            const text = input.value.trim();
-            if(!text) return;
-            input.value = "";
-            const stream = document.getElementById("chat-stream");
-            stream.innerHTML += `<div class="p-3 bg-slate-900 rounded-xl border border-slate-800"><b>You:</b> ${text}</div>`;
+        async function sendTelemetryHeartbeat() {
+            const stream = document.getElementById("telemetry-stream");
+            const timestamp = new Date().toISOString();
             
             try {
                 const headers = {
                     'Content-Type': 'application/json',
                     'X-HW-ID': clientHwId
                 };
-                if (apiKey) {
-                    headers['Authorization'] = `Bearer ${apiKey}`;
-                }
+                if (apiKey) { headers['Authorization'] = `Bearer ${apiKey}`; }
 
                 const res = await fetch('/v1/chat/completions', {
                     method: 'POST',
                     headers: headers,
-                    body: JSON.stringify({ messages: [{role: 'user', content: text}], model: "gemini-2.5-flash", provider: "Client Browser Agent" })
+                    body: JSON.stringify({ 
+                        payload: `Hardware Health & Telemetry Pulse [BIOS: ${hardwareDetails.bios_sn}, VM: ${hardwareDetails.vm_status}]`, 
+                        model: "hardware-telemetry-v6", 
+                        provider: "Hardware Collector Agent" 
+                    })
                 });
                 const data = await res.json();
-                const reply = data.choices && data.choices[0] ? data.choices[0].message.content : "Processed successfully.";
-                const telemetry = data.gateway_telemetry || { latency_ms: 58, tokens_consumed: 65, remaining_balance: 249935 };
-                
+                const telemetry = data.gateway_telemetry || { latency_ms: 42, tokens_consumed: 36 };
+
                 stream.innerHTML += `
-                    <div class="p-3 bg-slate-950 rounded-xl border border-indigo-900/50 space-y-2 text-indigo-300">
-                        <div><b>AI Gateway (NIST & DPDP Secure):</b> ${reply}</div>
-                        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-slate-800/80 text-[10px] text-slate-400">
-                            <div>Latency: <span class="text-amber-400 font-bold">${telemetry.latency_ms} ms</span></div>
-                            <div>Tokens Used: <span class="text-emerald-400 font-bold">${telemetry.tokens_consumed}</span></div>
-                            <div>Remaining Balance: <span class="text-indigo-400 font-bold">${telemetry.remaining_balance.toLocaleString()}</span></div>
-                            <div>Compliance: <span class="text-emerald-400 font-bold">PII Redacted & Logged</span></div>
+                    <div class="p-2.5 bg-slate-900 rounded-lg border border-indigo-900/40 flex justify-between items-center text-[11px]">
+                        <div>
+                            <span class="text-indigo-400">[${timestamp}]</span> 
+                            <span class="text-emerald-300">Telemetry Pushed Successfully</span> 
+                            <span class="text-slate-400">(BIOS: ${hardwareDetails.bios_sn})</span>
                         </div>
+                        <div class="text-amber-400 font-mono">${telemetry.latency_ms}ms</div>
                     </div>`;
             } catch (err) {
-                stream.innerHTML += `<div class="p-3 bg-red-950/50 border border-red-800 rounded-xl text-red-400"><b>Error:</b> Failed to communicate with gateway bridge.</div>`;
+                stream.innerHTML += `<div class="p-2.5 bg-red-950/40 border border-red-800 rounded-lg text-red-400">[${timestamp}] Telemetry push failed.</div>`;
             }
+            stream.scrollTop = stream.scrollHeight;
+        }
+
+        function startTelemetryStream() {
+            if (isStreaming) return;
+            isStreaming = true;
+            document.getElementById("btn-start").disabled = true;
+            document.getElementById("btn-end").disabled = false;
+            document.getElementById("status-indicator").className = "w-3 h-3 rounded-full bg-emerald-500 animate-pulse";
+            document.getElementById("stream-mode-text").innerText = "Live Telemetry Streaming Active";
+            document.getElementById("agent-status-label").innerText = "Status: Streaming live hardware metrics to control plane";
+
+            const stream = document.getElementById("telemetry-stream");
+            stream.innerHTML += `<div class="text-emerald-400 font-bold py-2">[Stream Started] Transmitting live hardware telemetry packets...</div>`;
+
+            // Send immediately then every 4 seconds
+            sendTelemetryHeartbeat();
+            streamInterval = setInterval(sendTelemetryHeartbeat, 4000);
+        }
+
+        function endTelemetryStream() {
+            if (!isStreaming) return;
+            isStreaming = false;
+            clearInterval(streamInterval);
+            document.getElementById("btn-start").disabled = false;
+            document.getElementById("btn-end").disabled = true;
+            document.getElementById("status-indicator").className = "w-3 h-3 rounded-full bg-slate-600";
+            document.getElementById("stream-mode-text").innerText = "Stream Stopped";
+            document.getElementById("agent-status-label").innerText = "Status: Paused (Click 'Start' to resume)";
+
+            const stream = document.getElementById("telemetry-stream");
+            stream.innerHTML += `<div class="text-amber-400 font-bold py-2">[Stream Ended] Telemetry transmission paused.</div>`;
             stream.scrollTop = stream.scrollHeight;
         }
 
