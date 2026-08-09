@@ -83,7 +83,6 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
-        # Auto-migrate columns if table already existed without them
         for col_name, col_type in [
             ("subscription_tier", "TEXT DEFAULT 'ENTERPRISE_PRO'"),
             ("balance_tokens", "INTEGER DEFAULT 500000"),
@@ -110,7 +109,7 @@ def get_db():
 
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
-    version="8.8.0",
+    version="8.9.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -135,7 +134,6 @@ def startup_event():
     init_db()
 
 def sanitize_pii(text: str) -> str:
-    """Masks PII and sensitive API credentials to meet GDPR & DPDP standards."""
     if not isinstance(text, str):
         return str(text) if text else ""
     text = re.sub(r"[\w\.-]+@[\w\.-]+\.\w+", "[REDACTED_EMAIL]", text)
@@ -351,9 +349,9 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
 
         sanitized_prompt = sanitize_pii(str(raw_prompt))
         
-        model = body.get("model", "gemini-2.5-pro")
-        version = body.get("version", "v2.5-enterprise")
-        think_level = body.get("think_level", "Balanced (Level 2)")
+        model = body.get("model", "Custom-LLM-Dynamic")
+        version = body.get("version", "v1.0")
+        think_level = body.get("think_level", "Standard")
         provider = body.get("provider", "AI Gateway")
 
         input_tokens = len(sanitized_prompt.split()) * 2 + 14
@@ -374,7 +372,7 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         bios_val = meta.get("bios_sn")
         device_type_val = meta.get("device_type")
 
-        ai_response_text = f"Processed AI Request [{model} | Version: {version}]: '{sanitized_prompt[:35]}...'"
+        ai_response_text = f"Processed Traffic [{model} | Ver: {version}]: '{sanitized_prompt[:35]}...'"
 
         payload_data = {
             "provider": provider,
@@ -890,28 +888,15 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3 bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs font-mono">
             <div>
                 <label style="font-size: 10px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">LLM Model</label>
-                <select id="model-select" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-200">
-                    <option value="gemini-2.5-pro">gemini-2.5-pro</option>
-                    <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                    <option value="claude-3-5-sonnet">claude-3-5-sonnet</option>
-                    <option value="gpt-4o">gpt-4o</option>
-                </select>
+                <input id="model-input" type="text" value="custom-llm-engine" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-200 outline-none" placeholder="e.g. llama-3-70b">
             </div>
             <div>
                 <label style="font-size: 10px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Model Version</label>
-                <select id="version-select" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-200">
-                    <option value="v2.5-enterprise">v2.5-enterprise</option>
-                    <option value="v2.4-stable">v2.4-stable</option>
-                    <option value="v3.0-rc">v3.0-rc</option>
-                </select>
+                <input id="version-input" type="text" value="v1.0.0" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-200 outline-none" placeholder="e.g. v2.1-prod">
             </div>
             <div>
-                <label style="font-size: 10px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Think Level</label>
-                <select id="think-select" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-200">
-                    <option value="Deep Reasoning (Level 3)">Deep Reasoning (Level 3)</option>
-                    <option value="Balanced (Level 2)">Balanced (Level 2)</option>
-                    <option value="Fast (Level 1)">Fast (Level 1)</option>
-                </select>
+                <label style="font-size: 10px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Think Level / Context</label>
+                <input id="think-input" type="text" value="Standard" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-200 outline-none" placeholder="e.g. Deep Reasoning">
             </div>
         </div>
 
@@ -966,9 +951,9 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             if(!text) return;
             input.value = "";
 
-            const model = document.getElementById("model-select").value;
-            const version = document.getElementById("version-select").value;
-            const thinkLevel = document.getElementById("think-select").value;
+            const model = document.getElementById("model-input").value.trim() || "custom-llm";
+            const version = document.getElementById("version-input").value.trim() || "v1.0";
+            const thinkLevel = document.getElementById("think-input").value.trim() || "Standard";
 
             const chatContainer = document.getElementById("chat-messages");
             chatContainer.innerHTML += `<div style="padding: 0.75rem; background: #0f172a; border: 1px solid #1e293b; border-radius: 0.5rem;"><strong style="color: #818cf8;">AI Traffic [Model: ${model} | Version: ${version}]:</strong> ${text}</div>`;
@@ -1010,16 +995,6 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
         }
 
         initClient();
-        setInterval(() => {
-            if(clientCredentials.hw_id) {
-                // Heartbeat background telemetry query
-                const input = document.getElementById("prompt-input");
-                if(!input.value) {
-                    input.value = "Automated system telemetry audit query";
-                    sendAITraffic();
-                }
-            }
-        }, 45000); // Heartbeat every 45 seconds
     </script>
 </body>
 </html>"""
