@@ -510,7 +510,7 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-# --- Optimized Production Stylesheet (Zero CDN Warnings) ---[cite: 1]
+# --- Optimized Production Stylesheet ---[cite: 1]
 GLOBAL_CSS = """
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background-color: #030712; color: #f3f4f6; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
@@ -568,15 +568,15 @@ th, td { padding: 0.75rem; border-bottom: 1px solid #1e293b; }
 button, a, input, select { font: inherit; color: inherit; }
 """
 
-# --- Frontend Dashboards (Warning-Free Styling) ---[cite: 1]
-DASHBOARD_HTML = f"""<!DOCTYPE html>
+# --- Frontend Dashboards (Fixed: Changed f""" to regular """ to avoid f-string syntax error) ---
+DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Enterprise Cloud AI Gateway & Control Plane</title>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <style>{GLOBAL_CSS}</style>
+    <style>""" + GLOBAL_CSS + """</style>
 </head>
 <body class="min-h-screen p-6 flex flex-col gap-4">
     <header class="flex flex-col md:flex-row items-center justify-between border border-slate-800 pb-4 gap-4 bg-slate-900 p-4 rounded-xl">
@@ -834,14 +834,14 @@ DASHBOARD_HTML = f"""<!DOCTYPE html>
 </body>
 </html>"""
 
-WEB_AGENT_HTML = f"""<!DOCTYPE html>
+WEB_AGENT_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Browser Telemetry & AI Traffic Collector</title>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <style>{GLOBAL_CSS}</style>
+    <style>""" + GLOBAL_CSS + """</style>
 </head>
 <body class="min-h-screen p-4 flex flex-col items-center justify-center">
     <div class="max-w-4xl w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col" style="height: 90vh;">
