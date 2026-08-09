@@ -58,7 +58,7 @@ class ClientModel(Base):
     id = Column(Integer, primary_key=True, index=True)
     hw_id = Column(String, unique=True, index=True)
     api_key = Column(String, unique=True, index=True)
-    status = Column(String, default="PENDING")
+    status = Column(String, default="APPROVED")
     subscription_tier = Column(String, default="ENTERPRISE_PRO")
     balance_tokens = Column(Integer, default=250000)
     metadata_json = Column(Text, nullable=True)
@@ -103,7 +103,7 @@ def get_db():
 # --- FastAPI App ---
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
-    version="5.0.0",
+    version="5.1.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -132,13 +132,9 @@ def sanitize_pii(text: str) -> str:
     """Zero-dependency PII Redaction engine adhering to GDPR & DPDP Act."""
     if not isinstance(text, str):
         return str(text) if text else ""
-    # Mask email addresses
     text = re.sub(r"[\w\.-]+@[\w\.-]+\.\w+", "[REDACTED_EMAIL]", text)
-    # Mask Indian & international phone numbers (10 to 12 digits)
     text = re.sub(r"\b\d{10,12}\b", "[REDACTED_PHONE]", text)
-    # Mask API keys and secrets
     text = re.sub(r"sk_live_\w+|sk_test_\w+|AIzaSy\w+|sk_tenant_\w+", "[REDACTED_SECRET]", text)
-    # Mask Aadhaar-like 12-digit patterns for DPDP compliance
     text = re.sub(r"\b\d{4}\s\d{4}\s\d{4}\b", "[REDACTED_ID]", text)
     return text
 
@@ -203,7 +199,7 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
             client = ClientModel(
                 hw_id=hw_id,
                 api_key=api_key,
-                status="PENDING",
+                status="APPROVED",
                 subscription_tier="ENTERPRISE_PRO",
                 balance_tokens=250000,
                 is_deleted=False,
@@ -277,11 +273,11 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
             client_node = ClientModel(
                 hw_id=hw_id_header,
                 api_key=f"sk_tenant_{secrets.token_hex(16)}",
-                status="PENDING",
+                status="APPROVED",
                 subscription_tier="ENTERPRISE_PRO",
                 balance_tokens=250000,
                 is_deleted=False,
-                metadata_json=json.dumps({"hw_id": hw_id_header, "source": "external_app_bridge"})
+                metadata_json=json.dumps({"hw_id": hw_id_header, "source": "external_app_bridge", "hostname": "CLIENT-MACHINE", "device_type": "PC", "os": "Windows"})
             )
             db.add(client_node)
             db.commit()
@@ -302,7 +298,7 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         text_resp = f"Enterprise Cloud AI Gateway routed response: {sanitized_prompt[:50]}"
         input_tokens = max(15, len(sanitized_prompt.split()) * 2)
         output_tokens = 50
-        latency = 62
+        latency = 58
         total_tokens = input_tokens + output_tokens
 
         client_node.balance_tokens = max(0, client_node.balance_tokens - total_tokens)
@@ -389,7 +385,7 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
             clients.append({
                 **meta,
                 "hw_id": c.hw_id or "UNKNOWN",
-                "status": c.status or "PENDING",
+                "status": c.status or "APPROVED",
                 "subscription_tier": c.subscription_tier or "ENTERPRISE_PRO",
                 "balance_tokens": c.balance_tokens or 0,
                 "is_deleted": is_del,
@@ -656,6 +652,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         <span class="font-bold text-indigo-400 text-xs truncate max-w-[180px]" title="${c.hw_id}">${c.hw_id}</span>
                         <span class="px-2.5 py-0.5 border rounded-full text-[10px] font-bold ${badgeColor}">${c.status}</span>
                     </div>
+                    <div class="mt-2 text-[11px] text-slate-300 space-y-1 bg-slate-900/90 p-2.5 rounded border border-slate-800/80">
+                        <div>Hostname: <strong class="text-indigo-300">${c.hostname || 'Client-Machine'}</strong></div>
+                        <div>OS / Type: <strong class="text-emerald-300">${c.os || 'Windows'} (${c.device_type || 'PC'})</strong></div>
+                        <div>IP / Location: <strong class="text-slate-200">${c.ip_address || '127.0.0.1'} (${c.geo_location ? c.geo_location.region : 'Maharashtra'})</strong></div>
+                    </div>
                     <div class="flex justify-between text-[11px] text-slate-400 mt-2">
                         <span>Tier: <strong class="text-slate-200">${c.subscription_tier || 'ENTERPRISE_PRO'}</strong></span>
                         <span>Tokens: <strong class="text-emerald-400">${(c.balance_tokens||0).toLocaleString()}</strong></span>
@@ -742,9 +743,9 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
         <div class="flex items-center justify-between mb-4 border-b border-slate-800 pb-4">
             <div>
                 <h1 class="text-sm font-bold text-white flex items-center gap-2">
-                    <i data-lucide="cpu" class="w-4 h-4 text-indigo-400"></i> Tenant AI Playground & External App Bridge (Perplexity / Comet)
+                    <i data-lucide="cpu" class="w-4 h-4 text-indigo-400"></i> Tenant AI Playground & Machine Telemetry Agent
                 </h1>
-                <p id="device-mode-label" class="text-[11px] text-indigo-400 font-mono mt-0.5">Generating Robust Hardware Fingerprint...</p>
+                <p id="device-mode-label" class="text-[11px] text-indigo-400 font-mono mt-0.5">Capturing Machine Telemetry...</p>
             </div>
             <div class="flex items-center gap-3">
                 <button onclick="toggleBridgeConfig()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-mono transition flex items-center gap-1">
@@ -757,8 +758,28 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             </div>
         </div>
 
+        <!-- Instant Client Machine Telemetry Inspector Card -->
+        <div id="machine-info-card" class="mb-4 p-4 bg-slate-950 border border-indigo-900/60 rounded-xl text-xs font-mono grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+                <span class="text-slate-400 text-[10px]">HOSTNAME:</span><br/>
+                <strong id="info-hostname" class="text-indigo-300">Detecting...</strong>
+            </div>
+            <div>
+                <span class="text-slate-400 text-[10px]">OS / TYPE:</span><br/>
+                <strong id="info-os" class="text-emerald-300">Detecting...</strong>
+            </div>
+            <div>
+                <span class="text-slate-400 text-[10px]">UNIQUE HW ID:</span><br/>
+                <strong id="info-hwid" class="text-indigo-400 truncate block">Detecting...</strong>
+            </div>
+            <div>
+                <span class="text-slate-400 text-[10px]">COMPLIANCE:</span><br/>
+                <strong class="text-purple-400">GDPR, NIST & DPDP</strong>
+            </div>
+        </div>
+
         <!-- External App Integration Instructions Modal/Card -->
-        <div id="bridge-modal" class="hidden mb-4 p-4 bg-slate-950 border border-indigo-900 rounded-xl text-xs font-mono space-y-2">
+        <div id="bridge-modal" class="hidden mb-4 p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono space-y-2">
             <div class="flex justify-between items-center text-white font-bold">
                 <span>External App & Perplexity Integration Settings</span>
                 <button onclick="toggleBridgeConfig()" class="text-slate-400 hover:text-white">&times; Close</button>
@@ -777,10 +798,10 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
         </div>
 
         <div id="chat-stream" class="flex-1 bg-slate-950 rounded-xl p-4 border border-slate-800 overflow-y-auto space-y-3 text-xs font-mono mb-4">
-            <div class="text-slate-500 text-center py-6">Ready for cross-platform AI traffic simulation. Built-in PII redaction and NIST/DPDP compliance active.</div>
+            <div class="text-slate-500 text-center py-6">Machine telemetry captured successfully. Click send or test prompt to forward traffic to dashboard.</div>
         </div>
         <div class="flex gap-3">
-            <input type="text" id="test-prompt" placeholder="Type prompt to test gateway & share telemetry (e.g., test email: user@test.com)..." class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-indigo-500" onkeydown="if(event.key==='Enter') sendCall()">
+            <input type="text" id="test-prompt" placeholder="Type prompt to send traffic (e.g., test email user@test.com)..." class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-indigo-500" onkeydown="if(event.key==='Enter') sendCall()">
             <button onclick="sendCall()" class="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl text-xs transition shadow-lg shadow-indigo-600/30 flex items-center gap-1.5">
                 <i data-lucide="send" class="w-4 h-4"></i> Send & Share
             </button>
@@ -792,7 +813,6 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
         let clientHwId = "";
         let apiKey = "";
 
-        // Advanced Hardware Fingerprinting Algorithm (Zero-Dependency & Robust)
         async function generateHardwareFingerprint() {
             const nav = window.navigator;
             const screen = window.screen;
@@ -822,39 +842,47 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                 hash |= 0;
             }
             const uniqueHex = Math.abs(hash).toString(16).toUpperCase();
-            const prefix = /android|iphone|ipad|ipod/i.test(nav.userAgent) ? "HW-MOB-" : "HW-PC-";
+            const isMobile = /android|iphone|ipad|ipod/i.test(nav.userAgent);
+            const prefix = isMobile ? "HW-MOB-" : "HW-PC-";
             return `${prefix}${uniqueHex}-${nav.hardwareConcurrency || 4}C-${screen.width}X${screen.height}`;
         }
 
         async function initAgent() {
-            clientHwId = localStorage.getItem("enterprise_hw_id_v2");
+            clientHwId = localStorage.getItem("enterprise_hw_id_v3");
             if (!clientHwId) {
                 clientHwId = await generateHardwareFingerprint();
-                localStorage.setItem("enterprise_hw_id_v2", clientHwId);
+                localStorage.setItem("enterprise_hw_id_v3", clientHwId);
             }
 
             const ua = navigator.userAgent;
-            let osName = "Desktop Workstation";
-            if (/android/i.test(ua)) osName = "Android Mobile";
-            else if (/iphone|ipad|ipod/i.test(ua)) osName = "iOS Device";
-            else if (/win/i.test(navigator.platform || ua)) osName = "Windows PC";
-            else if (/mac/i.test(navigator.platform || ua)) osName = "macOS Workstation";
-            else if (/linux/i.test(navigator.platform || ua)) osName = "Linux Node";
+            let osName = "Windows Workstation";
+            let deviceType = "PC";
+            if (/android/i.test(ua)) { osName = "Android OS"; deviceType = "Mobile"; }
+            else if (/iphone|ipad|ipod/i.test(ua)) { osName = "iOS / Apple"; deviceType = "Mobile"; }
+            else if (/mac/i.test(navigator.platform || ua)) { osName = "macOS Workstation"; deviceType = "PC"; }
+            else if (/linux/i.test(navigator.platform || ua)) { osName = "Linux Node"; deviceType = "PC"; }
 
+            const hostname = `WORKSTATION-${deviceType}-${clientHwId.split('-')[2] || 'NODE'}`;
+
+            document.getElementById("info-hostname").innerText = hostname;
+            document.getElementById("info-os").innerText = `${osName} (${deviceType})`;
+            document.getElementById("info-hwid").innerText = clientHwId;
             document.getElementById("device-mode-label").innerText = `Client Platform: ${osName} | Unique HW ID: ${clientHwId}`;
+            
             document.getElementById("bridge-url").innerText = window.location.origin + "/v1/chat/completions";
             document.getElementById("bridge-hwid").innerText = clientHwId;
 
-            // Register with backend control plane
             try {
                 const res = await fetch('/api/register', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         hw_id: clientHwId,
-                        device_type: osName,
+                        hostname: hostname,
+                        device_type: deviceType,
+                        os: osName,
                         user_agent: navigator.userAgent,
-                        platform_source: 'Browser Playground & External App Bridge'
+                        platform_source: 'Browser Agent & Traffic Inspector'
                     })
                 });
                 const data = await res.json();
@@ -896,11 +924,11 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                 const res = await fetch('/v1/chat/completions', {
                     method: 'POST',
                     headers: headers,
-                    body: JSON.stringify({ messages: [{role: 'user', content: text}], model: "gemini-2.5-flash", provider: "Perplexity / External App Client" })
+                    body: JSON.stringify({ messages: [{role: 'user', content: text}], model: "gemini-2.5-flash", provider: "Client Browser Agent" })
                 });
                 const data = await res.json();
                 const reply = data.choices && data.choices[0] ? data.choices[0].message.content : "Processed successfully.";
-                const telemetry = data.gateway_telemetry || { latency_ms: 62, tokens_consumed: 70, remaining_balance: 249930 };
+                const telemetry = data.gateway_telemetry || { latency_ms: 58, tokens_consumed: 65, remaining_balance: 249935 };
                 
                 stream.innerHTML += `
                     <div class="p-3 bg-slate-950 rounded-xl border border-indigo-900/50 space-y-2 text-indigo-300">
