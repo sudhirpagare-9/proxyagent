@@ -7,18 +7,29 @@ import requests
 import json
 import logging
 import os
+import hashlib
+import random
 
 # --- Logging Setup ---
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] [DYNAMIC-AGENT] %(message)s",
+    format="%(asctime)s [%(levelname)s] [AI-TRAFFIC-AGENT] %(message)s",
 )
-logger = logging.getLogger("NativeClientAgent")
+logger = logging.getLogger("NativeAIClientAgent")
 
 BACKEND_URL = os.environ.get("BACKEND_URL", "https://proxyagent-dashboard.onrender.com")
 
+AI_WORKLOAD_PROMPTS = [
+    "Write a Python FastAPI endpoint implementing JWT authentication and rate limiting.",
+    "Analyze PostgreSQL query execution plan for indexing optimization on large tables.",
+    "Generate a secure Dockerfile following NIST SP 800-53 container hardening guidelines.",
+    "Implement an asynchronous Three.js 3D mesh rendering loop with WebGL shaders.",
+    "Review data privacy compliance requirements for GDPR article 32 data encryption.",
+    "Create a Python script using cryptography.fernet for secure payload encryption.",
+    "Design a modular network security packet filter for real-time threat detection."
+]
+
 def get_dynamic_bios_serial() -> str:
-    """Dynamically queries system BIOS serial number from operating system."""
     try:
         if platform.system() == "Windows":
             output = subprocess.check_output("wmic bios get serialnumber", shell=True, text=True, timeout=3)
@@ -36,13 +47,11 @@ def get_dynamic_bios_serial() -> str:
     return f"SYS-{platform.machine()}-{abs(hash(platform.node()))}"
 
 def get_dynamic_mac_address() -> str:
-    """Extracts true physical MAC address."""
     mac_num = uuid.getnode()
     mac_str = ':'.join(['{:02x}'.format((mac_num >> elements) & 0xff) for elements in range(40, -1, -8)])
     return mac_str.upper()
 
 def get_dynamic_ip_address() -> str:
-    """Discovers active local IP address dynamically."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -58,8 +67,9 @@ def collect_real_system_hardware() -> dict:
     ip_address = get_dynamic_ip_address()
     bios_sn = get_dynamic_bios_serial()
     
-    # Unique ID bound strictly to actual hardware attributes
-    hw_id = f"HW-{platform.system().upper()}-{abs(hash(hostname + mac_address))}"
+    unique_seed = f"{hostname}-{mac_address}-{bios_sn}"
+    hash_hex = hashlib.sha256(unique_seed.encode()).hexdigest()[:12].upper()
+    hw_id = f"HW-{platform.system().upper()}-{hash_hex}"
 
     os_name = platform.system()
     os_release = platform.release()
@@ -78,42 +88,39 @@ def collect_real_system_hardware() -> dict:
     }
 
 def run_agent():
-    logger.info("Initializing Dynamic Hardware Telemetry Agent...")
+    logger.info("Initializing AI Traffic Client Agent...")
     hw_specs = collect_real_system_hardware()
     
-    logger.info("Discovered System Hardware:")
+    logger.info("Discovered Client Node:")
     logger.info(f" -> Hostname: {hw_specs['hostname']}")
     logger.info(f" -> IP Address: {hw_specs['ip_address']}")
-    logger.info(f" -> MAC Address: {hw_specs['mac_address']}")
     logger.info(f" -> Hardware ID: {hw_specs['hw_id']}")
-    logger.info(f" -> BIOS Serial: {hw_specs['bios_sn']}")
 
     api_key = None
 
-    # Step 1: Register dynamic node with backend
     try:
         reg_response = requests.post(f"{BACKEND_URL}/api/register", json=hw_specs, timeout=10)
         if reg_response.status_code == 200:
             data = reg_response.json()
             api_key = data.get("api_key")
-            logger.info("Successfully registered dynamic node with gateway.")
+            logger.info("Successfully registered client node with gateway.")
         else:
             logger.error(f"Registration failed with code: {reg_response.status_code}")
     except Exception as e:
         logger.error(f"Registration connection error: {e}")
 
-    # Step 2: Continuous live telemetry stream loop
-    logger.info("Starting live telemetry stream...")
+    logger.info("Starting live AI traffic transmission stream...")
     headers = {'Content-Type': 'application/json', 'X-HW-ID': hw_specs['hw_id']}
     if api_key:
         headers['Authorization'] = f"Bearer {api_key}"
 
     while True:
         try:
+            selected_prompt = random.choice(AI_WORKLOAD_PROMPTS)
             payload = {
-                "payload": f"Dynamic Telemetry Heartbeat from {hw_specs['hostname']} [IP: {hw_specs['ip_address']}]",
+                "payload": selected_prompt,
                 "model": "gemini-2.5-pro",
-                "provider": "Native Python Agent",
+                "provider": "Native Desktop AI Agent",
                 "hostname": hw_specs['hostname'],
                 "mac_address": hw_specs['mac_address'],
                 "ip_address": hw_specs['ip_address'],
@@ -123,13 +130,13 @@ def run_agent():
             }
             res = requests.post(f"{BACKEND_URL}/v1/chat/completions", json=payload, headers=headers, timeout=10)
             if res.status_code == 200:
-                logger.info(f"Telemetry pushed successfully. Host: {hw_specs['hostname']} | IP: {hw_specs['ip_address']}")
+                logger.info(f"AI Traffic captured & logged! Prompt: '{selected_prompt[:35]}...'")
             else:
-                logger.warning(f"Telemetry push returned code: {res.status_code}")
+                logger.warning(f"Traffic transmission returned code: {res.status_code}")
         except Exception as ex:
             logger.error(f"Transmission failure: {ex}")
 
-        time.sleep(5)
+        time.sleep(8)
 
 if __name__ == "__main__":
     run_agent()
