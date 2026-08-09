@@ -26,14 +26,14 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.sql import func
 
-# --- Logging & Compliance Setup ---
+# --- Logging & Compliance Setup ---[cite: 1]
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] [AI-GATEWAY-SECURITY] %(message)s",
 )
 logger = logging.getLogger("EnterpriseAIGateway")
 
-# --- Database Setup ---
+# --- Database Setup ---[cite: 1]
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./enterprise_gateway.db")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
@@ -234,6 +234,50 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
         db.rollback()
         logger.error(f"Registration error: {e}")
         return {"status": "error", "message": str(e)}
+
+@app.get("/api/export-audit-report")
+def export_audit_report(user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
+    try:
+        active_clients = db.query(ClientModel).filter(ClientModel.is_deleted == False).all()
+        active_hw_ids = {c.hw_id for c in active_clients}
+        rows = db.query(TrafficLogModel).order_by(TrafficLogModel.created_at.desc()).all()
+        rows = [r for r in rows if r.hw_id in active_hw_ids]
+    except:
+        rows = []
+        
+    output = io.StringIO()
+    output.write("HardwareID,Hostname,IPAddress,Provider,Model,Version,ThinkLevel,PromptTokens,CompletionTokens,LatencyMS,AI_Prompt,AI_Response,TimestampUTC\n")
+    
+    for r in rows:
+        p = {}
+        try:
+            if r.payload_json:
+                try:
+                    p = json.loads(cipher.decrypt(r.payload_json.encode()).decode())
+                except:
+                    p = json.loads(r.payload_json)
+        except:
+            pass
+            
+        hw_id = r.hw_id or ""
+        hostname = p.get("hostname") or ""
+        ip_address = p.get("ip_address") or ""
+        provider = r.provider or ""
+        model = r.model or ""
+        version = r.version or ""
+        think_level = r.think_level or ""
+        prompt_tokens = r.prompt_tokens or 0
+        completion_tokens = r.completion_tokens or 0
+        latency_ms = r.latency_ms or 0
+        query = str(p.get("query", "")).replace('"', '""')
+        response_text = str(p.get("response", "")).replace('"', '""')
+        timestamp_utc = p.get("timestamp_utc", "")
+        
+        output.write(f'"{hw_id}","{hostname}","{ip_address}","{provider}","{model}","{version}","{think_level}",{prompt_tokens},{completion_tokens},{latency_ms},"{query}","{response_text}","{timestamp_utc}"\n')
+        
+    response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
+    response.headers["Content-Disposition"] = "attachment; filename=ai_traffic_compliance_audit.csv"
+    return response
 
 @app.post("/api/clients/{hw_id}/status")
 async def update_client_status(hw_id: str, request: Request, user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
@@ -457,32 +501,6 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
         logger.error(f"Error in dashboard_data: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-@app.get("/api/export-audit-report")
-def export_audit_report(user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
-    try:
-        active_clients = db.query(ClientModel).filter(ClientModel.is_deleted == False).all()
-        active_hw_ids = {c.hw_id for c in active_clients}
-        rows = db.query(TrafficLogModel).order_by(TrafficLogModel.created_at.desc()).all()
-        rows = [r for r in rows if r.hw_id in active_hw_ids]
-    except:
-        rows = []
-    output = io.StringIO()
-    output.write("HardwareID,Hostname,IPAddress,Provider,Model,Version,ThinkLevel,PromptTokens,CompletionTokens,LatencyMS,AI_Prompt,AI_Response,TimestampUTC\n")
-    for r in rows:
-        p = {}
-        try:
-            if r.payload_json:
-                try:
-                    p = json.loads(cipher.decrypt(r.payload_json.encode()).decode())
-                except:
-                    p = json.loads(r.payload_json)
-        except:
-            pass
-        output.write(f'"{r.hw_id}","{p.get("hostname") or ""}","{p.get("ip_address") or ""}","{r.provider or ""}","{r.model or ""}","{r.version or ""}","{r.think_level or ""}",{r.prompt_tokens},{r.completion_tokens},{r.latency_ms},"{str(p.get("query","")).replace('"', '""')}","{str(p.get("response","")).replace('"', '""')}","{p.get("timestamp_utc","")}"\n')
-    response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
-    response.headers["Content-Disposition"] = "attachment; filename=ai_traffic_compliance_audit.csv"
-    return response
-
 @app.websocket("/ws/live-traffic")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
@@ -492,7 +510,7 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-# --- Optimized Production Stylesheet (Zero CDN Warnings) ---
+# --- Optimized Production Stylesheet (Zero CDN Warnings) ---[cite: 1]
 GLOBAL_CSS = """
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background-color: #030712; color: #f3f4f6; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
@@ -550,7 +568,7 @@ th, td { padding: 0.75rem; border-bottom: 1px solid #1e293b; }
 button, a, input, select { font: inherit; color: inherit; }
 """
 
-# --- Frontend Dashboards (Warning-Free Styling) ---
+# --- Frontend Dashboards (Warning-Free Styling) ---[cite: 1]
 DASHBOARD_HTML = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
