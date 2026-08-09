@@ -103,7 +103,7 @@ def get_db():
 # --- FastAPI App ---
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
-    version="6.2.0",
+    version="6.3.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -187,6 +187,9 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
         forwarded = request.headers.get("x-forwarded-for")
         real_ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "127.0.0.1")
 
+        if not body.get("hostname") or body.get("hostname") == "WIN-ENTERPRISE-PC":
+            body["hostname"] = "sup laptop"
+
         geo_info = {"country": "India", "city": "Mumbai", "region": "Maharashtra", "compliance": "DPDP & GDPR Active"}
         body["ip_address"] = real_ip
         body["geo_location"] = geo_info
@@ -268,6 +271,14 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
             client_node = db.query(ClientModel).filter(ClientModel.api_key == api_key).first()
         if not client_node or client_node.is_deleted:
             client_node = db.query(ClientModel).filter(ClientModel.hw_id == hw_id_header).first()
+        
+        meta = {}
+        if client_node and client_node.metadata_json:
+            try:
+                meta = json.loads(client_node.metadata_json)
+            except:
+                meta = {}
+
         if not client_node or client_node.is_deleted:
             client_node = ClientModel(
                 hw_id=hw_id_header,
@@ -278,7 +289,7 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
                 is_deleted=False,
                 metadata_json=json.dumps({
                     "hw_id": hw_id_header,
-                    "hostname": "WIN-ENTERPRISE-PC",
+                    "hostname": "sup laptop",
                     "ip_address": "192.168.1.105",
                     "mac_address": "00:1A:2B:3C:4D:5E",
                     "device_type": "Windows Workstation (PC)",
@@ -287,6 +298,7 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
             )
             db.add(client_node)
             db.commit()
+            meta = json.loads(client_node.metadata_json)
 
         prompt = body.get("payload", body.get("messages", [{}])[-1].get("content", "Live Hardware Telemetry Heartbeat"))
         sanitized_prompt = sanitize_pii(prompt)
@@ -305,17 +317,14 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         timestamp_utc = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
         timestamp_local = datetime.now().strftime("%Y-%m-%d %H:%M:%S Local")
 
-        meta = {}
-        if client_node.metadata_json:
-            try:
-                meta = json.loads(client_node.metadata_json)
-            except:
-                meta = {}
+        hostname_val = meta.get("hostname") or "sup laptop"
+        ip_val = meta.get("ip_address") or "192.168.1.105"
+        mac_val = meta.get("mac_address") or "00:1A:2B:3C:4D:5E"
 
         payload_data = {
             "provider": provider,
             "m": model,
-            "version": "v6.2-enterprise",
+            "version": "v6.3-enterprise",
             "think_level": "Deep Reason (Level 3)",
             "query": sanitized_prompt,
             "response": "Secure AI Traffic Audited & Routed successfully.",
@@ -324,9 +333,9 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
             "latency": latency,
             "timestamp_utc": timestamp_utc,
             "timestamp_local": timestamp_local,
-            "hostname": meta.get("hostname", "WIN-ENTERPRISE-PC"),
-            "ip_address": meta.get("ip_address", "192.168.1.105"),
-            "mac_address": meta.get("mac_address", "00:1A:2B:3C:4D:5E")
+            "hostname": hostname_val,
+            "ip_address": ip_val,
+            "mac_address": mac_val
         }
 
         try:
@@ -352,6 +361,9 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
                 "id": log_entry.id,
                 "timestamp": timestamp_utc,
                 "tenant_id": client_node.hw_id,
+                "hostname": hostname_val,
+                "ip_address": ip_val,
+                "mac_address": mac_val,
                 "provider": f"{provider} / {model}",
                 "tokens": total_tokens,
                 "latency_ms": latency,
@@ -372,11 +384,11 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         "usage": {"prompt_tokens": 22, "completion_tokens": 45, "total_tokens": 67},
         "gateway_telemetry": {
             "hw_id": client_node.hw_id if client_node else hw_id_header,
-            "hostname": meta.get("hostname", "WIN-ENTERPRISE-PC"),
-            "ip_address": meta.get("ip_address", "192.168.1.105"),
-            "mac_address": meta.get("mac_address", "00:1A:2B:3C:4D:5E"),
+            "hostname": hostname_val,
+            "ip_address": ip_val,
+            "mac_address": mac_val,
             "model_name": "gemini-2.5-pro",
-            "model_version": "v6.2-enterprise",
+            "model_version": "v6.3-enterprise",
             "think_level": "Deep Reason (Level 3)",
             "input_tokens": 22,
             "output_tokens": 45,
@@ -408,6 +420,11 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
             is_del = bool(c.is_deleted)
             if not is_del:
                 active_hw_ids.add(c.hw_id)
+            
+            # Guarantee fallback to sup laptop
+            if not meta.get("hostname") or meta.get("hostname") == "WIN-ENTERPRISE-PC":
+                meta["hostname"] = "sup laptop"
+
             clients.append({
                 **meta,
                 "hw_id": c.hw_id or "UNKNOWN",
@@ -436,9 +453,9 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
             logs.append({
                 "id": l.id,
                 "hw_id": l.hw_id or "UNKNOWN",
-                "hostname": payload.get("hostname", "WIN-ENTERPRISE-PC"),
-                "ip_address": payload.get("ip_address", "192.168.1.105"),
-                "mac_address": payload.get("mac_address", "00:1A:2B:3C:4D:5E"),
+                "hostname": payload.get("hostname") or "sup laptop",
+                "ip_address": payload.get("ip_address") or "192.168.1.105",
+                "mac_address": payload.get("mac_address") or "00:1A:2B:3C:4D:5E",
                 "timestamp_utc": payload.get("timestamp_utc", str(l.created_at) if l.created_at else "N/A"),
                 "timestamp_local": payload.get("timestamp_local", "N/A"),
                 "provider": f"{l.provider or 'Gateway'} / {l.model or 'hw'}",
@@ -475,7 +492,7 @@ def export_audit_report(user: dict = Depends(verify_admin_user), db: Session = D
                     p = json.loads(r.payload_json)
         except:
             pass
-        output.write(f'"{r.hw_id}","{p.get("hostname","N/A")}","{p.get("ip_address","N/A")}","{p.get("mac_address","N/A")}","{r.provider}","{r.model}",{r.prompt_tokens},{r.completion_tokens},{r.latency_ms},"{p.get("timestamp_local","N/A")}","{p.get("timestamp_utc","N/A")}"\n')
+        output.write(f'"{r.hw_id}","{p.get("hostname") or "sup laptop"}","{p.get("ip_address") or "192.168.1.105"}","{p.get("mac_address") or "00:1A:2B:3C:4D:5E"}","{r.provider}","{r.model}",{r.prompt_tokens},{r.completion_tokens},{r.latency_ms},"{p.get("timestamp_local","N/A")}","{p.get("timestamp_utc","N/A")}"\n')
     response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
     response.headers["Content-Disposition"] = "attachment; filename=hardware_collector_audit_report.csv"
     return response
@@ -679,7 +696,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         <span class="px-2.5 py-0.5 border rounded-full text-[10px] font-bold ${badgeColor}">${c.status}</span>
                     </div>
                     <div class="mt-2 text-[11px] text-slate-300 space-y-1 bg-slate-900/90 p-2.5 rounded border border-slate-800/80">
-                        <div>Hostname: <strong class="text-cyan-300">${c.hostname || 'WIN-ENTERPRISE-PC'}</strong></div>
+                        <div>Hostname: <strong class="text-cyan-300">${c.hostname || 'sup laptop'}</strong></div>
                         <div>IP Address: <strong class="text-emerald-300">${c.ip_address || '192.168.1.105'}</strong></div>
                         <div>MAC Address: <strong class="text-amber-300">${c.mac_address || '00:1A:2B:3C:4D:5E'}</strong></div>
                         <div>OS & Device: <strong class="text-indigo-300">${c.device_type || 'Windows Workstation'}</strong></div>
@@ -724,11 +741,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                             <div class="text-slate-400">UTC: ${l.timestamp_utc}</div>
                         </td>
                         <td class="p-3 text-indigo-400 font-bold truncate max-w-[140px]" title="${l.hw_id}">
-                            ${l.hw_id}<br/><span class="text-cyan-300 font-normal">${l.hostname}</span>
+                            ${l.hw_id}<br/><span class="text-cyan-300 font-normal">${l.hostname || 'sup laptop'}</span>
                         </td>
                         <td class="p-3 text-slate-300 text-[11px]">
-                            IP: <span class="text-emerald-400">${l.ip_address}</span><br/>
-                            MAC: <span class="text-amber-300">${l.mac_address}</span>
+                            IP: <span class="text-emerald-400">${l.ip_address || '192.168.1.105'}</span><br/>
+                            MAC: <span class="text-amber-300">${l.mac_address || '00:1A:2B:3C:4D:5E'}</span>
                         </td>
                         <td class="p-3 text-slate-200 text-[11px]">
                             Tokens: <span class="text-emerald-400 font-bold">${l.tokens}</span><br/>
@@ -790,7 +807,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             </div>
             <div>
                 <span class="text-slate-400 text-[10px]">HOSTNAME:</span><br/>
-                <strong id="info-hostname" class="text-cyan-300">Detecting...</strong>
+                <strong id="info-hostname" class="text-cyan-300">sup laptop</strong>
             </div>
             <div>
                 <span class="text-slate-400 text-[10px]">IP & MAC ADDRESS:</span><br/>
@@ -837,7 +854,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
         let clientHwId = "";
         let apiKey = "";
         let ipAddress = "192.168.1.105";
-        let hostname = "WIN-ENTERPRISE-PC";
+        let hostname = "sup laptop";
         let macAddress = "00:1A:2B:3C:4D:5E";
         let streamInterval = null;
         let isStreaming = false;
@@ -898,23 +915,20 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
 
             let storedHwId = localStorage.getItem("enterprise_hw_id");
             let storedBios = localStorage.getItem("enterprise_bios_sn");
-            let storedHostname = localStorage.getItem("enterprise_hostname");
             let storedMac = localStorage.getItem("enterprise_mac");
 
             if (!storedHwId) {
                 const cpuCores = nav.hardwareConcurrency || 8;
                 storedHwId = `HW-SECURE-${Math.abs(hashCode(canvasHash + cpuCores)).toString(16).toUpperCase()}-${cpuCores}C`;
                 storedBios = `BIOS-SN-${Math.abs(hashCode(gpuRenderer + screen.width)).toString(16).toUpperCase()}`;
-                storedHostname = `WIN-WKST-${Math.floor(Math.random() * 8999 + 1000)}`;
                 storedMac = `00:1A:${Math.floor(Math.random()*89+10)}:${Math.floor(Math.random()*89+10)}:${Math.floor(Math.random()*89+10)}:${Math.floor(Math.random()*89+10)}`;
                 
                 localStorage.setItem("enterprise_hw_id", storedHwId);
                 localStorage.setItem("enterprise_bios_sn", storedBios);
-                localStorage.setItem("enterprise_hostname", storedHostname);
                 localStorage.setItem("enterprise_mac", storedMac);
             }
 
-            hostname = storedHostname;
+            hostname = "sup laptop";
             macAddress = storedMac;
 
             hardwareDetails = {
@@ -996,7 +1010,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                     ip_address: ipAddress,
                     mac_address: macAddress,
                     model_name: "gemini-2.5-pro",
-                    model_version: "v6.2-enterprise",
+                    model_version: "v6.3-enterprise",
                     think_level: "Deep Reason (Level 3)",
                     input_tokens: 22,
                     output_tokens: 45,
@@ -1014,8 +1028,8 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                             <span class="text-indigo-300">UTC Time: <strong>${t.timestamp_utc}</strong></span>
                         </div>
                         <div class="grid grid-cols-2 md:grid-cols-4 gap-2 pt-1 text-[11px]">
-                            <div>HW ID / Host: <strong class="text-indigo-400 truncate block">${t.hw_id}</strong><span class="text-cyan-300">${t.hostname}</span></div>
-                            <div>Network: <strong class="text-emerald-300">IP: ${t.ip_address}</strong><br/><span class="text-amber-300">MAC: ${t.mac_address}</span></div>
+                            <div>HW ID / Host: <strong class="text-indigo-400 truncate block">${t.hw_id}</strong><span class="text-cyan-300">${t.hostname || 'sup laptop'}</span></div>
+                            <div>Network: <strong class="text-emerald-300">IP: ${t.ip_address || '192.168.1.105'}</strong><br/><span class="text-amber-300">MAC: ${t.mac_address || '00:1A:2B:3C:4D:5E'}</span></div>
                             <div>AI Model & Ver: <strong class="text-emerald-400">${t.model_name}</strong><br/><span class="text-purple-300">${t.model_version}</span></div>
                             <div>Think Level: <strong class="text-amber-300">${t.think_level}</strong></div>
                             <div>Input Tokens: <strong class="text-blue-300">${t.input_tokens}</strong></div>
@@ -1042,7 +1056,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             document.getElementById("agent-status-label").innerText = "Status: Streaming live AI traffic & accurate hardware metrics with dual timestamps";
 
             const stream = document.getElementById("telemetry-stream");
-            stream.innerHTML += `<div class="text-emerald-400 font-bold py-2">[Stream Started] Capturing and streaming AI traffic packets with Hostname, IP, MAC & Dual Timestamps...</div>`;
+            stream.innerHTML += `<div class="text-emerald-400 font-bold py-2">[Stream Started] Capturing and streaming AI traffic packets with Hostname (sup laptop), IP, MAC & Dual Timestamps...</div>`;
 
             sendTelemetryHeartbeat();
             streamInterval = setInterval(sendTelemetryHeartbeat, 4000);
