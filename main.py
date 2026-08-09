@@ -83,6 +83,7 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
+        # 1. Update clients table
         for col_name, col_type in [
             ("subscription_tier", "TEXT DEFAULT 'ENTERPRISE_PRO'"),
             ("balance_tokens", "INTEGER DEFAULT 500000"),
@@ -94,6 +95,18 @@ def init_db():
                 db.commit()
             except Exception:
                 db.rollback()
+                
+        # 2. Update traffic_logs table (FIX ADDED HERE)
+        for col_name, col_type in [
+            ("version", "VARCHAR"),
+            ("think_level", "VARCHAR")
+        ]:
+            try:
+                db.execute(text(f"ALTER TABLE traffic_logs ADD COLUMN {col_name} {col_type}"))
+                db.commit()
+            except Exception:
+                db.rollback()
+                
         logger.info("Database initialized and schema verified successfully.")
     except Exception as e:
         logger.warning(f"Database initialization notice: {e}")
