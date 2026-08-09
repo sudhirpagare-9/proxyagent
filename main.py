@@ -104,7 +104,7 @@ def get_db():
 # --- FastAPI App ---
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
-    version="4.7.1",
+    version="4.8.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -261,7 +261,7 @@ async def log_traffic(request: Request, db: Session = Depends(get_db)):
     hw_id = body.get("hw_id", "HW-DEFAULT-CLIENT")
     try:
         client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
-        if not client:
+        if not client or client.is_deleted:
             client = ClientModel(
                 hw_id=hw_id,
                 api_key=f"sk_tenant_{secrets.token_hex(16)}",
@@ -340,9 +340,9 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         client_node = None
         if api_key:
             client_node = db.query(ClientModel).filter(ClientModel.api_key == api_key).first()
-        if not client_node:
+        if not client_node or client_node.is_deleted:
             client_node = db.query(ClientModel).filter(ClientModel.hw_id == hw_id_header).first()
-        if not client_node:
+        if not client_node or client_node.is_deleted:
             client_node = ClientModel(
                 hw_id=hw_id_header,
                 api_key=f"sk_tenant_{secrets.token_hex(16)}",
@@ -436,6 +436,7 @@ def dashboard_data(user: dict = Depends(verify_supabase_user), db: Session = Dep
         log_rows = db.query(TrafficLogModel).order_by(TrafficLogModel.id.desc()).limit(150).all()
 
         clients = []
+        active_hw_ids = set()
         for c in client_rows:
             meta = {}
             if c.metadata_json:
@@ -443,19 +444,25 @@ def dashboard_data(user: dict = Depends(verify_supabase_user), db: Session = Dep
                     meta = json.loads(c.metadata_json)
                 except:
                     meta = {}
+            is_del = bool(c.is_deleted)
+            if not is_del:
+                active_hw_ids.add(c.hw_id)
             clients.append({
                 **meta,
                 "hw_id": c.hw_id or "UNKNOWN",
                 "status": c.status or "PENDING",
                 "subscription_tier": c.subscription_tier or "ENTERPRISE_PRO",
                 "balance_tokens": c.balance_tokens or 0,
-                "is_deleted": bool(c.is_deleted),
+                "is_deleted": is_del,
                 "created_at": str(c.created_at) if c.created_at else "",
                 "api_key": c.api_key or "",
             })
 
         logs = []
         for l in log_rows:
+            # Only include logs if the associated client is active and not deleted
+            if l.hw_id not in active_hw_ids:
+                continue
             payload = {}
             try:
                 if l.payload_json:
@@ -486,7 +493,10 @@ def dashboard_data(user: dict = Depends(verify_supabase_user), db: Session = Dep
 @app.get("/api/export-audit-report")
 def export_audit_report(user: dict = Depends(verify_supabase_user), db: Session = Depends(get_db)):
     try:
+        active_clients = db.query(ClientModel).filter(ClientModel.is_deleted == False).all()
+        active_hw_ids = {c.hw_id for c in active_clients}
         rows = db.query(TrafficLogModel).order_by(TrafficLogModel.created_at.desc()).all()
+        rows = [r for r in rows if r.hw_id in active_hw_ids]
     except:
         rows = []
     output = io.StringIO()
@@ -592,7 +602,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <h2 class="text-xs font-bold uppercase text-slate-200 flex items-center gap-2">
                     <i data-lucide="activity" class="w-4 h-4 text-emerald-400"></i> Live AI Traffic Telemetry & Audit Log
                 </h2>
-                <span id="log-count" class="px-2.5 py-0.5 bg-slate-800 text-slate-300 rounded-full text-[10px] font-mono">0 Recorded</span>
+                <div class="flex items-center gap-2">
+                    <span id="selected-client-badge" class="px-2 py-0.5 bg-indigo-950 text-indigo-400 border border-indigo-800 rounded text-[10px] font-mono">Selected: None</span>
+                    <span id="log-count" class="px-2.5 py-0.5 bg-slate-800 text-slate-300 rounded-full text-[10px] font-mono">0 Recorded</span>
+                </div>
             </div>
             <div class="overflow-x-auto flex-1 max-h-[520px] overflow-y-auto">
                 <table class="w-full text-left text-xs font-mono">
@@ -607,7 +620,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         </tr>
                     </thead>
                     <tbody id="logs-table-body" class="divide-y divide-slate-800/60 text-slate-300">
-                        <tr><td colspan="6" class="py-12 text-center text-slate-500">Listening for live AI traffic...</td></tr>
+                        <tr><td colspan="6" class="py-12 text-center text-slate-500">Select an active client or listen for live AI traffic...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -617,6 +630,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <script>
         lucide.createIcons();
         const SERVER_URL = window.location.origin;
+        let selectedHwId = null;
+        let globalClients = [];
+        let globalLogs = [];
 
         async function loadDashboardData() {
             try {
@@ -624,15 +640,30 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if(!res.ok) return;
                 const data = await res.json();
                 
-                document.getElementById("stat-total-clients").innerText = (data.clients || []).filter(c => !c.is_deleted).length;
-                document.getElementById("stat-approved-clients").innerText = (data.clients || []).filter(c => c.status === 'APPROVED' && !c.is_deleted).length;
+                globalClients = (data.clients || []).filter(c => !c.is_deleted);
+                globalLogs = data.logs || [];
+
+                document.getElementById("stat-total-clients").innerText = globalClients.length;
+                document.getElementById("stat-approved-clients").innerText = globalClients.filter(c => c.status === 'APPROVED').length;
                 
                 let totalTokens = 0;
-                (data.logs || []).forEach(l => totalTokens += (l.tokens || 0));
+                globalLogs.forEach(l => totalTokens += (l.tokens || 0));
                 document.getElementById("stat-total-tokens").innerText = totalTokens.toLocaleString();
 
-                renderClients(data.clients || []);
-                renderLogs(data.logs || []);
+                // Check if selected client still exists
+                if (selectedHwId && !globalClients.some(c => c.hw_id === selectedHwId)) {
+                    selectedHwId = null;
+                }
+                // Auto-select first client if none selected and available
+                if (!selectedHwId && globalClients.length > 0) {
+                    selectedHwId = globalClients[0].hw_id;
+                }
+                if (globalClients.length === 0) {
+                    selectedHwId = null;
+                }
+
+                renderClients(globalClients);
+                renderLogs(globalLogs);
             } catch (err) { console.error("Telemetry fetch error:", err); }
         }
 
@@ -653,36 +684,54 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const res = await fetch(`${SERVER_URL}/api/clients/${encodeURIComponent(hwId)}/delete`, {
                     method: 'POST'
                 });
-                if(res.ok) { loadDashboardData(); }
+                if(res.ok) { 
+                    if(selectedHwId === hwId) { selectedHwId = null; }
+                    loadDashboardData(); 
+                }
             } catch(e) { console.error(e); }
+        }
+
+        function selectClient(hwId) {
+            selectedHwId = hwId;
+            renderClients(globalClients);
+            renderLogs(globalLogs);
         }
 
         function renderClients(clients) {
             const container = document.getElementById("clients-container");
-            const activeClients = clients.filter(c => !c.is_deleted);
-            document.getElementById("client-count").innerText = `${activeClients.length} Registered`;
-            if (!activeClients.length) { 
+            document.getElementById("client-count").innerText = `${clients.length} Registered`;
+            if (!clients.length) { 
                 container.innerHTML = `<div class="text-xs text-slate-500 text-center py-12 font-mono">No active nodes registered.</div>`; 
+                renderLogs([]);
                 return; 
             }
             container.innerHTML = "";
-            activeClients.forEach(c => {
+            clients.forEach(c => {
+                const isSelected = c.hw_id === selectedHwId;
                 let badgeColor = c.status === 'APPROVED' ? 'text-emerald-400 bg-emerald-950 border-emerald-800' : (c.status === 'DENIED' ? 'text-red-400 bg-red-950 border-red-800' : 'text-amber-400 bg-amber-950 border-amber-800');
                 const card = document.createElement("div");
-                card.className = `p-4 rounded-xl border border-slate-800 bg-slate-950/85 space-y-3 font-mono shadow-sm`;
+                card.className = `p-4 rounded-xl border transition cursor-pointer font-mono shadow-sm ${isSelected ? 'border-indigo-500 bg-indigo-950/30 ring-1 ring-indigo-500' : 'border-slate-800 bg-slate-950/85 hover:border-slate-700'}`;
+                card.onclick = (e) => {
+                    // Prevent selection change if action buttons are clicked
+                    if(e.target.tagName === 'BUTTON') return;
+                    selectClient(c.hw_id);
+                };
                 card.innerHTML = `
                     <div class="flex justify-between items-center">
-                        <span class="font-bold text-indigo-400 text-xs truncate max-w-[200px]" title="${c.hw_id}">${c.hw_id}</span>
+                        <span class="font-bold text-indigo-400 text-xs truncate max-w-[180px]" title="${c.hw_id}">${c.hw_id}</span>
                         <span class="px-2.5 py-0.5 border rounded-full text-[10px] font-bold ${badgeColor}">${c.status}</span>
                     </div>
-                    <div class="flex justify-between text-[11px] text-slate-400">
+                    <div class="flex justify-between text-[11px] text-slate-400 mt-2">
                         <span>Tier: <strong class="text-slate-200">${c.subscription_tier || 'ENTERPRISE_PRO'}</strong></span>
                         <span>Tokens: <strong class="text-emerald-400">${(c.balance_tokens||0).toLocaleString()}</strong></span>
                     </div>
-                    <div class="flex items-center justify-end gap-2 pt-1 border-t border-slate-800/80">
-                        <button onclick="updateClientStatus('${c.hw_id}', 'APPROVED')" class="px-2 py-1 bg-emerald-900/45 hover:bg-emerald-900 text-emerald-300 rounded text-[10px] font-semibold transition border border-emerald-800">Approve</button>
-                        <button onclick="updateClientStatus('${c.hw_id}', 'DENIED')" class="px-2 py-1 bg-amber-900/45 hover:bg-amber-900 text-amber-300 rounded text-[10px] font-semibold transition border border-amber-800">Deny</button>
-                        <button onclick="softDeleteClient('${c.hw_id}')" class="px-2 py-1 bg-red-900/45 hover:bg-red-900 text-red-300 rounded text-[10px] font-semibold transition border border-red-800">Delete</button>
+                    <div class="flex items-center justify-between pt-2 border-t border-slate-800/80 mt-2">
+                        <span class="text-[10px] text-indigo-300">${isSelected ? '● Active Selection' : 'Click to inspect'}</span>
+                        <div class="flex items-center gap-1.5">
+                            <button onclick="updateClientStatus('${c.hw_id}', 'APPROVED')" class="px-2 py-1 bg-emerald-900/45 hover:bg-emerald-900 text-emerald-300 rounded text-[10px] font-semibold transition border border-emerald-800">Approve</button>
+                            <button onclick="updateClientStatus('${c.hw_id}', 'DENIED')" class="px-2 py-1 bg-amber-900/45 hover:bg-amber-900 text-amber-300 rounded text-[10px] font-semibold transition border border-amber-800">Deny</button>
+                            <button onclick="softDeleteClient('${c.hw_id}')" class="px-2 py-1 bg-red-900/45 hover:bg-red-900 text-red-300 rounded text-[10px] font-semibold transition border border-red-800">Delete</button>
+                        </div>
                     </div>`;
                 container.appendChild(card);
             });
@@ -690,13 +739,25 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         function renderLogs(logs) {
             const tbody = document.getElementById("logs-table-body");
-            document.getElementById("log-count").innerText = `${logs.length} Recorded`;
-            if (!logs.length) { 
-                tbody.innerHTML = `<tr><td colspan="6" class="py-12 text-center text-slate-500">No telemetry records found.</td></tr>`; 
+            const badge = document.getElementById("selected-client-badge");
+            
+            if (!selectedHwId || globalClients.length === 0) {
+                badge.innerText = "Selected: None";
+                document.getElementById("log-count").innerText = "0 Recorded";
+                tbody.innerHTML = `<tr><td colspan="6" class="py-12 text-center text-slate-500">No active client selected or all clients deleted.</td></tr>`;
+                return;
+            }
+
+            badge.innerText = `Selected: ${selectedHwId}`;
+            const filteredLogs = logs.filter(l => l.hw_id === selectedHwId);
+            document.getElementById("log-count").innerText = `${filteredLogs.length} Recorded`;
+
+            if (!filteredLogs.length) { 
+                tbody.innerHTML = `<tr><td colspan="6" class="py-12 text-center text-slate-500">No telemetry records found for tenant ${selectedHwId}.</td></tr>`; 
                 return; 
             }
             tbody.innerHTML = "";
-            logs.forEach(l => {
+            filteredLogs.forEach(l => {
                 tbody.innerHTML += `
                     <tr class="hover:bg-slate-800/40 transition">
                         <td class="p-3 text-slate-400 text-[11px]">${l.timestamp_utc}</td>
@@ -750,7 +811,12 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                 </h1>
                 <p id="device-mode-label" class="text-[11px] text-indigo-400 font-mono mt-0.5">Device Mode: Detecting Client & Registering...</p>
             </div>
-            <a href="/" class="text-indigo-400 text-xs font-mono hover:underline">&larr; Back to Dashboard</a>
+            <div class="flex items-center gap-3">
+                <button onclick="clearChat()" class="text-slate-400 text-xs font-mono hover:text-white flex items-center gap-1">
+                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Clear Chat
+                </button>
+                <a href="/" class="text-indigo-400 text-xs font-mono hover:underline">&larr; Back to Dashboard</a>
+            </div>
         </div>
         <div id="chat-stream" class="flex-1 bg-slate-950 rounded-xl p-4 border border-slate-800 overflow-y-auto space-y-3 text-xs font-mono mb-4">
             <div class="text-slate-500 text-center py-6">Ready for AI traffic simulation & cross-platform telemetry testing. Messages sent here are encrypted and shared with the NIST dashboard in real-time.</div>
@@ -764,13 +830,24 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
     </div>
     <script>
         lucide.createIcons();
-        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        
+        // Precise device and OS identification
+        const ua = navigator.userAgent;
+        let osName = "Desktop PC";
+        if (/android/i.test(ua)) { osName = "Android Mobile/Tablet"; }
+        else if (/iphone|ipad|ipod/i.test(ua)) { osName = "iOS Device"; }
+        else if (/win/i.test(navigator.platform || ua)) { osName = "Windows PC"; }
+        else if (/mac/i.test(navigator.platform || ua)) { osName = "macOS Workstation"; }
+        else if (/linux/i.test(navigator.platform || ua)) { osName = "Linux Node"; }
+
         let clientHwId = localStorage.getItem("enterprise_hw_id");
         if (!clientHwId) {
-            clientHwId = (isMobile ? "HW-MOBILE-" : "HW-VIRTUAL-PC-") + Math.random().toString(36).substring(2, 10).toUpperCase() + "-" + Date.now().toString(36).toUpperCase();
+            const prefix = /android|iphone|ipad|ipod/i.test(ua) ? "HW-MOB-" : "HW-PC-";
+            clientHwId = prefix + Math.random().toString(36).substring(2, 10).toUpperCase() + "-" + Date.now().toString(36).toUpperCase();
             localStorage.setItem("enterprise_hw_id", clientHwId);
         }
-        document.getElementById("device-mode-label").innerText = `Device Mode: ${isMobile ? 'Mobile Smartphone/Tablet' : 'Virtual / Physical PC'} | Unique HW ID: ${clientHwId}`;
+
+        document.getElementById("device-mode-label").innerText = `Device Mode: ${osName} | Unique HW ID: ${clientHwId}`;
 
         // Automatically register client with backend control plane upon loading
         async function registerAgentNode() {
@@ -780,7 +857,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         hw_id: clientHwId,
-                        device_type: isMobile ? 'Mobile' : 'PC',
+                        device_type: osName,
                         user_agent: navigator.userAgent,
                         platform_source: 'Browser Tenant Agent'
                     })
@@ -790,6 +867,11 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             }
         }
         registerAgentNode();
+
+        function clearChat() {
+            const stream = document.getElementById("chat-stream");
+            stream.innerHTML = `<div class="text-slate-500 text-center py-6">Chat history cleared. Ready for new traffic simulation.</div>`;
+        }
 
         async function sendCall() {
             const input = document.getElementById("test-prompt");
