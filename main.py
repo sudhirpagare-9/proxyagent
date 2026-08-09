@@ -26,14 +26,14 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.sql import func
 
-# --- Logging & Compliance Setup ---[cite: 1]
+# --- Logging & Compliance Setup ---
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] [AI-GATEWAY-SECURITY] %(message)s",
 )
 logger = logging.getLogger("EnterpriseAIGateway")
 
-# --- Database Setup ---[cite: 1]
+# --- Database Setup ---
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./enterprise_gateway.db")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
@@ -81,13 +81,25 @@ class TrafficLogModel(Base):
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
     try:
-        db = SessionLocal()
-        db.commit()
-        db.close()
+        # Auto-migrate columns if table already existed without them
+        for col_name, col_type in [
+            ("subscription_tier", "TEXT DEFAULT 'ENTERPRISE_PRO'"),
+            ("balance_tokens", "INTEGER DEFAULT 500000"),
+            ("metadata_json", "TEXT"),
+            ("is_deleted", "BOOLEAN DEFAULT 0")
+        ]:
+            try:
+                db.execute(text(f"ALTER TABLE clients ADD COLUMN {col_name} {col_type}"))
+                db.commit()
+            except Exception:
+                db.rollback()
         logger.info("Database initialized and schema verified successfully.")
     except Exception as e:
         logger.warning(f"Database initialization notice: {e}")
+    finally:
+        db.close()
 
 def get_db():
     db = SessionLocal()
@@ -98,7 +110,7 @@ def get_db():
 
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
-    version="8.7.0",
+    version="8.8.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -339,10 +351,10 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
 
         sanitized_prompt = sanitize_pii(str(raw_prompt))
         
-        model = body.get("model")
-        version = body.get("version")
-        think_level = body.get("think_level")
-        provider = body.get("provider")
+        model = body.get("model", "gemini-2.5-pro")
+        version = body.get("version", "v2.5-enterprise")
+        think_level = body.get("think_level", "Balanced (Level 2)")
+        provider = body.get("provider", "AI Gateway")
 
         input_tokens = len(sanitized_prompt.split()) * 2 + 14
         output_tokens = 68
@@ -359,8 +371,10 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         hostname_val = meta.get("hostname")
         ip_val = meta.get("ip_address")
         mac_val = meta.get("mac_address")
+        bios_val = meta.get("bios_sn")
+        device_type_val = meta.get("device_type")
 
-        ai_response_text = f"Processed AI Request for query: '{sanitized_prompt[:35]}...'"
+        ai_response_text = f"Processed AI Request [{model} | Version: {version}]: '{sanitized_prompt[:35]}...'"
 
         payload_data = {
             "provider": provider,
@@ -376,7 +390,10 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
             "timestamp_local": timestamp_local,
             "hostname": hostname_val,
             "ip_address": ip_val,
-            "mac_address": mac_val
+            "mac_address": mac_val,
+            "bios_sn": bios_val,
+            "device_type": device_type_val,
+            "balance_tokens": client_node.balance_tokens
         }
 
         try:
@@ -407,11 +424,14 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
                 "hostname": hostname_val,
                 "ip_address": ip_val,
                 "mac_address": mac_val,
+                "bios_sn": bios_val,
+                "device_type": device_type_val,
                 "provider": provider,
                 "model": model,
                 "version": version,
                 "think_level": think_level,
                 "tokens": total_tokens,
+                "balance_tokens": client_node.balance_tokens,
                 "latency_ms": latency,
                 "prompt": sanitized_prompt,
                 "response": ai_response_text
@@ -431,6 +451,7 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         "model": model,
         "choices": [{"index": 0, "message": {"role": "assistant", "content": ai_response_text}, "finish_reason": "stop"}],
         "usage": {"prompt_tokens": input_tokens, "completion_tokens": output_tokens, "total_tokens": total_tokens},
+        "balance_tokens": client_node.balance_tokens
     }
 
 @app.get("/api/dashboard-data")
@@ -457,7 +478,7 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
                 "hw_id": c.hw_id,
                 "status": c.status or "APPROVED",
                 "subscription_tier": c.subscription_tier or "ENTERPRISE_PRO",
-                "balance_tokens": c.balance_tokens or 0,
+                "balance_tokens": c.balance_tokens if c.balance_tokens is not None else 500000,
                 "is_deleted": is_del,
                 "created_at": str(c.created_at) if c.created_at else "",
                 "api_key": c.api_key or "",
@@ -483,13 +504,18 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
                 "hostname": payload.get("hostname"),
                 "ip_address": payload.get("ip_address"),
                 "mac_address": payload.get("mac_address"),
+                "bios_sn": payload.get("bios_sn"),
+                "device_type": payload.get("device_type"),
                 "timestamp_utc": payload.get("timestamp_utc", str(l.created_at) if l.created_at else None),
                 "timestamp_local": payload.get("timestamp_local"),
                 "provider": l.provider,
                 "model": l.model,
                 "version": l.version,
                 "think_level": l.think_level,
+                "prompt_tokens": l.prompt_tokens or 0,
+                "completion_tokens": l.completion_tokens or 0,
                 "tokens": (l.prompt_tokens or 0) + (l.completion_tokens or 0),
+                "balance_tokens": payload.get("balance_tokens"),
                 "latency_ms": l.latency_ms or 0,
                 "prompt": payload.get("query"),
                 "response": payload.get("response")
@@ -510,7 +536,7 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-# --- Optimized Production Stylesheet ---[cite: 1]
+# --- Optimized Production Stylesheet ---
 GLOBAL_CSS = """
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background-color: #030712; color: #f3f4f6; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
@@ -568,7 +594,7 @@ th, td { padding: 0.75rem; border-bottom: 1px solid #1e293b; }
 button, a, input, select { font: inherit; color: inherit; }
 """
 
-# --- Frontend Dashboards (Fixed: Changed f""" to regular """ to avoid f-string syntax error) ---
+# --- Frontend Dashboards ---
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -586,7 +612,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
             <div>
                 <h1 class="text-sm font-bold text-white">Enterprise Cloud AI Gateway & Control Plane</h1>
-                <p class="text-xs text-indigo-400">Dynamic Real-Time AI Traffic Compliance & Monitoring</p>
+                <p class="text-xs text-indigo-400">Dynamic AI Traffic Capture, Token Accounting & Machine Telemetry</p>
             </div>
         </div>
         <div class="flex items-center gap-3 flex-wrap">
@@ -607,7 +633,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
-            <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Total Nodes / Clients</div>
+            <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Active Machine Nodes</div>
             <div id="stat-total-clients" style="font-size: 1.5rem; font-weight: 800; color: #ffffff;" class="font-mono mt-1">0</div>
         </div>
         <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
@@ -615,12 +641,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div id="stat-approved-clients" style="font-size: 1.5rem; font-weight: 800; color: #34d399;" class="font-mono mt-1">0</div>
         </div>
         <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
-            <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Telemetry Packets Logged</div>
+            <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">AI Requests Captured</div>
             <div id="stat-total-tokens" style="font-size: 1.5rem; font-weight: 800; color: #818cf8;" class="font-mono mt-1">0</div>
         </div>
         <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
             <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Compliance Engine</div>
-            <div style="font-size: 1.25rem; font-weight: 800; color: #c084fc;" class="font-mono mt-1">GDPR + NIST + DPDP</div>
+            <div style="font-size: 1.1rem; font-weight: 800; color: #c084fc;" class="font-mono mt-1">GDPR + NIST + DPDP</div>
         </div>
     </div>
 
@@ -628,19 +654,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col shadow-xl">
             <div class="flex items-center justify-between mb-4 pb-2" style="border-bottom: 1px solid #1e293b;">
                 <h2 class="text-xs font-bold uppercase text-slate-200 flex items-center gap-2">
-                    <i data-lucide="server" class="w-4 h-4 text-indigo-400"></i> Discovered Hardware Nodes
+                    <i data-lucide="server" class="w-4 h-4 text-indigo-400"></i> Sending Machine & Token Balance
                 </h2>
                 <span id="client-count" class="px-3 py-1 bg-slate-950 text-slate-300 rounded-full text-xs font-mono">0 Registered</span>
             </div>
             <div id="clients-container" class="space-y-3 overflow-y-auto flex-1 max-h-[520px]">
-                <div class="text-xs text-slate-500 text-center py-12 font-mono">Loading client nodes...</div>
+                <div class="text-xs text-slate-500 text-center py-12 font-mono">Loading machine nodes...</div>
             </div>
         </div>
 
         <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col shadow-xl">
             <div class="flex items-center justify-between mb-4 pb-2" style="border-bottom: 1px solid #1e293b;">
                 <h2 class="text-xs font-bold uppercase text-slate-200 flex items-center gap-2">
-                    <i data-lucide="activity" class="w-4 h-4 text-emerald-400"></i> Live AI Traffic & Hardware Telemetry Audit Stream
+                    <i data-lucide="activity" class="w-4 h-4 text-emerald-400"></i> Captured AI Traffic & LLM Version Telemetry
                 </h2>
                 <div class="flex items-center gap-2">
                     <span id="selected-client-badge" style="background: #022c22; color: #34d399; border: 1px solid #065f46;" class="px-2 py-0.5 rounded text-xs font-mono">Selected: None</span>
@@ -651,15 +677,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <table>
                     <thead style="position: sticky; top: 0; background: #020617; color: #94a3b8; text-transform: uppercase;">
                         <tr>
-                            <th>Timestamps (Local / UTC)</th>
-                            <th>Hardware ID / Hostname</th>
-                            <th>Network (IP / MAC)</th>
-                            <th>Tokens / Latency</th>
-                            <th>Payload Preview</th>
+                            <th>Timestamp</th>
+                            <th>Machine & Hostname</th>
+                            <th>LLM & Version</th>
+                            <th>Token Usage / Balance</th>
+                            <th>Captured Prompt / Response</th>
                         </tr>
                     </thead>
                     <tbody id="logs-table-body" style="color: #cbd5e1;">
-                        <tr><td colspan="5" class="py-12 text-center text-slate-500">Select a client node or use the Browser Agent Window...</td></tr>
+                        <tr><td colspan="5" class="py-12 text-center text-slate-500">Select a machine node or launch Browser Agent Window...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -713,7 +739,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         async function softDeleteClient(hwId) {
-            if(!confirm(`Delete client node ${hwId}?`)) return;
+            if(!confirm(`Delete machine node ${hwId}?`)) return;
             try {
                 const res = await fetch(`${SERVER_URL}/api/clients/${encodeURIComponent(hwId)}/delete`, {
                     method: 'POST'
@@ -735,7 +761,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const container = document.getElementById("clients-container");
             document.getElementById("client-count").innerText = `${clients.length} Registered`;
             if (!clients.length) { 
-                container.innerHTML = `<div class="text-xs text-slate-500 text-center py-12 font-mono">No client nodes detected.</div>`; 
+                container.innerHTML = `<div class="text-xs text-slate-500 text-center py-12 font-mono">No machine nodes detected.</div>`; 
                 renderLogs([]);
                 return; 
             }
@@ -758,11 +784,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         <div>Hostname: <strong style="color: #67e8f9;">${c.hostname || 'N/A'}</strong></div>
                         <div>IP Address: <strong style="color: #34d399;">${c.ip_address || 'N/A'}</strong></div>
                         <div>MAC Address: <strong style="color: #fbbf24;">${c.mac_address || 'N/A'}</strong></div>
-                        <div>OS & Device: <strong style="color: #818cf8;">${c.device_type || 'N/A'}</strong></div>
-                        <div>BIOS / Serial: <strong style="color: #c084fc;">${c.bios_sn || 'N/A'}</strong></div>
+                        <div>Device / OS: <strong style="color: #818cf8;">${c.device_type || 'N/A'}</strong></div>
+                        <div>BIOS Serial: <strong style="color: #c084fc;">${c.bios_sn || 'N/A'}</strong></div>
+                        <div style="margin-top: 4px; padding-top: 4px; border-top: 1px dashed #1e293b;">Token Balance: <strong style="color: #34d399; font-size: 12px;">${c.balance_tokens.toLocaleString()} tokens</strong></div>
                     </div>
                     <div class="flex items-center justify-between" style="padding-top: 0.5rem; border-top: 1px solid #1e293b; margin-top: 0.5rem;">
-                        <span style="font-size: 10px; color: #818cf8;">${isSelected ? '● Active Selection' : 'Click to inspect telemetry'}</span>
+                        <span style="font-size: 10px; color: #818cf8;">${isSelected ? '● Active Selection' : 'Click to inspect traffic'}</span>
                         <div class="flex items-center gap-2">
                             <button onclick="updateClientStatus('${c.hw_id}', 'APPROVED')" style="padding: 0.25rem 0.5rem; background: #065f46; color: #34d399; border-radius: 0.25rem; font-size: 10px; border: none; cursor: pointer;">Approve</button>
                             <button onclick="softDeleteClient('${c.hw_id}')" style="padding: 0.25rem 0.5rem; background: #7f1d1d; color: #fca5a5; border-radius: 0.25rem; font-size: 10px; border: none; cursor: pointer;">Delete</button>
@@ -779,7 +806,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if (!selectedHwId || globalClients.length === 0) {
                 badge.innerText = "Selected: None";
                 document.getElementById("log-count").innerText = "0 Recorded";
-                tbody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-slate-500">No client node selected.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-slate-500">No machine node selected.</td></tr>`;
                 return;
             }
 
@@ -788,7 +815,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             document.getElementById("log-count").innerText = `${filteredLogs.length} Recorded`;
 
             if (!filteredLogs.length) { 
-                tbody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-slate-500">No telemetry packets recorded for this client yet.</td></tr>`; 
+                tbody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-slate-500">No AI traffic recorded for this machine yet.</td></tr>`; 
                 return; 
             }
             tbody.innerHTML = "";
@@ -803,16 +830,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                             ${l.hw_id}<br/><span style="color: #67e8f9; font-weight: normal;">${l.hostname || 'N/A'}</span>
                         </td>
                         <td style="font-size: 11px;">
-                            <div>IP: <span style="color: #34d399;">${l.ip_address || 'N/A'}</span></div>
-                            <div>MAC: <span style="color: #fbbf24;">${l.mac_address || 'N/A'}</span></div>
+                            <div>LLM: <span style="color: #c084fc; font-weight: bold;">${l.model || 'N/A'}</span></div>
+                            <div>Version: <span style="color: #67e8f9;">${l.version || 'N/A'}</span></div>
+                            <div>Think: <span style="color: #fbbf24;">${l.think_level || 'N/A'}</span></div>
                         </td>
                         <td style="font-size: 11px;">
-                            <div>Tokens: <span style="color: #34d399; font-weight: bold;">${l.tokens}</span></div>
+                            <div>Used: <span style="color: #34d399; font-weight: bold;">${l.tokens} tokens</span></div>
+                            <div>Prompt: ${l.prompt_tokens} | Comp: ${l.completion_tokens}</div>
+                            <div style="color: #38bdf8;">Balance: <strong>${l.balance_tokens !== undefined && l.balance_tokens !== null ? l.balance_tokens.toLocaleString() : 'N/A'}</strong></div>
                             <div>Latency: <span style="color: #fbbf24;">${l.latency_ms} ms</span></div>
                         </td>
                         <td style="font-size: 11px;">
-                            <div>Query: <span style="color: #818cf8;">${l.prompt || 'N/A'}</span></div>
-                            <div>Status: <span style="color: #34d399;">Secure AI Traffic Audited under GDPR & NIST</span></div>
+                            <div><strong>Prompt:</strong> <span style="color: #818cf8;">${l.prompt || 'N/A'}</span></div>
+                            <div><strong>Response:</strong> <span style="color: #34d399;">${l.response || 'N/A'}</span></div>
                         </td>
                     </tr>`;
             });
@@ -859,7 +889,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3 bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs font-mono">
             <div>
-                <label style="font-size: 10px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">AI Model</label>
+                <label style="font-size: 10px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">LLM Model</label>
                 <select id="model-select" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-200">
                     <option value="gemini-2.5-pro">gemini-2.5-pro</option>
                     <option value="gemini-2.5-flash">gemini-2.5-flash</option>
@@ -886,13 +916,13 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
         </div>
 
         <div id="chat-messages" class="flex-1 bg-slate-950 rounded-xl p-4 border border-slate-800 overflow-y-auto space-y-3 text-xs font-mono mb-4">
-            <div class="text-slate-500 text-center py-6">Browser telemetry node active. Transmitting real-time dynamic hardware metrics and AI queries to control plane...</div>
+            <div class="text-slate-500 text-center py-6">Browser telemetry node active. Transmitting machine details and AI queries to control plane...</div>
         </div>
 
         <div class="flex gap-2">
-            <input id="prompt-input" type="text" placeholder="Enter Real AI Prompt (e.g. Run enterprise security compliance audit...)" class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-xs font-mono text-slate-200" style="outline: none;" onkeydown="if(event.key==='Enter') sendAITraffic()">
+            <input id="prompt-input" type="text" placeholder="Enter AI Prompt (e.g. Analyze network security and summarize compliance logs...)" class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-xs font-mono text-slate-200" style="outline: none;" onkeydown="if(event.key==='Enter') sendAITraffic()">
             <button onclick="sendAITraffic()" style="padding: 0.75rem 1.25rem; background: #4f46e5; color: white; border-radius: 0.75rem; border: none; cursor: pointer;" class="text-xs font-bold flex items-center gap-2 shadow">
-                <i data-lucide="send" class="w-4 h-4"></i> Transmit Telemetry
+                <i data-lucide="send" class="w-4 h-4"></i> Send AI Traffic
             </button>
         </div>
     </div>
@@ -924,7 +954,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                 clientCredentials.hw_id = data.hw_id;
                 clientCredentials.api_key = data.api_key;
                 clientCredentials.hostname = data.hostname;
-                document.getElementById("client-info").innerText = `Hardware ID: ${data.hw_id} | Hostname: ${data.hostname} | MAC: ${data.mac_address}`;
+                document.getElementById("client-info").innerText = `Hardware ID: ${data.hw_id} | Hostname: ${data.hostname} | MAC: ${data.mac_address} | Balance: ${data.balance_tokens.toLocaleString()} tokens`;
             } catch(e) {
                 console.error(e);
             }
@@ -941,7 +971,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             const thinkLevel = document.getElementById("think-select").value;
 
             const chatContainer = document.getElementById("chat-messages");
-            chatContainer.innerHTML += `<div style="padding: 0.75rem; background: #0f172a; border: 1px solid #1e293b; border-radius: 0.5rem;"><strong style="color: #818cf8;">Telemetry Heartbeat [Model: ${model} | Think: ${thinkLevel}]:</strong> ${text}</div>`;
+            chatContainer.innerHTML += `<div style="padding: 0.75rem; background: #0f172a; border: 1px solid #1e293b; border-radius: 0.5rem;"><strong style="color: #818cf8;">AI Traffic [Model: ${model} | Version: ${version}]:</strong> ${text}</div>`;
             chatContainer.scrollTop = chatContainer.scrollHeight;
 
             try {
@@ -956,26 +986,40 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                         model: model,
                         version: version,
                         think_level: thinkLevel,
-                        provider: "Browser Telemetry Collector",
+                        provider: "Browser Agent Collector",
                         payload: text,
                         hostname: clientCredentials.hostname
                     })
                 });
+                
+                if(!res.ok) {
+                    const errText = await res.text();
+                    throw new Error(`Server responded with ${res.status}: ${errText}`);
+                }
+
                 const data = await res.json();
-                const reply = data.choices[0].message.content;
-                chatContainer.innerHTML += `<div style="padding: 0.75rem; background: rgba(2, 44, 34, 0.4); border: 1px solid #065f46; border-radius: 0.5rem;"><strong style="color: #34d399;">Telemetry Response:</strong> ${reply} <div style="font-size: 10px; color: #94a3b8; margin-top: 4px;">Audited under GDPR, NIST SP 800-53 & DPDP Act</div></div>`;
+                const reply = data.choices && data.choices[0] ? data.choices[0].message.content : "Processed successfully";
+                const usage = data.usage ? data.usage.total_tokens : "N/A";
+                const balance = data.balance_tokens !== undefined ? data.balance_tokens.toLocaleString() : "N/A";
+
+                chatContainer.innerHTML += `<div style="padding: 0.75rem; background: rgba(2, 44, 34, 0.4); border: 1px solid #065f46; border-radius: 0.5rem;"><strong style="color: #34d399;">AI Response & Telemetry:</strong> ${reply}<div style="font-size: 10px; color: #38bdf8; margin-top: 4px;">Tokens Used: ${usage} | Remaining Balance: ${balance} tokens</div></div>`;
                 chatContainer.scrollTop = chatContainer.scrollHeight;
             } catch(e) {
-                chatContainer.innerHTML += `<div style="padding: 0.75rem; background: #450a0a; color: #fca5a5; border-radius: 0.5rem;">Error transmitting telemetry: ${e}</div>`;
+                chatContainer.innerHTML += `<div style="padding: 0.75rem; background: #450a0a; color: #fca5a5; border-radius: 0.5rem;">Error transmitting telemetry: ${e.message}</div>`;
             }
         }
 
         initClient();
         setInterval(() => {
             if(clientCredentials.hw_id) {
-                sendAITraffic();
+                // Heartbeat background telemetry query
+                const input = document.getElementById("prompt-input");
+                if(!input.value) {
+                    input.value = "Automated system telemetry audit query";
+                    sendAITraffic();
+                }
             }
-        }, 30000); // Send automated heartbeat telemetry every 30 seconds
+        }, 45000); // Heartbeat every 45 seconds
     </script>
 </body>
 </html>"""
