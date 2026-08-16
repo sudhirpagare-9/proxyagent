@@ -49,10 +49,9 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# --- Persistent Encryption Key Setup (Prevents N/A decryption loss on restarts) ---
+# --- Persistent Encryption Key Setup ---
 ENCRYPTION_KEY = os.environ.get("ENC_KEY")
 if not ENCRYPTION_KEY or ENCRYPTION_KEY.startswith("placeholder"):
-    # Deterministic static fallback fernet key to prevent loss of logs across restarts
     ENCRYPTION_KEY = b'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI='
 else:
     ENCRYPTION_KEY = ENCRYPTION_KEY.encode()
@@ -129,12 +128,11 @@ def get_db():
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
     description="Secure AI traffic capture, token accounting, and machine telemetry backend.",
-    version="9.1.0",
+    version="9.2.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
 
-# --- CORS Middleware Configuration ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -143,7 +141,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Cryptographic Keypair for Secure Handshakes ---
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 public_key = private_key.public_key()
 public_pem = public_key.public_bytes(
@@ -155,7 +152,6 @@ public_pem = public_key.public_bytes(
 def startup_event():
     init_db()
 
-# --- Utility Functions ---
 def sanitize_pii(text: str) -> str:
     if not isinstance(text, str):
         return str(text) if text else ""
@@ -167,7 +163,6 @@ def sanitize_pii(text: str) -> str:
 async def verify_admin_user(request: Request, authorization: Optional[str] = Header(None)):
     return {"sub": "admin-security-officer", "email": "compliance@enterprise.internal"}
 
-# --- WebSocket Connection Manager ---
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
@@ -189,7 +184,6 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# --- HTML & Frontend Assets ---
 GLOBAL_CSS = """
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background-color: #030712; color: #f3f4f6; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
@@ -337,7 +331,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         </tr>
                     </thead>
                     <tbody id="logs-table-body" style="color: #cbd5e1;">
-                        <tr><td colspan="5" class="py-12 text-center text-slate-500">Select a machine node or launch Browser Agent Window...</td></tr>
+                        <tr><td colspan="5" class="py-12 text-center text-slate-500">Select an approved machine node or launch Browser Agent Window...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -357,11 +351,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if(!res.ok) return;
                 const data = await res.json();
                 
-                globalClients = (data.clients || []).filter(c => !c.is_deleted);
+                // Only load non-deleted and approved clients on dashboard
+                globalClients = (data.clients || []).filter(c => !c.is_deleted && c.status === 'APPROVED');
                 globalLogs = data.logs || [];
 
-                document.getElementById("stat-total-clients").innerText = globalClients.length;
-                document.getElementById("stat-approved-clients").innerText = globalClients.filter(c => c.status === 'APPROVED' || !c.status).length;
+                document.getElementById("stat-total-clients").innerText = (data.clients || []).filter(c => !c.is_deleted).length;
+                document.getElementById("stat-approved-clients").innerText = globalClients.length;
                 document.getElementById("stat-total-tokens").innerText = globalLogs.length;
 
                 if (selectedHwId && !globalClients.some(c => c.hw_id === selectedHwId)) {
@@ -411,9 +406,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         function renderClients(clients) {
             const container = document.getElementById("clients-container");
-            document.getElementById("client-count").innerText = `${clients.length} Registered`;
+            document.getElementById("client-count").innerText = `${clients.length} Approved Registered`;
             if (!clients.length) { 
-                container.innerHTML = `<div class="text-xs text-slate-500 text-center py-12 font-mono">No machine nodes detected.</div>`; 
+                container.innerHTML = `<div class="text-xs text-slate-500 text-center py-12 font-mono">No approved machine nodes detected.</div>`; 
                 renderLogs([]);
                 return; 
             }
@@ -422,6 +417,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const isSelected = c.hw_id === selectedHwId;
                 const clientStatus = c.status || 'APPROVED';
                 let badgeColor = clientStatus === 'APPROVED' ? 'color: #34d399; background: #022c22; border-color: #065f46;' : 'color: #fbbf24; background: #451a03; border-color: #b45309;';
+                
+                // Button logic as requested:
+                // If APPROVED -> show Deny button & Delete button
+                // If DENIED -> show Approve button & Delete button
+                let statusToggleButton = '';
+                if (clientStatus === 'APPROVED') {
+                    statusToggleButton = `<button onclick="updateClientStatus('${c.hw_id}', 'DENIED')" style="padding: 0.25rem 0.5rem; background: #7f1d1d; color: #fca5a5; border-radius: 0.25rem; font-size: 10px; border: none; cursor: pointer;">Deny</button>`;
+                } else {
+                    statusToggleButton = `<button onclick="updateClientStatus('${c.hw_id}', 'APPROVED')" style="padding: 0.25rem 0.5rem; background: #065f46; color: #34d399; border-radius: 0.25rem; font-size: 10px; border: none; cursor: pointer;">Approve</button>`;
+                }
+                let deleteButton = `<button onclick="softDeleteClient('${c.hw_id}')" style="padding: 0.25rem 0.5rem; background: #334155; color: #cbd5e1; border-radius: 0.25rem; font-size: 10px; border: none; cursor: pointer;">Delete</button>`;
+
                 const card = document.createElement("div");
                 card.style.cssText = `padding: 1rem; border-radius: 0.75rem; border: 1px solid ${isSelected ? '#4f46e5' : '#1e293b'}; background: ${isSelected ? 'rgba(79, 70, 229, 0.1)' : '#020617'}; cursor: pointer; font-family: monospace; margin-bottom: 0.75rem;`;
                 card.onclick = (e) => {
@@ -444,8 +451,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <div class="flex items-center justify-between" style="padding-top: 0.5rem; border-top: 1px solid #1e293b; margin-top: 0.5rem;">
                         <span style="font-size: 10px; color: #818cf8;">${isSelected ? '● Active Selection' : 'Click to inspect traffic'}</span>
                         <div class="flex items-center gap-2">
-                            <button onclick="updateClientStatus('${c.hw_id}', 'APPROVED')" style="padding: 0.25rem 0.5rem; background: #065f46; color: #34d399; border-radius: 0.25rem; font-size: 10px; border: none; cursor: pointer;">Approve</button>
-                            <button onclick="softDeleteClient('${c.hw_id}')" style="padding: 0.25rem 0.5rem; background: #7f1d1d; color: #fca5a5; border-radius: 0.25rem; font-size: 10px; border: none; cursor: pointer;">Delete</button>
+                            ${statusToggleButton}
+                            ${deleteButton}
                         </div>
                     </div>`;
                 container.appendChild(card);
@@ -459,7 +466,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if (!selectedHwId || globalClients.length === 0) {
                 badge.innerText = "Selected: None";
                 document.getElementById("log-count").innerText = "0 Recorded";
-                tbody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-slate-500">No machine node selected.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-slate-500">No approved machine node selected.</td></tr>`;
                 return;
             }
 
@@ -544,15 +551,15 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3 bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs font-mono">
             <div>
                 <label style="font-size: 10px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">LLM Model</label>
-                <input id="model-input" type="text" value="gemini-2.5-pro" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-200 outline-none" placeholder="e.g. gemini-2.5-pro">
+                <input id="model-input" type="text" value="gemini-2.5-pro" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-200 outline-none">
             </div>
             <div>
                 <label style="font-size: 10px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Model Version</label>
-                <input id="version-input" type="text" value="v2.5-enterprise" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-200 outline-none" placeholder="e.g. v2.5-enterprise">
+                <input id="version-input" type="text" value="v2.5-enterprise" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-200 outline-none">
             </div>
             <div>
                 <label style="font-size: 10px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Think Level / Context</label>
-                <input id="think-input" type="text" value="Deep Reasoning (Level 3)" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-200 outline-none" placeholder="e.g. Deep Reasoning">
+                <input id="think-input" type="text" value="Deep Reasoning (Level 3)" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-200 outline-none">
             </div>
         </div>
 
@@ -751,10 +758,9 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
 @app.get("/api/export-audit-report")
 def export_audit_report(user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
     try:
-        active_clients = db.query(ClientModel).filter(ClientModel.is_deleted == False).all()
+        active_clients = db.query(ClientModel).filter(ClientModel.is_deleted == False, ClientModel.status == "APPROVED").all()
         active_hw_ids = {c.hw_id for c in active_clients}
-        rows = db.query(TrafficLogModel).order_by(TrafficLogModel.created_at.desc()).all()
-        rows = [r for r in rows if r.hw_id in active_hw_ids]
+        rows = db.query(TrafficLogModel).filter(TrafficLogModel.hw_id.in_(active_hw_ids)).order_by(TrafficLogModel.created_at.desc()).all() if active_hw_ids else []
     except:
         rows = []
         
@@ -787,7 +793,9 @@ def export_audit_report(user: dict = Depends(verify_admin_user), db: Session = D
         latency_ms = r.latency_ms or 0
         query = str(p.get("query") or p.get("prompt") or "").replace('"', '""')
         response_text = str(p.get("response") or f"Live AI Execution completed via [{model}]").replace('"', '""')
-        timestamp_utc = p.get("timestamp_utc", str(r.created_at) if r.created_at else "")
+        
+        db_time = r.created_at or datetime.now(timezone.utc)
+        timestamp_utc = db_time.strftime("%Y-%m-%d %H:%M:%S UTC")
         
         output.write(f'"{hw_id}","{hostname}","{ip_address}","{provider}","{model}","{version}","{think_level}",{prompt_tokens},{completion_tokens},{latency_ms},"{query}","{response_text}","{timestamp_utc}"\n')
         
@@ -836,8 +844,8 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         if (not client_node or client_node.is_deleted) and hw_id_header:
             client_node = db.query(ClientModel).filter(ClientModel.hw_id == hw_id_header).first()
         
-        if not client_node or client_node.is_deleted:
-            raise HTTPException(status_code=401, detail="Unauthorized client node or missing registration.")
+        if not client_node or client_node.is_deleted or client_node.status != "APPROVED":
+            raise HTTPException(status_code=401, detail="Unauthorized client node or client not approved.")
 
         meta = {}
         if client_node.metadata_json:
@@ -868,6 +876,7 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         client_node.balance_tokens = max(0, client_node.balance_tokens - total_tokens)
         db.commit()
 
+        # Dynamic live timestamp generation using current exact server time
         now_utc = datetime.now(timezone.utc)
         timestamp_utc = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
         timestamp_local = datetime.now().strftime("%Y-%m-%d %H:%M:%S Local")
@@ -961,11 +970,13 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
 @app.get("/api/dashboard-data")
 def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
     try:
-        client_rows = db.query(ClientModel).all()
-        log_rows = db.query(TrafficLogModel).order_by(TrafficLogModel.id.desc()).limit(200).all()
+        # Only fetch non-deleted and APPROVED clients and their logs to enforce strict dashboard visibility
+        client_rows = db.query(ClientModel).filter(ClientModel.is_deleted == False).all()
+        approved_hw_ids = {c.hw_id for c in client_rows if c.status == "APPROVED"}
+        
+        log_rows = db.query(TrafficLogModel).filter(TrafficLogModel.hw_id.in_(approved_hw_ids)).order_by(TrafficLogModel.id.desc()).limit(200).all() if approved_hw_ids else []
 
         clients = []
-        active_hw_ids = set()
         for c in client_rows:
             meta = {}
             if c.metadata_json:
@@ -973,9 +984,6 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
                     meta = json.loads(c.metadata_json)
                 except:
                     meta = {}
-            is_del = bool(c.is_deleted)
-            if not is_del:
-                active_hw_ids.add(c.hw_id)
 
             clients.append({
                 **meta,
@@ -983,15 +991,13 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
                 "status": c.status or "APPROVED",
                 "subscription_tier": c.subscription_tier or "ENTERPRISE_PRO",
                 "balance_tokens": c.balance_tokens if c.balance_tokens is not None else 500000,
-                "is_deleted": is_del,
+                "is_deleted": bool(c.is_deleted),
                 "created_at": str(c.created_at) if c.created_at else "",
                 "api_key": c.api_key or "",
             })
 
         logs = []
         for l in log_rows:
-            if l.hw_id not in active_hw_ids:
-                continue
             payload = {}
             if l.payload_json:
                 try:
@@ -1002,6 +1008,10 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
                     except:
                         payload = {}
             
+            db_time = l.created_at or datetime.now(timezone.utc)
+            utc_str = db_time.strftime("%Y-%m-%d %H:%M:%S UTC")
+            local_str = db_time.astimezone().strftime("%Y-%m-%d %H:%M:%S Local") if hasattr(db_time, 'astimezone') else str(db_time)
+
             logs.append({
                 "id": l.id,
                 "hw_id": l.hw_id,
@@ -1010,8 +1020,8 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
                 "mac_address": payload.get("mac_address"),
                 "bios_sn": payload.get("bios_sn"),
                 "device_type": payload.get("device_type"),
-                "timestamp_utc": payload.get("timestamp_utc", str(l.created_at) if l.created_at else None),
-                "timestamp_local": payload.get("timestamp_local") or str(l.created_at),
+                "timestamp_utc": utc_str,
+                "timestamp_local": local_str,
                 "provider": l.provider,
                 "model": l.model,
                 "version": l.version,
