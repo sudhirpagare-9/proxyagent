@@ -128,7 +128,7 @@ def get_db():
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
     description="Secure AI traffic capture, token accounting & cross-platform machine telemetry.",
-    version="9.7.0",
+    version="9.8.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -378,6 +378,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             } catch (err) { console.error("Fetch error:", err); }
         }
 
+        async function updateClientStatus(hwId, status) {
+            try {
+                const res = await fetch(`${SERVER_URL}/api/clients/${encodeURIComponent(hwId)}/status`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ status: status })
+                });
+                if(res.ok) {
+                    loadDashboardData();
+                }
+            } catch(e) { console.error(e); }
+        }
+
         async function softDeleteClient(hwId) {
             if(!confirm(`Delete device node ${hwId}?`)) return;
             try {
@@ -411,6 +424,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const clientStatus = c.status || 'APPROVED';
                 const fingerprintVal = c.fingerprint_id || (c.hw_id ? c.hw_id.split('-').pop() : 'N/A');
                 
+                const statusColor = clientStatus === 'APPROVED' ? '#34d399' : (clientStatus === 'DENIED' ? '#fca5a5' : '#fbbf24');
+                const statusBg = clientStatus === 'APPROVED' ? '#022c22' : (clientStatus === 'DENIED' ? '#450a0a' : '#451a03');
+                const statusBorder = clientStatus === 'APPROVED' ? '#065f46' : (clientStatus === 'DENIED' ? '#991b1b' : '#b45309');
+
                 const card = document.createElement("div");
                 card.style.cssText = `padding: 1rem; border-radius: 0.75rem; border: 1px solid ${isSelected ? '#4f46e5' : '#1e293b'}; background: ${isSelected ? 'rgba(79, 70, 229, 0.1)' : '#020617'}; cursor: pointer; font-family: monospace; margin-bottom: 0.75rem;`;
                 card.onclick = (e) => {
@@ -420,7 +437,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 card.innerHTML = `
                     <div class="flex justify-between items-center">
                         <span style="font-weight: 700; color: #818cf8; font-size: 11px;">${c.hw_id}</span>
-                        <span style="padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 10px; font-weight: 700; border: 1px solid; color: #34d399; background: #022c22; border-color: #065f46;">${clientStatus}</span>
+                        <span style="padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 10px; font-weight: 700; border: 1px solid; color: ${statusColor}; background: ${statusBg}; border-color: ${statusBorder};">${clientStatus}</span>
                     </div>
                     <div style="margin-top: 0.5rem; font-size: 11px; background: #0f172a; padding: 0.5rem; border-radius: 0.375rem; border: 1px solid #1e293b; line-height: 1.4;">
                         <div>Device / OS: <strong style="color: #67e8f9;">${c.device_type || 'Mobile / Browser'}</strong></div>
@@ -430,8 +447,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         <div style="margin-top: 4px; padding-top: 4px; border-top: 1px dashed #1e293b;">Token Balance: <strong style="color: #34d399; font-size: 12px;">${(c.balance_tokens || 0).toLocaleString()} tokens</strong></div>
                     </div>
                     <div class="flex items-center justify-between" style="padding-top: 0.5rem; border-top: 1px solid #1e293b; margin-top: 0.5rem;">
-                        <span style="font-size: 10px; color: #818cf8;">${isSelected ? '● Active Selection' : 'Click to inspect traffic'}</span>
-                        <button onclick="softDeleteClient('${c.hw_id}')" style="padding: 0.25rem 0.5rem; background: #334155; color: #cbd5e1; border-radius: 0.25rem; font-size: 10px; border: none; cursor: pointer;">Delete</button>
+                        <span style="font-size: 10px; color: #818cf8;">${isSelected ? '● Active' : 'Inspect'}</span>
+                        <div class="flex gap-1.5">
+                            <button onclick="updateClientStatus('${c.hw_id}', 'APPROVED')" style="padding: 0.25rem 0.5rem; background: #065f46; color: #34d399; border-radius: 0.25rem; font-size: 10px; border: none; cursor: pointer; font-weight: bold;">Approve</button>
+                            <button onclick="updateClientStatus('${c.hw_id}', 'DENIED')" style="padding: 0.25rem 0.5rem; background: #7f1d1d; color: #fca5a5; border-radius: 0.25rem; font-size: 10px; border: none; cursor: pointer; font-weight: bold;">Deny</button>
+                            <button onclick="softDeleteClient('${c.hw_id}')" style="padding: 0.25rem 0.5rem; background: #334155; color: #cbd5e1; border-radius: 0.25rem; font-size: 10px; border: none; cursor: pointer;">Delete</button>
+                        </div>
                     </div>`;
                 container.appendChild(card);
             });
@@ -557,15 +578,11 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             <div class="space-y-3 text-xs text-slate-300">
                 <div>
                     <strong style="color: #34d399;">1. Android & iOS Mobile Distribution (PWA):</strong>
-                    <p style="color: #94a3b8; margin-top: 2px;">Users open this agent URL on mobile Safari / Chrome and select <strong>"Add to Home Screen"</strong>. It runs securely as a standalone native-like Progressive Web App with hardware fingerprinting.</p>
+                    <p style="color: #94a3b8; margin-top: 2px;">Users open this agent URL on mobile Safari / Chrome and select <strong>"Add to Home Screen"</strong>.</p>
                 </div>
                 <div>
                     <strong style="color: #38bdf8;">2. Linux / Headless Node Deployment (Docker):</strong>
                     <pre style="background: #020617; padding: 0.5rem; border-radius: 0.375rem; margin-top: 4px; color: #34d399; overflow-x: auto;">docker run -d --name ai-gateway-agent -p 8000:8000 -e DATABASE_URL=sqlite:///./db.sqlite enterprise/proxyagent:latest</pre>
-                </div>
-                <div>
-                    <strong style="color: #c084fc;">3. Enterprise Fleet Script Embed:</strong>
-                    <pre style="background: #020617; padding: 0.5rem; border-radius: 0.375rem; margin-top: 4px; color: #818cf8; overflow-x: auto;">&lt;script src="https://proxyagent-dashboard.onrender.com/agent.js" data-gateway="https://proxyagent-dashboard.onrender.com" async&gt;&lt;/script&gt;</pre>
                 </div>
             </div>
             <button onclick="toggleDistModal()" style="width: 100%; margin-top: 1rem; padding: 0.5rem; background: #4f46e5; color: white; border-radius: 0.5rem; border: none; cursor: pointer; font-weight: bold;">Close Guide</button>
@@ -679,7 +696,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                     },
                     body: JSON.stringify({
                         model: "cross-platform-ai-stream",
-                        version: "v9.7-enterprise",
+                        version: "v9.8-enterprise",
                         think_level: "Realtime Telemetry",
                         provider: clientCredentials.browser_name,
                         payload: dynamicActivity,
@@ -785,7 +802,6 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
             db.add(client)
         else:
             client.is_deleted = False
-            client.status = "APPROVED"
             client.metadata_json = json.dumps(body)
             if not client.api_key:
                 client.api_key = f"sk_tenant_{secrets.token_hex(16)}"
@@ -811,6 +827,30 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
         db.rollback()
         logger.error(f"Registration error: {e}")
         return {"status": "error", "message": str(e)}
+
+@app.post("/api/clients/{hw_id}/status")
+async def update_client_status(hw_id: str, request: Request, user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
+    try:
+        body = await request.json()
+    except:
+        body = {}
+    new_status = body.get("status", "APPROVED")
+    
+    client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
+    if client:
+        client.status = new_status
+        db.commit()
+        return {"status": "success", "hw_id": hw_id, "client_status": new_status}
+    raise HTTPException(status_code=404, detail="Client node not found.")
+
+@app.post("/api/clients/{hw_id}/delete")
+async def soft_delete_client(hw_id: str, user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
+    client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
+    if client:
+        client.is_deleted = True
+        client.status = "DELETED"
+        db.commit()
+    return {"status": "success", "message": f"Client {hw_id} soft-deleted and purged from views."}
 
 @app.get("/api/export-audit-report")
 def export_audit_report(user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
@@ -860,15 +900,6 @@ def export_audit_report(user: dict = Depends(verify_admin_user), db: Session = D
     response.headers["Content-Disposition"] = "attachment; filename=ai_traffic_compliance_audit.csv"
     return response
 
-@app.post("/api/clients/{hw_id}/delete")
-async def soft_delete_client(hw_id: str, user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
-    client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
-    if client:
-        client.is_deleted = True
-        client.status = "DELETED"
-        db.commit()
-    return {"status": "success", "message": f"Client {hw_id} soft-deleted and purged from views."}
-
 @app.post("/v1/chat/completions")
 @app.post("/log-traffic")
 async def openai_compatible_chat_completions(request: Request, db: Session = Depends(get_db)):
@@ -891,6 +922,9 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         if not client_node or client_node.is_deleted:
             raise HTTPException(status_code=403, detail="Client node not found.")
 
+        if client_node.status != "APPROVED":
+            raise HTTPException(status_code=403, detail=f"Client node is currently {client_node.status}. Access denied by gateway control plane.")
+
         meta = {}
         if client_node.metadata_json:
             try:
@@ -908,7 +942,7 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         sanitized_prompt = sanitize_pii(str(raw_prompt))
         
         model = body.get("model", "cross-platform-model")
-        version = body.get("version", "v9.7")
+        version = body.get("version", "v9.8")
         think_level = body.get("think_level", "Realtime")
         provider = body.get("provider", "Browser Agent")
 
