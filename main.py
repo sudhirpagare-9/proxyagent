@@ -64,7 +64,7 @@ class ClientModel(Base):
     id = Column(Integer, primary_key=True, index=True)
     hw_id = Column(String, unique=True, index=True)
     api_key = Column(String, unique=True, index=True)
-    status = Column(String, default="APPROVED")
+    status = Column(String, default="PENDING")
     subscription_tier = Column(String, default="ENTERPRISE_PRO")
     balance_tokens = Column(Integer, default=500000)
     metadata_json = Column(Text, nullable=True)
@@ -128,7 +128,7 @@ def get_db():
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
     description="Secure AI traffic capture, token accounting, and machine telemetry backend.",
-    version="9.3.0",
+    version="9.4.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -351,11 +351,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if(!res.ok) return;
                 const data = await res.json();
                 
-                globalClients = (data.clients || []).filter(c => !c.is_deleted && c.status === 'APPROVED');
+                // Show all non-deleted clients (Approved, Denied, Pending/New) so admin has full control
+                globalClients = (data.clients || []).filter(c => !c.is_deleted);
                 globalLogs = data.logs || [];
 
-                document.getElementById("stat-total-clients").innerText = (data.clients || []).filter(c => !c.is_deleted).length;
-                document.getElementById("stat-approved-clients").innerText = globalClients.length;
+                const approvedClients = globalClients.filter(c => c.status === 'APPROVED');
+
+                document.getElementById("stat-total-clients").innerText = globalClients.length;
+                document.getElementById("stat-approved-clients").innerText = approvedClients.length;
                 document.getElementById("stat-total-tokens").innerText = globalLogs.length;
 
                 if (selectedHwId && !globalClients.some(c => c.hw_id === selectedHwId)) {
@@ -405,17 +408,23 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         function renderClients(clients) {
             const container = document.getElementById("clients-container");
-            document.getElementById("client-count").innerText = `${clients.length} Approved Registered`;
+            document.getElementById("client-count").innerText = `${clients.length} Total Registered`;
             if (!clients.length) { 
-                container.innerHTML = `<div class="text-xs text-slate-500 text-center py-12 font-mono">No approved machine nodes detected.</div>`; 
+                container.innerHTML = `<div class="text-xs text-slate-500 text-center py-12 font-mono">No machine nodes discovered yet.</div>`; 
                 renderLogs([]);
                 return; 
             }
             container.innerHTML = "";
             clients.forEach(c => {
                 const isSelected = c.hw_id === selectedHwId;
-                const clientStatus = c.status || 'APPROVED';
-                let badgeColor = clientStatus === 'APPROVED' ? 'color: #34d399; background: #022c22; border-color: #065f46;' : 'color: #fbbf24; background: #451a03; border-color: #b45309;';
+                const clientStatus = c.status || 'PENDING';
+                
+                let badgeColor = 'color: #fbbf24; background: #451a03; border-color: #b45309;';
+                if (clientStatus === 'APPROVED') {
+                    badgeColor = 'color: #34d399; background: #022c22; border-color: #065f46;';
+                } else if (clientStatus === 'DENIED') {
+                    badgeColor = 'color: #fca5a5; background: #450a0a; border-color: #7f1d1d;';
+                }
                 
                 const isApproved = clientStatus === 'APPROVED';
                 const isDenied = clientStatus === 'DENIED';
@@ -463,7 +472,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if (!selectedHwId || globalClients.length === 0) {
                 badge.innerText = "Selected: None";
                 document.getElementById("log-count").innerText = "0 Recorded";
-                tbody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-slate-500">No approved machine node selected.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-slate-500">No machine node selected.</td></tr>`;
                 return;
             }
 
@@ -736,7 +745,7 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
             client = ClientModel(
                 hw_id=hw_id,
                 api_key=api_key,
-                status="APPROVED",
+                status="PENDING", # Newly discovered nodes start as PENDING/NEW
                 subscription_tier="ENTERPRISE_PRO",
                 balance_tokens=500000,
                 is_deleted=False,
@@ -745,8 +754,10 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
             db.add(client)
         else:
             client.is_deleted = False
-            client.status = "APPROVED"
             client.metadata_json = json.dumps(body)
+            # PRESERVE existing admin status (DENIED or APPROVED) instead of overwriting back to approved!
+            if not client.status:
+                client.status = "PENDING"
             if not client.api_key:
                 client.api_key = f"sk_tenant_{secrets.token_hex(16)}"
         db.commit()
@@ -863,7 +874,7 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
             client_node = db.query(ClientModel).filter(ClientModel.hw_id == hw_id_header).first()
         
         if not client_node or client_node.is_deleted or client_node.status != "APPROVED":
-            raise HTTPException(status_code=401, detail="Unauthorized client node or client not approved.")
+            raise HTTPException(status_code=403, detail="Client node is not approved (Status: DENIED or PENDING). Traffic blocked.")
 
         meta = {}
         if client_node.metadata_json:
@@ -1004,7 +1015,7 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
             clients.append({
                 **meta,
                 "hw_id": c.hw_id,
-                "status": c.status or "APPROVED",
+                "status": c.status or "PENDING",
                 "subscription_tier": c.subscription_tier or "ENTERPRISE_PRO",
                 "balance_tokens": c.balance_tokens if c.balance_tokens is not None else 500000,
                 "is_deleted": bool(c.is_deleted),
