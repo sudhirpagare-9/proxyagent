@@ -128,7 +128,7 @@ def get_db():
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
     description="Secure AI traffic capture, token accounting, and machine telemetry backend.",
-    version="9.2.0",
+    version="9.3.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -351,7 +351,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if(!res.ok) return;
                 const data = await res.json();
                 
-                // Only load non-deleted and approved clients on dashboard
                 globalClients = (data.clients || []).filter(c => !c.is_deleted && c.status === 'APPROVED');
                 globalLogs = data.logs || [];
 
@@ -418,15 +417,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const clientStatus = c.status || 'APPROVED';
                 let badgeColor = clientStatus === 'APPROVED' ? 'color: #34d399; background: #022c22; border-color: #065f46;' : 'color: #fbbf24; background: #451a03; border-color: #b45309;';
                 
-                // Button logic as requested:
-                // If APPROVED -> show Deny button & Delete button
-                // If DENIED -> show Approve button & Delete button
-                let statusToggleButton = '';
-                if (clientStatus === 'APPROVED') {
-                    statusToggleButton = `<button onclick="updateClientStatus('${c.hw_id}', 'DENIED')" style="padding: 0.25rem 0.5rem; background: #7f1d1d; color: #fca5a5; border-radius: 0.25rem; font-size: 10px; border: none; cursor: pointer;">Deny</button>`;
-                } else {
-                    statusToggleButton = `<button onclick="updateClientStatus('${c.hw_id}', 'APPROVED')" style="padding: 0.25rem 0.5rem; background: #065f46; color: #34d399; border-radius: 0.25rem; font-size: 10px; border: none; cursor: pointer;">Approve</button>`;
-                }
+                const isApproved = clientStatus === 'APPROVED';
+                const isDenied = clientStatus === 'DENIED';
+
+                // Three separate buttons with active status disabled
+                let approveBtn = `<button onclick="updateClientStatus('${c.hw_id}', 'APPROVED')" ${isApproved ? 'disabled style="opacity: 0.4; cursor: not-allowed; background: #022c22; color: #34d399;"' : 'style="background: #065f46; color: #34d399; cursor: pointer;"'} style="padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 10px; border: none;">Approve</button>`;
+                let denyBtn = `<button onclick="updateClientStatus('${c.hw_id}', 'DENIED')" ${isDenied ? 'disabled style="opacity: 0.4; cursor: not-allowed; background: #451a03; color: #fca5a5;"' : 'style="background: #7f1d1d; color: #fca5a5; cursor: pointer;"'} style="padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 10px; border: none;">Deny</button>`;
                 let deleteButton = `<button onclick="softDeleteClient('${c.hw_id}')" style="padding: 0.25rem 0.5rem; background: #334155; color: #cbd5e1; border-radius: 0.25rem; font-size: 10px; border: none; cursor: pointer;">Delete</button>`;
 
                 const card = document.createElement("div");
@@ -450,8 +446,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     </div>
                     <div class="flex items-center justify-between" style="padding-top: 0.5rem; border-top: 1px solid #1e293b; margin-top: 0.5rem;">
                         <span style="font-size: 10px; color: #818cf8;">${isSelected ? '● Active Selection' : 'Click to inspect traffic'}</span>
-                        <div class="flex items-center gap-2">
-                            ${statusToggleButton}
+                        <div class="flex items-center gap-1.5">
+                            ${approveBtn}
+                            ${denyBtn}
                             ${deleteButton}
                         </div>
                     </div>`;
@@ -543,7 +540,10 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                 </h1>
                 <p id="client-info" class="text-xs text-indigo-400 font-mono mt-0.5">Initializing Real-Time Browser Telemetry Node...</p>
             </div>
-            <div>
+            <div class="flex items-center gap-4">
+                <label class="flex items-center gap-2 text-xs font-mono text-emerald-400 cursor-pointer">
+                    <input type="checkbox" id="auto-stream-toggle" onchange="toggleAutoStream()" style="accent-color: #10b981;"> Auto-Stream Live Telemetry (Every 10s)
+                </label>
                 <a href="/" class="text-indigo-400 text-xs font-mono" style="text-decoration: none;">&larr; Control Plane Dashboard</a>
             </div>
         </div>
@@ -579,6 +579,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
         lucide.createIcons();
         const SERVER_URL = window.location.origin;
         let clientCredentials = { hw_id: "", api_key: "", hostname: "" };
+        let autoStreamTimer = null;
 
         async function initClient() {
             try {
@@ -608,11 +609,11 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             }
         }
 
-        async function sendAITraffic() {
+        async function sendAITraffic(customPrompt = null) {
+            if(!clientCredentials.api_key) return;
             const input = document.getElementById("prompt-input");
-            const text = input.value.trim();
-            if(!text) return;
-            input.value = "";
+            const text = customPrompt || input.value.trim() || "Analyze network security and summarize compliance logs under GDPR & NIST frameworks.";
+            if(!customPrompt && input.value.trim()) { input.value = ""; }
 
             const model = document.getElementById("model-input").value.trim() || "gemini-2.5-pro";
             const version = document.getElementById("version-input").value.trim() || "v2.5-enterprise";
@@ -664,6 +665,23 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                 chatContainer.scrollTop = chatContainer.scrollHeight;
             } catch(e) {
                 chatContainer.innerHTML += `<div style="padding: 0.75rem; background: #450a0a; color: #fca5a5; border-radius: 0.5rem;">Error transmitting telemetry: ${e.message}</div>`;
+            }
+        }
+
+        function toggleAutoStream() {
+            const toggle = document.getElementById("auto-stream-toggle");
+            if (toggle.checked) {
+                autoStreamTimer = setInterval(() => {
+                    const prompts = [
+                        "Verify network perimeter security compliance against NIST SP 800-53.",
+                        "Audit AI token usage and summarize enterprise GDPR data protection metrics.",
+                        "Analyze anomalous outbound requests and verify encryption certificates."
+                    ];
+                    const randomPrompt = prompts[Math.floor(Math.random() * prompts.length)];
+                    sendAITraffic(randomPrompt);
+                }, 10000);
+            } else {
+                if (autoStreamTimer) clearInterval(autoStreamTimer);
             }
         }
 
@@ -876,7 +894,6 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         client_node.balance_tokens = max(0, client_node.balance_tokens - total_tokens)
         db.commit()
 
-        # Dynamic live timestamp generation using current exact server time
         now_utc = datetime.now(timezone.utc)
         timestamp_utc = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
         timestamp_local = datetime.now().strftime("%Y-%m-%d %H:%M:%S Local")
@@ -970,7 +987,6 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
 @app.get("/api/dashboard-data")
 def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
     try:
-        # Only fetch non-deleted and APPROVED clients and their logs to enforce strict dashboard visibility
         client_rows = db.query(ClientModel).filter(ClientModel.is_deleted == False).all()
         approved_hw_ids = {c.hw_id for c in client_rows if c.status == "APPROVED"}
         
