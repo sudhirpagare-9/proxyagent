@@ -7,24 +7,28 @@ import re
 import secrets
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
+from fastapi import FastAPI, HTTPException, Header, Request, WebSocket, WebSocketDisconnect, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from pydantic import BaseModel
+
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, create_engine, text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.sql import func
+
+# --- Try loading python-dotenv if available ---
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
-
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, create_engine, text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.sql import func
 
 # --- Logging & Compliance Setup ---
 logging.basicConfig(
@@ -45,6 +49,7 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+# --- Encryption Setup ---
 ENCRYPTION_KEY = os.environ.get("ENC_KEY")
 if not ENCRYPTION_KEY or ENCRYPTION_KEY.startswith("placeholder"):
     ENCRYPTION_KEY = Fernet.generate_key()
@@ -53,6 +58,7 @@ else:
 
 cipher = Fernet(ENCRYPTION_KEY)
 
+# --- Database Models ---
 class ClientModel(Base):
     __tablename__ = "clients"
     id = Column(Integer, primary_key=True, index=True)
@@ -118,13 +124,16 @@ def get_db():
     finally:
         db.close()
 
+# --- FastAPI App Initialization ---
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
+    description="Secure AI traffic capture, token accounting, and machine telemetry backend.",
     version="9.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
 
+# --- CORS Middleware Configuration ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -133,6 +142,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- Cryptographic Keypair for Secure Handshakes ---
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 public_key = private_key.public_key()
 public_pem = public_key.public_bytes(
@@ -144,6 +154,7 @@ public_pem = public_key.public_bytes(
 def startup_event():
     init_db()
 
+# --- Utility Functions ---
 def sanitize_pii(text: str) -> str:
     if not isinstance(text, str):
         return str(text) if text else ""
@@ -155,9 +166,10 @@ def sanitize_pii(text: str) -> str:
 async def verify_admin_user(request: Request, authorization: Optional[str] = Header(None)):
     return {"sub": "admin-security-officer", "email": "compliance@enterprise.internal"}
 
+# --- WebSocket Connection Manager ---
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: list[WebSocket] = []
+        self.active_connections: List[WebSocket] = []
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -176,378 +188,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-@app.get("/", response_class=HTMLResponse)
-def serve_dashboard():
-    return DASHBOARD_HTML
-
-@app.get("/agent", response_class=HTMLResponse)
-def serve_agent():
-    return WEB_AGENT_HTML
-
-@app.get("/public-key", response_class=PlainTextResponse)
-def get_public_key():
-    return public_pem
-
-@app.post("/api/register")
-@app.post("/register")
-async def register_client(request: Request, db: Session = Depends(get_db)):
-    try:
-        body = await request.json()
-    except:
-        body = {}
-    
-    hw_id = body.get("hw_id")
-    if not hw_id:
-        raise HTTPException(status_code=400, detail="Dynamic hw_id is required in registration payload.")
-    
-    try:
-        client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
-        forwarded = request.headers.get("x-forwarded-for")
-        real_ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else None)
-
-        hostname = body.get("hostname")
-        mac_address = body.get("mac_address")
-        bios_sn = body.get("bios_sn")
-        device_type = body.get("device_type")
-
-        geo_info = {"country": "India", "region": "Maharashtra", "compliance": "GDPR, NIST SP 800-53 & DPDP Act Active"}
-        body["ip_address"] = real_ip
-        body["geo_location"] = geo_info
-        body["registered_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-
-        if not client:
-            api_key = f"sk_tenant_{secrets.token_hex(16)}"
-            client = ClientModel(
-                hw_id=hw_id,
-                api_key=api_key,
-                status="APPROVED",
-                subscription_tier="ENTERPRISE_PRO",
-                balance_tokens=500000,
-                is_deleted=False,
-                metadata_json=json.dumps(body)
-            )
-            db.add(client)
-        else:
-            client.is_deleted = False
-            client.metadata_json = json.dumps(body)
-            if not client.api_key:
-                client.api_key = f"sk_tenant_{secrets.token_hex(16)}"
-        db.commit()
-        db.refresh(client)
-        
-        return {
-            "status": "success",
-            "hw_id": client.hw_id,
-            "api_key": client.api_key,
-            "ip_address": real_ip,
-            "client_status": client.status,
-            "subscription_tier": client.subscription_tier,
-            "balance_tokens": client.balance_tokens,
-            "geo_location": geo_info,
-            "hostname": hostname,
-            "mac_address": mac_address,
-            "bios_sn": bios_sn,
-            "device_type": device_type
-        }
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Registration error: {e}")
-        return {"status": "error", "message": str(e)}
-
-@app.get("/api/export-audit-report")
-def export_audit_report(user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
-    try:
-        active_clients = db.query(ClientModel).filter(ClientModel.is_deleted == False).all()
-        active_hw_ids = {c.hw_id for c in active_clients}
-        rows = db.query(TrafficLogModel).order_by(TrafficLogModel.created_at.desc()).all()
-        rows = [r for r in rows if r.hw_id in active_hw_ids]
-    except:
-        rows = []
-        
-    output = io.StringIO()
-    output.write("HardwareID,Hostname,IPAddress,Provider,Model,Version,ThinkLevel,PromptTokens,CompletionTokens,LatencyMS,AI_Prompt,AI_Response,TimestampUTC\n")
-    
-    for r in rows:
-        p = {}
-        try:
-            if r.payload_json:
-                try:
-                    p = json.loads(cipher.decrypt(r.payload_json.encode()).decode())
-                except:
-                    p = json.loads(r.payload_json)
-        except:
-            pass
-            
-        hw_id = r.hw_id or ""
-        hostname = p.get("hostname") or ""
-        ip_address = p.get("ip_address") or ""
-        provider = r.provider or ""
-        model = r.model or ""
-        version = r.version or ""
-        think_level = r.think_level or ""
-        prompt_tokens = r.prompt_tokens or 0
-        completion_tokens = r.completion_tokens or 0
-        latency_ms = r.latency_ms or 0
-        query = str(p.get("query", "")).replace('"', '""')
-        response_text = str(p.get("response", "")).replace('"', '""')
-        timestamp_utc = p.get("timestamp_utc", "")
-        
-        output.write(f'"{hw_id}","{hostname}","{ip_address}","{provider}","{model}","{version}","{think_level}",{prompt_tokens},{completion_tokens},{latency_ms},"{query}","{response_text}","{timestamp_utc}"\n')
-        
-    response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
-    response.headers["Content-Disposition"] = "attachment; filename=ai_traffic_compliance_audit.csv"
-    return response
-
-@app.post("/api/clients/{hw_id}/status")
-async def update_client_status(hw_id: str, request: Request, user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
-    try:
-        body = await request.json()
-    except:
-        body = {}
-    new_status = body.get("status", "APPROVED")
-    client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
-    if client:
-        client.status = new_status
-        db.commit()
-    return {"status": "success", "hw_id": hw_id, "new_status": new_status}
-
-@app.post("/api/clients/{hw_id}/delete")
-async def soft_delete_client(hw_id: str, user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
-    client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
-    if client:
-        client.is_deleted = True
-        client.status = "DELETED"
-        db.commit()
-    return {"status": "success", "message": f"Client {hw_id} soft-deleted."}
-
-@app.post("/v1/chat/completions")
-@app.post("/log-traffic")
-async def openai_compatible_chat_completions(request: Request, db: Session = Depends(get_db)):
-    try:
-        body = await request.json()
-    except:
-        body = {}
-        
-    auth_header = request.headers.get("Authorization", "")
-    api_key = auth_header.split(" ")[1] if auth_header.startswith("Bearer ") else None
-    hw_id_header = request.headers.get("X-HW-ID") or body.get("hw_id")
-
-    try:
-        client_node = None
-        if api_key:
-            client_node = db.query(ClientModel).filter(ClientModel.api_key == api_key).first()
-        if (not client_node or client_node.is_deleted) and hw_id_header:
-            client_node = db.query(ClientModel).filter(ClientModel.hw_id == hw_id_header).first()
-        
-        if not client_node or client_node.is_deleted:
-            raise HTTPException(status_code=401, detail="Unauthorized client node or missing registration.")
-
-        meta = {}
-        if client_node.metadata_json:
-            try:
-                meta = json.loads(client_node.metadata_json)
-            except:
-                meta = {}
-
-        raw_prompt = body.get("payload") or body.get("prompt")
-        if not raw_prompt and "messages" in body and isinstance(body["messages"], list) and len(body["messages"]) > 0:
-            raw_prompt = body["messages"][-1].get("content")
-        
-        if not raw_prompt:
-            raise HTTPException(status_code=400, detail="Prompt or payload is requested.")
-
-        sanitized_prompt = sanitize_pii(str(raw_prompt))
-        
-        model = body.get("model", "live-model")
-        version = body.get("version", "v1.0")
-        think_level = body.get("think_level", "Standard")
-        provider = body.get("provider", "Live Collector")
-
-        # Accept real telemetry metrics if supplied by client payload, otherwise calculate real token footprint
-        input_tokens = body.get("prompt_tokens") or (len(sanitized_prompt.split()) * 2 + 12)
-        output_tokens = body.get("completion_tokens") or 64
-        latency = body.get("latency_ms") or 120
-        total_tokens = input_tokens + output_tokens
-
-        client_node.balance_tokens = max(0, client_node.balance_tokens - total_tokens)
-        db.commit()
-
-        now_utc = datetime.now(timezone.utc)
-        timestamp_utc = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
-        timestamp_local = datetime.now().strftime("%Y-%m-%d %H:%M:%S Local")
-
-        hostname_val = meta.get("hostname")
-        ip_val = meta.get("ip_address")
-        mac_val = meta.get("mac_address")
-        bios_val = meta.get("bios_sn")
-        device_type_val = meta.get("device_type")
-
-        # Capture actual response sent in payload or acknowledge live execution
-        ai_response_text = body.get("response") or f"Live AI Execution completed via [{model}]"
-
-        payload_data = {
-            "provider": provider,
-            "model": model,
-            "version": version,
-            "think_level": think_level,
-            "query": sanitized_prompt,
-            "response": ai_response_text,
-            "prompt_tokens": input_tokens,
-            "completion_tokens": output_tokens,
-            "latency_ms": latency,
-            "timestamp_utc": timestamp_utc,
-            "timestamp_local": timestamp_local,
-            "hostname": hostname_val,
-            "ip_address": ip_val,
-            "mac_address": mac_val,
-            "bios_sn": bios_val,
-            "device_type": device_type_val,
-            "balance_tokens": client_node.balance_tokens
-        }
-
-        try:
-            encrypted_payload = cipher.encrypt(json.dumps(payload_data).encode()).decode()
-        except:
-            encrypted_payload = json.dumps(payload_data)
-
-        log_entry = TrafficLogModel(
-            hw_id=client_node.hw_id,
-            provider=provider,
-            model=model,
-            version=version,
-            think_level=think_level,
-            prompt_tokens=input_tokens,
-            completion_tokens=output_tokens,
-            latency_ms=latency,
-            payload_json=encrypted_payload
-        )
-        db.add(log_entry)
-        db.commit()
-
-        await manager.broadcast({
-            "type": "NEW_TRAFFIC",
-            "data": {
-                "id": log_entry.id,
-                "timestamp": timestamp_utc,
-                "tenant_id": client_node.hw_id,
-                "hostname": hostname_val,
-                "ip_address": ip_val,
-                "mac_address": mac_val,
-                "bios_sn": bios_val,
-                "device_type": device_type_val,
-                "provider": provider,
-                "model": model,
-                "version": version,
-                "think_level": think_level,
-                "tokens": total_tokens,
-                "balance_tokens": client_node.balance_tokens,
-                "latency_ms": latency,
-                "prompt": sanitized_prompt,
-                "response": ai_response_text
-            }
-        })
-    except HTTPException as he:
-        raise he
-    except Exception as ex:
-        db.rollback()
-        logger.error(f"AI Traffic logging error: {ex}")
-        raise HTTPException(status_code=500, detail=str(ex))
-
-    return {
-        "id": f"chatcmpl-{int(time.time())}",
-        "object": "chat.completion",
-        "created": int(time.time()),
-        "model": model,
-        "choices": [{"index": 0, "message": {"role": "assistant", "content": ai_response_text}, "finish_reason": "stop"}],
-        "usage": {"prompt_tokens": input_tokens, "completion_tokens": output_tokens, "total_tokens": total_tokens},
-        "balance_tokens": client_node.balance_tokens
-    }
-
-@app.get("/api/dashboard-data")
-def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
-    try:
-        client_rows = db.query(ClientModel).all()
-        log_rows = db.query(TrafficLogModel).order_by(TrafficLogModel.id.desc()).limit(200).all()
-
-        clients = []
-        active_hw_ids = set()
-        for c in client_rows:
-            meta = {}
-            if c.metadata_json:
-                try:
-                    meta = json.loads(c.metadata_json)
-                except:
-                    meta = {}
-            is_del = bool(c.is_deleted)
-            if not is_del:
-                active_hw_ids.add(c.hw_id)
-
-            clients.append({
-                **meta,
-                "hw_id": c.hw_id,
-                "status": c.status or "APPROVED",
-                "subscription_tier": c.subscription_tier or "ENTERPRISE_PRO",
-                "balance_tokens": c.balance_tokens if c.balance_tokens is not None else 500000,
-                "is_deleted": is_del,
-                "created_at": str(c.created_at) if c.created_at else "",
-                "api_key": c.api_key or "",
-            })
-
-        logs = []
-        for l in log_rows:
-            if l.hw_id not in active_hw_ids:
-                continue
-            payload = {}
-            try:
-                if l.payload_json:
-                    try:
-                        payload = json.loads(cipher.decrypt(l.payload_json.encode()).decode())
-                    except:
-                        payload = json.loads(l.payload_json)
-            except:
-                payload = {}
-            
-            logs.append({
-                "id": l.id,
-                "hw_id": l.hw_id,
-                "hostname": payload.get("hostname"),
-                "ip_address": payload.get("ip_address"),
-                "mac_address": payload.get("mac_address"),
-                "bios_sn": payload.get("bios_sn"),
-                "device_type": payload.get("device_type"),
-                "timestamp_utc": payload.get("timestamp_utc", str(l.created_at) if l.created_at else None),
-                "timestamp_local": payload.get("timestamp_local"),
-                "provider": l.provider,
-                "model": l.model,
-                "version": l.version,
-                "think_level": l.think_level,
-                "prompt_tokens": l.prompt_tokens or 0,
-                "completion_tokens": l.completion_tokens or 0,
-                "tokens": (l.prompt_tokens or 0) + (l.completion_tokens or 0),
-                "balance_tokens": payload.get("balance_tokens"),
-                "latency_ms": l.latency_ms or 0,
-                "prompt": payload.get("query"),
-                "response": payload.get("response")
-            })
-
-        return {"clients": clients, "logs": logs, "authenticated_user": "compliance@enterprise.internal"}
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Error in dashboard_data: {e}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
-
-@app.websocket("/ws/live-traffic")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-
-# --- Optimized Production Stylesheet ---
+# --- HTML & Frontend Assets ---
 GLOBAL_CSS = """
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background-color: #030712; color: #f3f4f6; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
@@ -973,7 +614,6 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
 
             const startTime = performance.now();
             try {
-                // To capture actual live interaction responses, you can pass live response and token counts directly or proxy an external API call here
                 const simulatedLiveResponse = `Live execution response for: "${text.substring(0, 40)}..." processed securely under NIST/GDPR guidelines.`;
                 const promptTokensCount = text.split(/\s+/).length * 2 + 10;
                 const completionTokensCount = simulatedLiveResponse.split(/\s+/).length * 2 + 8;
@@ -1021,6 +661,377 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
     </script>
 </body>
 </html>"""
+
+# --- API Endpoints ---
+
+@app.get("/", response_class=HTMLResponse)
+def serve_dashboard():
+    return DASHBOARD_HTML
+
+@app.get("/agent", response_class=HTMLResponse)
+def serve_agent():
+    return WEB_AGENT_HTML
+
+@app.get("/public-key", response_class=PlainTextResponse)
+def get_public_key():
+    return public_pem
+
+@app.post("/api/register")
+@app.post("/register")
+async def register_client(request: Request, db: Session = Depends(get_db)):
+    try:
+        body = await request.json()
+    except:
+        body = {}
+    
+    hw_id = body.get("hw_id")
+    if not hw_id:
+        raise HTTPException(status_code=400, detail="Dynamic hw_id is required in registration payload.")
+    
+    try:
+        client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
+        forwarded = request.headers.get("x-forwarded-for")
+        real_ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else None)
+
+        hostname = body.get("hostname")
+        mac_address = body.get("mac_address")
+        bios_sn = body.get("bios_sn")
+        device_type = body.get("device_type")
+
+        geo_info = {"country": "India", "region": "Maharashtra", "compliance": "GDPR, NIST SP 800-53 & DPDP Act Active"}
+        body["ip_address"] = real_ip
+        body["geo_location"] = geo_info
+        body["registered_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+        if not client:
+            api_key = f"sk_tenant_{secrets.token_hex(16)}"
+            client = ClientModel(
+                hw_id=hw_id,
+                api_key=api_key,
+                status="APPROVED",
+                subscription_tier="ENTERPRISE_PRO",
+                balance_tokens=500000,
+                is_deleted=False,
+                metadata_json=json.dumps(body)
+            )
+            db.add(client)
+        else:
+            client.is_deleted = False
+            client.metadata_json = json.dumps(body)
+            if not client.api_key:
+                client.api_key = f"sk_tenant_{secrets.token_hex(16)}"
+        db.commit()
+        db.refresh(client)
+        
+        return {
+            "status": "success",
+            "hw_id": client.hw_id,
+            "api_key": client.api_key,
+            "ip_address": real_ip,
+            "client_status": client.status,
+            "subscription_tier": client.subscription_tier,
+            "balance_tokens": client.balance_tokens,
+            "geo_location": geo_info,
+            "hostname": hostname,
+            "mac_address": mac_address,
+            "bios_sn": bios_sn,
+            "device_type": device_type
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Registration error: {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/export-audit-report")
+def export_audit_report(user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
+    try:
+        active_clients = db.query(ClientModel).filter(ClientModel.is_deleted == False).all()
+        active_hw_ids = {c.hw_id for c in active_clients}
+        rows = db.query(TrafficLogModel).order_by(TrafficLogModel.created_at.desc()).all()
+        rows = [r for r in rows if r.hw_id in active_hw_ids]
+    except:
+        rows = []
+        
+    output = io.StringIO()
+    output.write("HardwareID,Hostname,IPAddress,Provider,Model,Version,ThinkLevel,PromptTokens,CompletionTokens,LatencyMS,AI_Prompt,AI_Response,TimestampUTC\n")
+    
+    for r in rows:
+        p = {}
+        try:
+            if r.payload_json:
+                try:
+                    p = json.loads(cipher.decrypt(r.payload_json.encode()).decode())
+                except:
+                    p = json.loads(r.payload_json)
+        except:
+            pass
+            
+        hw_id = r.hw_id or ""
+        hostname = p.get("hostname") or ""
+        ip_address = p.get("ip_address") or ""
+        provider = r.provider or ""
+        model = r.model or ""
+        version = r.version or ""
+        think_level = r.think_level or ""
+        prompt_tokens = r.prompt_tokens or 0
+        completion_tokens = r.completion_tokens or 0
+        latency_ms = r.latency_ms or 0
+        query = str(p.get("query", "")).replace('"', '""')
+        response_text = str(p.get("response", "")).replace('"', '""')
+        timestamp_utc = p.get("timestamp_utc", "")
+        
+        output.write(f'"{hw_id}","{hostname}","{ip_address}","{provider}","{model}","{version}","{think_level}",{prompt_tokens},{completion_tokens},{latency_ms},"{query}","{response_text}","{timestamp_utc}"\n')
+        
+    response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
+    response.headers["Content-Disposition"] = "attachment; filename=ai_traffic_compliance_audit.csv"
+    return response
+
+@app.post("/api/clients/{hw_id}/status")
+async def update_client_status(hw_id: str, request: Request, user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
+    try:
+        body = await request.json()
+    except:
+        body = {}
+    new_status = body.get("status", "APPROVED")
+    client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
+    if client:
+        client.status = new_status
+        db.commit()
+    return {"status": "success", "hw_id": hw_id, "new_status": new_status}
+
+@app.post("/api/clients/{hw_id}/delete")
+async def soft_delete_client(hw_id: str, user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
+    client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
+    if client:
+        client.is_deleted = True
+        client.status = "DELETED"
+        db.commit()
+    return {"status": "success", "message": f"Client {hw_id} soft-deleted and purged from views."}
+
+@app.post("/v1/chat/completions")
+@app.post("/log-traffic")
+async def openai_compatible_chat_completions(request: Request, db: Session = Depends(get_db)):
+    try:
+        body = await request.json()
+    except:
+        body = {}
+        
+    auth_header = request.headers.get("Authorization", "")
+    api_key = auth_header.split(" ")[1] if auth_header.startswith("Bearer ") else None
+    hw_id_header = request.headers.get("X-HW-ID") or body.get("hw_id")
+
+    try:
+        client_node = None
+        if api_key:
+            client_node = db.query(ClientModel).filter(ClientModel.api_key == api_key).first()
+        if (not client_node or client_node.is_deleted) and hw_id_header:
+            client_node = db.query(ClientModel).filter(ClientModel.hw_id == hw_id_header).first()
+        
+        if not client_node or client_node.is_deleted:
+            raise HTTPException(status_code=401, detail="Unauthorized client node or missing registration.")
+
+        meta = {}
+        if client_node.metadata_json:
+            try:
+                meta = json.loads(client_node.metadata_json)
+            except:
+                meta = {}
+
+        raw_prompt = body.get("payload") or body.get("prompt")
+        if not raw_prompt and "messages" in body and isinstance(body["messages"], list) and len(body["messages"]) > 0:
+            raw_prompt = body["messages"][-1].get("content")
+        
+        if not raw_prompt:
+            raise HTTPException(status_code=400, detail="Prompt or payload is required.")
+
+        sanitized_prompt = sanitize_pii(str(raw_prompt))
+        
+        model = body.get("model", "live-model")
+        version = body.get("version", "v1.0")
+        think_level = body.get("think_level", "Standard")
+        provider = body.get("provider", "Live Collector")
+
+        input_tokens = body.get("prompt_tokens") or (len(sanitized_prompt.split()) * 2 + 12)
+        output_tokens = body.get("completion_tokens") or 64
+        latency = body.get("latency_ms") or 120
+        total_tokens = input_tokens + output_tokens
+
+        client_node.balance_tokens = max(0, client_node.balance_tokens - total_tokens)
+        db.commit()
+
+        now_utc = datetime.now(timezone.utc)
+        timestamp_utc = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
+        timestamp_local = datetime.now().strftime("%Y-%m-%d %H:%M:%S Local")
+
+        hostname_val = meta.get("hostname")
+        ip_val = meta.get("ip_address")
+        mac_val = meta.get("mac_address")
+        bios_val = meta.get("bios_sn")
+        device_type_val = meta.get("device_type")
+
+        ai_response_text = body.get("response") or f"Live AI Execution completed via [{model}]"
+
+        payload_data = {
+            "provider": provider,
+            "model": model,
+            "version": version,
+            "think_level": think_level,
+            "query": sanitized_prompt,
+            "response": ai_response_text,
+            "prompt_tokens": input_tokens,
+            "completion_tokens": output_tokens,
+            "latency_ms": latency,
+            "timestamp_utc": timestamp_utc,
+            "timestamp_local": timestamp_local,
+            "hostname": hostname_val,
+            "ip_address": ip_val,
+            "mac_address": mac_val,
+            "bios_sn": bios_val,
+            "device_type": device_type_val,
+            "balance_tokens": client_node.balance_tokens
+        }
+
+        try:
+            encrypted_payload = cipher.encrypt(json.dumps(payload_data).encode()).decode()
+        except:
+            encrypted_payload = json.dumps(payload_data)
+
+        log_entry = TrafficLogModel(
+            hw_id=client_node.hw_id,
+            provider=provider,
+            model=model,
+            version=version,
+            think_level=think_level,
+            prompt_tokens=input_tokens,
+            completion_tokens=output_tokens,
+            latency_ms=latency,
+            payload_json=encrypted_payload
+        )
+        db.add(log_entry)
+        db.commit()
+
+        await manager.broadcast({
+            "type": "NEW_TRAFFIC",
+            "data": {
+                "id": log_entry.id,
+                "timestamp": timestamp_utc,
+                "tenant_id": client_node.hw_id,
+                "hostname": hostname_val,
+                "ip_address": ip_val,
+                "mac_address": mac_val,
+                "bios_sn": bios_val,
+                "device_type": device_type_val,
+                "provider": provider,
+                "model": model,
+                "version": version,
+                "think_level": think_level,
+                "tokens": total_tokens,
+                "balance_tokens": client_node.balance_tokens,
+                "latency_ms": latency,
+                "prompt": sanitized_prompt,
+                "response": ai_response_text
+            }
+        })
+    except HTTPException as he:
+        raise he
+    except Exception as ex:
+        db.rollback()
+        logger.error(f"AI Traffic logging error: {ex}")
+        raise HTTPException(status_code=500, detail=str(ex))
+
+    return {
+        "id": f"chatcmpl-{int(time.time())}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": ai_response_text}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": input_tokens, "completion_tokens": output_tokens, "total_tokens": total_tokens},
+        "balance_tokens": client_node.balance_tokens
+    }
+
+@app.get("/api/dashboard-data")
+def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
+    try:
+        client_rows = db.query(ClientModel).all()
+        log_rows = db.query(TrafficLogModel).order_by(TrafficLogModel.id.desc()).limit(200).all()
+
+        clients = []
+        active_hw_ids = set()
+        for c in client_rows:
+            meta = {}
+            if c.metadata_json:
+                try:
+                    meta = json.loads(c.metadata_json)
+                except:
+                    meta = {}
+            is_del = bool(c.is_deleted)
+            if not is_del:
+                active_hw_ids.add(c.hw_id)
+
+            clients.append({
+                **meta,
+                "hw_id": c.hw_id,
+                "status": c.status or "APPROVED",
+                "subscription_tier": c.subscription_tier or "ENTERPRISE_PRO",
+                "balance_tokens": c.balance_tokens if c.balance_tokens is not None else 500000,
+                "is_deleted": is_del,
+                "created_at": str(c.created_at) if c.created_at else "",
+                "api_key": c.api_key or "",
+            })
+
+        logs = []
+        for l in log_rows:
+            if l.hw_id not in active_hw_ids:
+                continue
+            payload = {}
+            try:
+                if l.payload_json:
+                    try:
+                        payload = json.loads(cipher.decrypt(l.payload_json.encode()).decode())
+                    except:
+                        payload = json.loads(l.payload_json)
+            except:
+                payload = {}
+            
+            logs.append({
+                "id": l.id,
+                "hw_id": l.hw_id,
+                "hostname": payload.get("hostname"),
+                "ip_address": payload.get("ip_address"),
+                "mac_address": payload.get("mac_address"),
+                "bios_sn": payload.get("bios_sn"),
+                "device_type": payload.get("device_type"),
+                "timestamp_utc": payload.get("timestamp_utc", str(l.created_at) if l.created_at else None),
+                "timestamp_local": payload.get("timestamp_local"),
+                "provider": l.provider,
+                "model": l.model,
+                "version": l.version,
+                "think_level": l.think_level,
+                "prompt_tokens": l.prompt_tokens or 0,
+                "completion_tokens": l.completion_tokens or 0,
+                "tokens": (l.prompt_tokens or 0) + (l.completion_tokens or 0),
+                "balance_tokens": payload.get("balance_tokens"),
+                "latency_ms": l.latency_ms or 0,
+                "prompt": payload.get("query"),
+                "response": payload.get("response")
+            })
+
+        return {"clients": clients, "logs": logs, "authenticated_user": "compliance@enterprise.internal"}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error in dashboard_data: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.websocket("/ws/live-traffic")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 if __name__ == "__main__":
     import uvicorn
