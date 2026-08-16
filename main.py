@@ -128,7 +128,7 @@ def get_db():
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
     description="Secure AI traffic capture, token accounting & cross-platform machine telemetry.",
-    version="9.9.1",
+    version="9.9.2",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -934,7 +934,14 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         model = body.get("model", "cross-platform-model")
         version = body.get("version", "v9.9")
         think_level = body.get("think_level", "Realtime")
-        provider = body.get("provider", "Browser Agent")
+        
+        # --- Strict Provider Sanitization to Prevent Browser Names as AI Providers ---
+        raw_provider = body.get("provider", "System Diagnostic")
+        browser_indicators = ["edge", "chrome", "firefox", "safari", "browser", "mobile device", "windows workstation", "macs", "linux"]
+        if not raw_provider or raw_provider.lower().strip() in browser_indicators:
+            provider = "System Diagnostic"
+        else:
+            provider = raw_Provider if 'raw_Provider' in locals() else raw_provider
 
         input_tokens = body.get("prompt_tokens") or (len(sanitized_prompt.split()) * 2 + 10)
         output_tokens = body.get("completion_tokens") or 32
