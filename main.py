@@ -128,7 +128,7 @@ def get_db():
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
     description="Secure AI traffic capture, token accounting & cross-platform machine telemetry.",
-    version="9.8.0",
+    version="9.9.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -241,7 +241,7 @@ body { background-color: #030712; color: #f3f4f6; font-family: ui-sans-serif, sy
 .min-h-screen { min-height: 100vh; }
 table { width: 100%; border-collapse: collapse; text-align: left; }
 th, td { padding: 0.75rem; border-bottom: 1px solid #1e293b; }
-button, a, input, select { font: inherit; color: inherit; }
+button, a, input, select, textarea { font: inherit; color: inherit; }
 """
 
 DASHBOARD_HTML = """<!DOCTYPE html>
@@ -474,7 +474,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             document.getElementById("log-count").innerText = `${filteredLogs.length} Recorded`;
 
             if (!filteredLogs.length) { 
-                tbody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-slate-500">No live telemetry recorded for this device yet. Click 'Trigger Real-Time Telemetry' in Agent window.</td></tr>`; 
+                tbody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-slate-500">No live telemetry recorded for this device yet. Use Agent window to log prompts.</td></tr>`; 
                 return; 
             }
             tbody.innerHTML = "";
@@ -536,56 +536,52 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
     <style>""" + GLOBAL_CSS + """</style>
 </head>
 <body class="min-h-screen p-4 flex flex-col items-center justify-center">
-    <div class="max-w-4xl w-full bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col" style="height: 92vh;">
+    <div class="max-w-4xl w-full bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col" style="height: 94vh;">
         <div class="flex flex-col md:flex-row items-center justify-between mb-3 border-b border-slate-800 pb-3 gap-2">
             <div>
                 <h1 class="text-sm font-bold text-white flex items-center gap-2">
-                    <i data-lucide="smartphone" class="w-4 h-4 text-indigo-400"></i> Universal Mobile & Cross-Platform Telemetry Agent
+                    <i data-lucide="smartphone" class="w-4 h-4 text-indigo-400"></i> External AI App & Cross-Platform Telemetry Agent
                 </h1>
-                <p id="client-info" class="text-xs text-indigo-400 font-mono mt-0.5">Detecting mobile/desktop device fingerprint...</p>
+                <p id="client-info" class="text-xs text-indigo-400 font-mono mt-0.5">Detecting device fingerprint...</p>
             </div>
             <div class="flex items-center gap-3 flex-wrap">
-                <label class="flex items-center gap-1.5 text-xs font-mono text-emerald-400 cursor-pointer">
-                    <input type="checkbox" id="auto-stream-toggle" onchange="toggleAutoStream()" style="accent-color: #10b981;"> Auto-Stream (8s)
-                </label>
-                <button onclick="toggleDistModal()" style="padding: 0.35rem 0.75rem; background: #334155; color: #f8fafc; border-radius: 0.375rem; border: none; cursor: pointer;" class="text-xs font-bold flex items-center gap-1">
-                    <i data-lucide="share-2" class="w-3.5 h-3.5"></i> Scale & Distribute Agent
-                </button>
-                <a href="/" class="text-indigo-400 text-xs font-mono" style="text-decoration: none;">&larr; Dashboard</a>
+                <a href="/" class="text-indigo-400 text-xs font-mono" style="text-decoration: none;">&larr; Return to Dashboard</a>
             </div>
+        </div>
+
+        <div style="background: #020617; border: 1px solid #1e293b; border-radius: 0.75rem; padding: 1rem; margin-bottom: 0.75rem; font-family: monospace;">
+            <div style="font-size: 11px; font-weight: bold; color: #34d399; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="cpu" class="w-4 h-4"></i> Sync External App Prompt (Perplexity, ChatGPT, Ollama, etc.)
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mb-2">
+                <div>
+                    <label style="font-size: 10px; color: #94a3b8; display: block; margin-bottom: 2px;">AI Provider / App Name:</label>
+                    <select id="external-app-name" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #f8fafc; padding: 0.4rem; border-radius: 0.375rem; font-size: 11px;">
+                        <option value="Perplexity App">Perplexity App</option>
+                        <option value="ChatGPT Desktop">ChatGPT Desktop</option>
+                        <option value="Claude App">Claude App</option>
+                        <option value="Ollama CLI / UI">Ollama CLI / Local UI</option>
+                        <option value="Custom External App">Custom External App</option>
+                    </select>
+                </div>
+                <div class="md:col-span-2">
+                    <label style="font-size: 10px; color: #94a3b8; display: block; margin-bottom: 2px;">Prompt / Query Running in App:</label>
+                    <input type="text" id="external-prompt-input" value="pull specific quantization tags in ollama" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #f8fafc; padding: 0.4rem; border-radius: 0.375rem; font-size: 11px;" placeholder="e.g. pull specific quantization tags in ollama">
+                </div>
+            </div>
+            <button onclick="captureExternalAppPrompt()" style="width: 100%; padding: 0.5rem; background: #059669; color: white; border-radius: 0.375rem; border: none; cursor: pointer; font-weight: bold; font-size: 11px;" class="flex items-center justify-center gap-1.5">
+                <i data-lucide="send" class="w-3.5 h-3.5"></i> Stream External App Prompt to Control Plane Dashboard
+            </button>
         </div>
 
         <div id="chat-messages" class="flex-1 bg-slate-950 rounded-xl p-4 border border-slate-800 overflow-y-auto space-y-3 text-xs font-mono mb-3">
-            <div class="text-slate-500 text-center py-6">Cross-platform agent initialized. Optimized for Android, iOS, Linux, MacOS, and Windows web environments.</div>
+            <div class="text-slate-500 text-center py-6">Ready to capture external app telemetry. Enter your active prompt above and click stream.</div>
         </div>
 
         <div class="flex gap-2">
-            <button onclick="triggerManualCapture()" style="width: 100%; padding: 0.75rem; background: #4f46e5; color: white; border-radius: 0.75rem; border: none; cursor: pointer;" class="text-xs font-bold flex items-center justify-center gap-2 shadow">
-                <i data-lucide="zap" class="w-4 h-4"></i> Trigger Real-Time Telemetry Capture
+            <button onclick="triggerQuickTelemetry()" style="width: 100%; padding: 0.6rem; background: #4f46e5; color: white; border-radius: 0.5rem; border: none; cursor: pointer;" class="text-xs font-bold flex items-center justify-center gap-2 shadow">
+                <i data-lucide="zap" class="w-4 h-4"></i> Trigger Automatic System Diagnostic Telemetry
             </button>
-        </div>
-    </div>
-
-    <!-- Distribution & Scaling Modal -->
-    <div id="dist-modal" style="display: none; position: fixed; inset: 0; background: rgba(2,6,23,0.85); z-index: 100; align-items: center; justify-content: center; padding: 1rem;">
-        <div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 1rem; max-width: 650px; width: 100%; padding: 1.5rem; font-family: monospace;">
-            <div class="flex justify-between items-center mb-3 pb-2 border-b border-slate-800">
-                <h3 class="text-xs font-bold text-white uppercase flex items-center gap-2">
-                    <i data-lucide="globe" class="w-4 h-4 text-emerald-400"></i> Enterprise Agent Distribution & Scaling Provision
-                </h3>
-                <button onclick="toggleDistModal()" style="background:none; border:none; color:#94a3b8; cursor:pointer; font-weight:bold;">✕</button>
-            </div>
-            <div class="space-y-3 text-xs text-slate-300">
-                <div>
-                    <strong style="color: #34d399;">1. Android & iOS Mobile Distribution (PWA):</strong>
-                    <p style="color: #94a3b8; margin-top: 2px;">Users open this agent URL on mobile Safari / Chrome and select <strong>"Add to Home Screen"</strong>.</p>
-                </div>
-                <div>
-                    <strong style="color: #38bdf8;">2. Linux / Headless Node Deployment (Docker):</strong>
-                    <pre style="background: #020617; padding: 0.5rem; border-radius: 0.375rem; margin-top: 4px; color: #34d399; overflow-x: auto;">docker run -d --name ai-gateway-agent -p 8000:8000 -e DATABASE_URL=sqlite:///./db.sqlite enterprise/proxyagent:latest</pre>
-                </div>
-            </div>
-            <button onclick="toggleDistModal()" style="width: 100%; margin-top: 1rem; padding: 0.5rem; background: #4f46e5; color: white; border-radius: 0.5rem; border: none; cursor: pointer; font-weight: bold;">Close Guide</button>
         </div>
     </div>
 
@@ -593,42 +589,25 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
         lucide.createIcons();
         const SERVER_URL = window.location.origin;
         let clientCredentials = { hw_id: "", api_key: "", device_type: "", browser_name: "" };
-        let autoStreamTimer = null;
 
         function getDeviceAndBrowserProfile() {
             const ua = navigator.userAgent;
-            let osPrefix = "HW-WEB";
-            let osName = "Web Client";
+            let osPrefix = "HW-WINDOWS";
+            let osName = "Windows Workstation";
             
-            if (/android/i.test(ua)) {
-                osPrefix = "HW-ANDROID";
-                osName = "Android Mobile";
-            } else if (/iphone|ipad|ipod/i.test(ua)) {
-                osPrefix = "HW-IOS";
-                osName = "iOS Mobile / Tablet";
-            } else if (/macintosh|mac os x/i.test(ua)) {
-                osPrefix = "HW-MAC";
-                osName = "macOS Workstation";
-            } else if (/win/i.test(ua)) {
-                osPrefix = "HW-WINDOWS";
-                osName = "Windows Workstation";
-            } else if (/linux/i.test(ua)) {
-                osPrefix = "HW-LINUX";
-                osName = "Linux System";
-            }
+            if (/android/i.test(ua)) { osPrefix = "HW-ANDROID"; osName = "Android Mobile"; }
+            else if (/iphone|ipad|ipod/i.test(ua)) { osPrefix = "HW-IOS"; osName = "iOS Mobile"; }
+            else if (/macintosh|mac os x/i.test(ua)) { osPrefix = "HW-MAC"; osName = "macOS Workstation"; }
+            else if (/linux/i.test(ua)) { osPrefix = "HW-LINUX"; osName = "Linux System"; }
 
-            let browserName = "Unknown Browser";
+            let browserName = "Edge";
             if (/chrome|crios|crmo/i.test(ua) && !/edg/i.test(ua)) browserName = "Chrome";
             else if (/firefox|fxios/i.test(ua)) browserName = "Firefox";
             else if (/safari/i.test(ua) && !/chrome/i.test(ua)) browserName = "Safari";
             else if (/edg/i.test(ua)) browserName = "Edge";
-            else if (/opr|opera/i.test(ua)) browserName = "Opera";
 
             const screenStr = `${window.screen.width}x${window.screen.height}`;
-            const cpuCores = navigator.hardwareConcurrency || 4;
-            const platform = navigator.platform || osName;
-            const rawHashStr = `${ua}|${screenStr}|${cpuCores}|${platform}`;
-            
+            const rawHashStr = `${ua}|${screenStr}|${navigator.hardwareConcurrency || 4}`;
             let hash = 0;
             for (let i = 0; i < rawHashStr.length; i++) {
                 hash = ((hash << 5) - hash) + rawHashStr.charCodeAt(i);
@@ -637,14 +616,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             const uniqueHashHex = Math.abs(hash).toString(16).toUpperCase();
             const hwId = `${osPrefix}-${uniqueHashHex}`;
 
-            return {
-                hw_id: hwId,
-                device_type: osName,
-                browser_name: browserName,
-                fingerprint_id: uniqueHashHex,
-                platform: platform,
-                screen: screenStr
-            };
+            return { hw_id: hwId, device_type: osName, browser_name: browserName, fingerprint_id: uniqueHashHex };
         }
 
         async function initClient() {
@@ -658,8 +630,6 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                         device_type: profile.device_type,
                         browser_name: profile.browser_name,
                         fingerprint_id: profile.fingerprint_id,
-                        platform: profile.platform,
-                        screen: profile.screen,
                         user_agent: navigator.userAgent
                     })
                 });
@@ -669,23 +639,21 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                 clientCredentials.device_type = profile.device_type;
                 clientCredentials.browser_name = profile.browser_name;
 
-                document.getElementById("client-info").innerText = `ID: ${data.hw_id} | OS: ${profile.device_type} | Browser: ${profile.browser_name} | Tokens: ${(data.balance_tokens || 500000).toLocaleString()}`;
-            } catch(e) {
-                console.error("Initialization error:", e);
-            }
+                document.getElementById("client-info").innerText = `ID: ${data.hw_id} | OS: ${profile.device_type} | Tokens: ${(data.balance_tokens || 500000).toLocaleString()}`;
+            } catch(e) { console.error(e); }
         }
 
-        async function triggerManualCapture() {
-            if(!clientCredentials.api_key) {
-                await initClient();
-            }
+        async function captureExternalAppPrompt() {
+            if(!clientCredentials.api_key) { await initClient(); }
             if(!clientCredentials.api_key) return;
 
+            const appName = document.getElementById("external-app-name").value;
+            const promptText = document.getElementById("external-prompt-input").value.trim();
+            if(!promptText) { alert("Please enter a prompt."); return; }
+
             const chatContainer = document.getElementById("chat-messages");
-            const navMemory = navigator.deviceMemory ? `${navigator.deviceMemory}GB RAM` : 'Dynamic RAM';
-            const dynamicActivity = `Dynamic telemetry event captured from ${clientCredentials.device_type} running ${clientCredentials.browser_name} (${navMemory}, Cores: ${navigator.hardwareConcurrency || 'N/A'}). Real-time compliance audit verified.`;
-            
             const startTime = performance.now();
+
             try {
                 const res = await fetch(`${SERVER_URL}/v1/chat/completions`, {
                     method: 'POST',
@@ -695,50 +663,63 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                         'X-HW-ID': clientCredentials.hw_id
                     },
                     body: JSON.stringify({
-                        model: "cross-platform-ai-stream",
-                        version: "v9.8-enterprise",
-                        think_level: "Realtime Telemetry",
-                        provider: clientCredentials.browser_name,
-                        payload: dynamicActivity,
-                        response: "Dynamic telemetry successfully verified and logged by control plane.",
-                        prompt_tokens: Math.round(dynamicActivity.split(' ').length * 1.5),
-                        completion_tokens: 30,
+                        model: appName.toLowerCase().replace(/\\s+/g, '-'),
+                        version: "v9.9-external",
+                        think_level: "External App Capture",
+                        provider: appName,
+                        payload: promptText,
+                        response: `External app prompt captured successfully from ${appName}.`,
+                        prompt_tokens: Math.round(promptText.split(' ').length * 1.5),
+                        completion_tokens: 35,
                         device_type: clientCredentials.device_type,
                         browser_name: clientCredentials.browser_name
                     })
                 });
                 
                 const latencyMs = Math.round(performance.now() - startTime);
-
-                if(!res.ok) {
-                    const errText = await res.text();
-                    throw new Error(`Server responded with ${res.status}: ${errText}`);
-                }
+                if(!res.ok) throw new Error(await res.text());
 
                 const data = await res.json();
                 const balance = data.balance_tokens !== undefined ? data.balance_tokens.toLocaleString() : "N/A";
 
-                chatContainer.innerHTML += `<div style="padding: 0.6rem; background: rgba(2, 44, 34, 0.4); border: 1px solid #065f46; border-radius: 0.5rem; margin-bottom: 0.5rem;"><strong style="color: #34d399;">[Device: ${clientCredentials.device_type} / ${clientCredentials.browser_name}] Stream Recorded:</strong> ${dynamicActivity}<div style="font-size: 10px; color: #38bdf8; margin-top: 3px;">Latency: ${latencyMs}ms | Balance: ${balance} tokens</div></div>`;
+                chatContainer.innerHTML += `<div style="padding: 0.6rem; background: rgba(6, 95, 70, 0.3); border: 1px solid #059669; border-radius: 0.5rem; margin-bottom: 0.5rem;"><strong style="color: #34d399;">[${appName}] Synced Prompt:</strong> ${promptText}<div style="font-size: 10px; color: #38bdf8; margin-top: 3px;">Latency: ${latencyMs}ms | Balance: ${balance} tokens | NIST/GDPR Secure</div></div>`;
                 chatContainer.scrollTop = chatContainer.scrollHeight;
             } catch(e) {
-                chatContainer.innerHTML += `<div style="padding: 0.6rem; background: #450a0a; color: #fca5a5; border-radius: 0.5rem;">Error transmitting telemetry: ${e.message}</div>`;
+                chatContainer.innerHTML += `<div style="padding: 0.6rem; background: #450a0a; color: #fca5a5; border-radius: 0.5rem;">Error: ${e.message}</div>`;
             }
         }
 
-        function toggleAutoStream() {
-            const toggle = document.getElementById("auto-stream-toggle");
-            if (toggle.checked) {
-                autoStreamTimer = setInterval(() => {
-                    triggerManualCapture();
-                }, 8000);
-            } else {
-                if (autoStreamTimer) clearInterval(autoStreamTimer);
-            }
-        }
+        async function triggerQuickTelemetry() {
+            if(!clientCredentials.api_key) { await initClient(); }
+            if(!clientCredentials.api_key) return;
 
-        function toggleDistModal() {
-            const modal = document.getElementById("dist-modal");
-            modal.style.display = modal.style.display === "flex" ? "none" : "flex";
+            const chatContainer = document.getElementById("chat-messages");
+            const defaultPrompt = "System diagnostic telemetry event captured.";
+            
+            try {
+                const res = await fetch(`${SERVER_URL}/v1/chat/completions`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${clientCredentials.api_key}`,
+                        'X-HW-ID': clientCredentials.hw_id
+                    },
+                    body: JSON.stringify({
+                        model: "system-telemetry",
+                        version: "v9.9",
+                        think_level: "Diagnostic",
+                        provider: clientCredentials.browser_name,
+                        payload: defaultPrompt,
+                        response: "Verified Secure.",
+                        prompt_tokens: 15,
+                        completion_tokens: 10
+                    })
+                });
+                if(res.ok) {
+                    chatContainer.innerHTML += `<div style="padding: 0.5rem; background: rgba(30, 41, 59, 0.5); border: 1px solid #334155; border-radius: 0.375rem; margin-bottom: 0.5rem; color: #94a3b8;">System diagnostic logged successfully.</div>`;
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                }
+            } catch(e) {}
         }
 
         initClient();
@@ -942,7 +923,7 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         sanitized_prompt = sanitize_pii(str(raw_prompt))
         
         model = body.get("model", "cross-platform-model")
-        version = body.get("version", "v9.8")
+        version = body.get("version", "v9.9")
         think_level = body.get("think_level", "Realtime")
         provider = body.get("provider", "Browser Agent")
 
