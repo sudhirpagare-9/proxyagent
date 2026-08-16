@@ -128,7 +128,7 @@ def get_db():
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
     description="Secure AI traffic capture, token accounting & cross-platform machine telemetry.",
-    version="9.6.0",
+    version="9.7.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -409,6 +409,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             clients.forEach(c => {
                 const isSelected = c.hw_id === selectedHwId;
                 const clientStatus = c.status || 'APPROVED';
+                const fingerprintVal = c.fingerprint_id || (c.hw_id ? c.hw_id.split('-').pop() : 'N/A');
                 
                 const card = document.createElement("div");
                 card.style.cssText = `padding: 1rem; border-radius: 0.75rem; border: 1px solid ${isSelected ? '#4f46e5' : '#1e293b'}; background: ${isSelected ? 'rgba(79, 70, 229, 0.1)' : '#020617'}; cursor: pointer; font-family: monospace; margin-bottom: 0.75rem;`;
@@ -425,7 +426,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         <div>Device / OS: <strong style="color: #67e8f9;">${c.device_type || 'Mobile / Browser'}</strong></div>
                         <div>Browser: <strong style="color: #34d399;">${c.browser_name || 'Web Client'}</strong></div>
                         <div>IP Address: <strong style="color: #fbbf24;">${c.ip_address || 'Dynamic'}</strong></div>
-                        <div>Fingerprint: <strong style="color: #c084fc;">${c.fingerprint_id || 'N/A'}</strong></div>
+                        <div>Fingerprint: <strong style="color: #c084fc;">${fingerprintVal}</strong></div>
                         <div style="margin-top: 4px; padding-top: 4px; border-top: 1px dashed #1e293b;">Token Balance: <strong style="color: #34d399; font-size: 12px;">${(c.balance_tokens || 0).toLocaleString()} tokens</strong></div>
                     </div>
                     <div class="flex items-center justify-between" style="padding-top: 0.5rem; border-top: 1px solid #1e293b; margin-top: 0.5rem;">
@@ -678,7 +679,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                     },
                     body: JSON.stringify({
                         model: "cross-platform-ai-stream",
-                        version: "v9.6-enterprise",
+                        version: "v9.7-enterprise",
                         think_level: "Realtime Telemetry",
                         provider: clientCredentials.browser_name,
                         payload: dynamicActivity,
@@ -761,6 +762,9 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
         device_type = body.get("device_type")
         browser_name = body.get("browser_name")
         fingerprint_id = body.get("fingerprint_id")
+        if not fingerprint_id and hw_id and "-" in hw_id:
+            fingerprint_id = hw_id.split("-")[-1]
+            body["fingerprint_id"] = fingerprint_id
 
         geo_info = {"client_ip": real_ip, "compliance": "GDPR, NIST SP 800-53 & DPDP Act Active"}
         body["ip_address"] = real_ip
@@ -904,7 +908,7 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         sanitized_prompt = sanitize_pii(str(raw_prompt))
         
         model = body.get("model", "cross-platform-model")
-        version = body.get("version", "v9.6")
+        version = body.get("version", "v9.7")
         think_level = body.get("think_level", "Realtime")
         provider = body.get("provider", "Browser Agent")
 
@@ -923,7 +927,7 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
 
         device_type_val = meta.get("device_type") or body.get("device_type")
         browser_name_val = meta.get("browser_name") or body.get("browser_name")
-        fingerprint_id_val = meta.get("fingerprint_id")
+        fingerprint_id_val = meta.get("fingerprint_id") or (client_node.hw_id.split('-')[-1] if client_node.hw_id and '-' in client_node.hw_id else 'N/A')
         ip_val = meta.get("ip_address") or get_client_ip(request)
 
         ai_response_text = body.get("response") or "Telemetry verified secure under NIST & GDPR."
@@ -1019,6 +1023,9 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
                     meta = json.loads(c.metadata_json)
                 except:
                     meta = {}
+
+            if not meta.get("fingerprint_id") and c.hw_id and "-" in c.hw_id:
+                meta["fingerprint_id"] = c.hw_id.split("-")[-1]
 
             clients.append({
                 **meta,
