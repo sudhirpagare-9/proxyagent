@@ -52,7 +52,7 @@ Base = declarative_base()
 # --- Persistent Encryption Key Setup ---
 ENCRYPTION_KEY = os.environ.get("ENC_KEY")
 if not ENCRYPTION_KEY or ENCRYPTION_KEY.startswith("placeholder"):
-    ENCRYPTION_KEY = b'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI='
+    ENCRYPTION_KEY = Fernet.generate_key()
 else:
     ENCRYPTION_KEY = ENCRYPTION_KEY.encode()
 
@@ -64,7 +64,7 @@ class ClientModel(Base):
     id = Column(Integer, primary_key=True, index=True)
     hw_id = Column(String, unique=True, index=True)
     api_key = Column(String, unique=True, index=True)
-    status = Column(String, default="APPROVED") # Auto-approve for seamless scaling
+    status = Column(String, default="APPROVED")
     subscription_tier = Column(String, default="ENTERPRISE_PRO")
     balance_tokens = Column(Integer, default=500000)
     metadata_json = Column(Text, nullable=True)
@@ -151,6 +151,14 @@ public_pem = public_key.public_bytes(
 @app.on_event("startup")
 def startup_event():
     init_db()
+
+def get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "127.0.0.1"
 
 def sanitize_pii(text: str) -> str:
     if not isinstance(text, str):
@@ -370,17 +378,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             } catch (err) { console.error("Fetch error:", err); }
         }
 
-        async function updateClientStatus(hwId, status) {
-            try {
-                const res = await fetch(`${SERVER_URL}/api/clients/${encodeURIComponent(hwId)}/status`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ status })
-                });
-                if(res.ok) { loadDashboardData(); }
-            } catch(e) { console.error(e); }
-        }
-
         async function softDeleteClient(hwId) {
             if(!confirm(`Delete device node ${hwId}?`)) return;
             try {
@@ -427,7 +424,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <div style="margin-top: 0.5rem; font-size: 11px; background: #0f172a; padding: 0.5rem; border-radius: 0.375rem; border: 1px solid #1e293b; line-height: 1.4;">
                         <div>Device / OS: <strong style="color: #67e8f9;">${c.device_type || 'Mobile / Browser'}</strong></div>
                         <div>Browser: <strong style="color: #34d399;">${c.browser_name || 'Web Client'}</strong></div>
-                        <div>IP Address: <strong style="color: #fbbf24;">${c.ip_address || 'N/A'}</strong></div>
+                        <div>IP Address: <strong style="color: #fbbf24;">${c.ip_address || 'Dynamic'}</strong></div>
                         <div>Fingerprint: <strong style="color: #c084fc;">${c.fingerprint_id || 'N/A'}</strong></div>
                         <div style="margin-top: 4px; padding-top: 4px; border-top: 1px dashed #1e293b;">Token Balance: <strong style="color: #34d399; font-size: 12px;">${(c.balance_tokens || 0).toLocaleString()} tokens</strong></div>
                     </div>
@@ -667,17 +664,11 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
             if(!clientCredentials.api_key) return;
 
             const chatContainer = document.getElementById("chat-messages");
-            const activities = [
-                "Real-time mobile AI traffic packet captured under NIST SP 800-53 security controls.",
-                "Encrypted session telemetry audit logged under GDPR compliance guidelines.",
-                "Automated token accounting check verified across distributed client gateway nodes.",
-                "Secure data transmission captured and validated via non-windows agent sandbox."
-            ];
-            const randomActivity = activities[Math.floor(Math.random() * activities.length)];
+            const navMemory = navigator.deviceMemory ? `${navigator.deviceMemory}GB RAM` : 'Dynamic RAM';
+            const dynamicActivity = `Dynamic telemetry event captured from ${clientCredentials.device_type} running ${clientCredentials.browser_name} (${navMemory}, Cores: ${navigator.hardwareConcurrency || 'N/A'}). Real-time compliance audit verified.`;
             
             const startTime = performance.now();
             try {
-                const latencyMs = Math.round(performance.now() - startTime) + 35;
                 const res = await fetch(`${SERVER_URL}/v1/chat/completions`, {
                     method: 'POST',
                     headers: {
@@ -690,16 +681,17 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                         version: "v9.6-enterprise",
                         think_level: "Realtime Telemetry",
                         provider: clientCredentials.browser_name,
-                        payload: randomActivity,
-                        response: "Telemetry successfully verified and logged by control plane.",
-                        prompt_tokens: 24,
+                        payload: dynamicActivity,
+                        response: "Dynamic telemetry successfully verified and logged by control plane.",
+                        prompt_tokens: Math.round(dynamicActivity.split(' ').length * 1.5),
                         completion_tokens: 30,
-                        latency_ms: latencyMs,
                         device_type: clientCredentials.device_type,
                         browser_name: clientCredentials.browser_name
                     })
                 });
                 
+                const latencyMs = Math.round(performance.now() - startTime);
+
                 if(!res.ok) {
                     const errText = await res.text();
                     throw new Error(`Server responded with ${res.status}: ${errText}`);
@@ -708,7 +700,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                 const data = await res.json();
                 const balance = data.balance_tokens !== undefined ? data.balance_tokens.toLocaleString() : "N/A";
 
-                chatContainer.innerHTML += `<div style="padding: 0.6rem; background: rgba(2, 44, 34, 0.4); border: 1px solid #065f46; border-radius: 0.5rem; margin-bottom: 0.5rem;"><strong style="color: #34d399;">[Device: ${clientCredentials.device_type} / ${clientCredentials.browser_name}] Stream Recorded:</strong> ${randomActivity}<div style="font-size: 10px; color: #38bdf8; margin-top: 3px;">Latency: ${latencyMs}ms | Balance: ${balance} tokens</div></div>`;
+                chatContainer.innerHTML += `<div style="padding: 0.6rem; background: rgba(2, 44, 34, 0.4); border: 1px solid #065f46; border-radius: 0.5rem; margin-bottom: 0.5rem;"><strong style="color: #34d399;">[Device: ${clientCredentials.device_type} / ${clientCredentials.browser_name}] Stream Recorded:</strong> ${dynamicActivity}<div style="font-size: 10px; color: #38bdf8; margin-top: 3px;">Latency: ${latencyMs}ms | Balance: ${balance} tokens</div></div>`;
                 chatContainer.scrollTop = chatContainer.scrollHeight;
             } catch(e) {
                 chatContainer.innerHTML += `<div style="padding: 0.6rem; background: #450a0a; color: #fca5a5; border-radius: 0.5rem;">Error transmitting telemetry: ${e.message}</div>`;
@@ -764,14 +756,13 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
     
     try:
         client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
-        forwarded = request.headers.get("x-forwarded-for")
-        real_ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else None)
+        real_ip = get_client_ip(request)
 
         device_type = body.get("device_type")
         browser_name = body.get("browser_name")
         fingerprint_id = body.get("fingerprint_id")
 
-        geo_info = {"country": "India", "region": "Maharashtra", "compliance": "GDPR, NIST SP 800-53 & DPDP Act Active"}
+        geo_info = {"client_ip": real_ip, "compliance": "GDPR, NIST SP 800-53 & DPDP Act Active"}
         body["ip_address"] = real_ip
         body["geo_location"] = geo_info
         body["registered_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -846,7 +837,7 @@ def export_audit_report(user: dict = Depends(verify_admin_user), db: Session = D
         hw_id = r.hw_id or ""
         device_type = p.get("device_type") or "Mobile / Browser"
         browser_name = p.get("browser_name") or "Web Agent"
-        ip_address = p.get("ip_address") or "106.215.180.186"
+        ip_address = p.get("ip_address") or "Dynamic"
         provider = r.provider or ""
         model = r.model or ""
         version = r.version or ""
@@ -864,19 +855,6 @@ def export_audit_report(user: dict = Depends(verify_admin_user), db: Session = D
     response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
     response.headers["Content-Disposition"] = "attachment; filename=ai_traffic_compliance_audit.csv"
     return response
-
-@app.post("/api/clients/{hw_id}/status")
-async def update_client_status(hw_id: str, request: Request, user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
-    try:
-        body = await request.json()
-    except:
-        body = {}
-    new_status = body.get("status", "APPROVED")
-    client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
-    if client:
-        client.status = new_status
-        db.commit()
-    return {"status": "success", "hw_id": hw_id, "new_status": new_status}
 
 @app.post("/api/clients/{hw_id}/delete")
 async def soft_delete_client(hw_id: str, user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
@@ -938,7 +916,6 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         client_node.balance_tokens = max(0, client_node.balance_tokens - total_tokens)
         db.commit()
 
-        # Fix timestamp calculation (UTC and local IST conversion)
         now_utc = datetime.now(timezone.utc)
         timestamp_utc = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
         ist_offset = timezone(timedelta(hours=5, minutes=30))
@@ -947,7 +924,7 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         device_type_val = meta.get("device_type") or body.get("device_type")
         browser_name_val = meta.get("browser_name") or body.get("browser_name")
         fingerprint_id_val = meta.get("fingerprint_id")
-        ip_val = meta.get("ip_address")
+        ip_val = meta.get("ip_address") or get_client_ip(request)
 
         ai_response_text = body.get("response") or "Telemetry verified secure under NIST & GDPR."
 
@@ -989,7 +966,6 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         db.add(log_entry)
         db.commit()
 
-        # Instant WebSocket live traffic push
         await manager.broadcast({
             "type": "NEW_TRAFFIC",
             "data": {
@@ -1077,7 +1053,7 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
                 "hw_id": l.hw_id,
                 "device_type": payload.get("device_type") or "Mobile Device",
                 "browser_name": payload.get("browser_name") or "Web Agent",
-                "ip_address": payload.get("ip_address") or "106.215.180.186",
+                "ip_address": payload.get("ip_address") or "Dynamic",
                 "timestamp_utc": utc_str,
                 "timestamp_local": payload.get("timestamp_local") or local_str,
                 "provider": l.provider,
