@@ -12,7 +12,6 @@ from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException, Header, Request, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
-from pydantic import BaseModel
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import serialization
@@ -23,21 +22,18 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.sql import func
 
-# --- Try loading python-dotenv if available ---
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
 
-# --- Logging & Compliance Setup ---
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] [AI-GATEWAY-SECURITY] %(message)s",
 )
 logger = logging.getLogger("EnterpriseAIGateway")
 
-# --- Database Setup ---
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./enterprise_gateway.db")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
@@ -49,7 +45,6 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# --- Persistent Encryption Key Setup ---
 ENCRYPTION_KEY = os.environ.get("ENC_KEY")
 if not ENCRYPTION_KEY or ENCRYPTION_KEY.startswith("placeholder"):
     ENCRYPTION_KEY = Fernet.generate_key()
@@ -58,7 +53,6 @@ else:
 
 cipher = Fernet(ENCRYPTION_KEY)
 
-# --- Database Models ---
 class ClientModel(Base):
     __tablename__ = "clients"
     id = Column(Integer, primary_key=True, index=True)
@@ -111,9 +105,9 @@ def init_db():
             except Exception:
                 db.rollback()
 
-        logger.info("Database initialized and schema verified successfully.")
+        logger.info("Database schema initialized and verified.")
     except Exception as e:
-        logger.warning(f"Database initialization notice: {e}")
+        logger.warning(f"Database setup note: {e}")
     finally:
         db.close()
 
@@ -124,13 +118,10 @@ def get_db():
     finally:
         db.close()
 
-# --- FastAPI App Initialization ---
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
-    description="Secure AI traffic capture, token accounting & cross-platform machine telemetry.",
-    version="9.9.2",
-    docs_url="/docs",
-    redoc_url="/redoc"
+    description="Secure AI traffic capture, token accounting & cross-platform telemetry.",
+    version="10.0.0"
 )
 
 app.add_middleware(
@@ -184,25 +175,24 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
-        for connection in self.active_connections:
+        for connection in list(self.active_connections):
             try:
                 await connection.send_json(message)
-            except:
-                pass
+            except Exception:
+                self.disconnect(connection)
 
 manager = ConnectionManager()
 
-# --- Inline SVG Icon Helpers (Zero external CDN / Tracking Prevention issues) ---
 ICONS = {
-    "shield": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
-    "smartphone": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>',
-    "download": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>',
-    "refresh": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>',
-    "server": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>',
-    "activity": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
-    "cpu": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M9 1v3"/><path d="M15 1v3"/><path d="M9 20v3"/><path d="M15 20v3"/><path d="M20 9h3"/><path d="M20 14h3"/><path d="M1 9h3"/><path d="M1 14h3"/></svg>',
-    "send": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>',
-    "zap": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>'
+    "shield": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+    "smartphone": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/></svg>',
+    "download": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>',
+    "refresh": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>',
+    "server": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>',
+    "activity": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
+    "cpu": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M9 1v3"/><path d="M15 1v3"/><path d="M9 20v3"/><path d="M15 20v3"/><path d="M20 9h3"/><path d="M20 14h3"/><path d="M1 9h3"/><path d="M1 14h3"/></svg>',
+    "send": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>',
+    "zap": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>'
 }
 
 GLOBAL_CSS = """
@@ -281,7 +271,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <span style="width:8px; height:8px; border-radius:50%; background:#10b981;"></span> Connected
             </span>
             <a href="/agent" target="_blank" style="padding: 0.5rem 0.875rem; background: #4f46e5; color: white; border-radius: 0.5rem; text-decoration: none;" class="text-xs font-bold flex items-center gap-1.5">
-                """ + ICONS["smartphone"] + """ Mobile & Browser Agent Window
+                """ + ICONS["smartphone"] + """ Mobile Agent Window
             </a>
             <a href="/api/export-audit-report" style="padding: 0.5rem 0.875rem; background: #1e293b; color: #e2e8f0; border-radius: 0.5rem; text-decoration: none;" class="text-xs font-semibold flex items-center gap-1.5">
                 """ + ICONS["download"] + """ Export Audit CSV
@@ -673,7 +663,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                     },
                     body: JSON.stringify({
                         model: appName.toLowerCase().replace(/\\s+/g, '-'),
-                        version: "v9.9-external",
+                        version: "v10.0-external",
                         think_level: "External App Capture",
                         provider: appName,
                         payload: promptText,
@@ -715,7 +705,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                     },
                     body: JSON.stringify({
                         model: "system-telemetry",
-                        version: "v9.9",
+                        version: "v10.0",
                         think_level: "Diagnostic",
                         provider: "System Diagnostic",
                         payload: defaultPrompt,
@@ -736,8 +726,6 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
 </body>
 </html>"""
 
-# --- API Endpoints ---
-
 @app.get("/", response_class=HTMLResponse)
 def serve_dashboard():
     return DASHBOARD_HTML
@@ -752,28 +740,31 @@ def get_public_key():
 
 @app.post("/api/register")
 @app.post("/register")
+@app.post("/api/nodes/register")
+@app.post("/api/device/register")
+@app.post("/api/devices")
 async def register_client(request: Request, db: Session = Depends(get_db)):
     try:
         body = await request.json()
-    except:
+    except Exception:
         body = {}
     
-    hw_id = body.get("hw_id")
+    hw_id = body.get("hw_id") or body.get("hardware_id") or body.get("device_id")
     if not hw_id:
-        raise HTTPException(status_code=400, detail="Dynamic hw_id is required in registration payload.")
+        raise HTTPException(status_code=400, detail="hw_id is required in registration payload.")
     
     try:
         client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
         real_ip = get_client_ip(request)
 
-        device_type = body.get("device_type")
-        browser_name = body.get("browser_name")
-        fingerprint_id = body.get("fingerprint_id")
+        device_type = body.get("device_type") or body.get("device_name") or "Desktop Agent"
+        browser_name = body.get("browser_name") or "System Proxy Agent"
+        fingerprint_id = body.get("fingerprint") or body.get("fingerprint_id")
         if not fingerprint_id and hw_id and "-" in hw_id:
             fingerprint_id = hw_id.split("-")[-1]
             body["fingerprint_id"] = fingerprint_id
 
-        geo_info = {"client_ip": real_ip, "compliance": "GDPR, NIST SP 800-53 & DPDP Act Active"}
+        geo_info = {"client_ip": real_ip, "compliance": "GDPR, NIST SP 800-53 Active"}
         body["ip_address"] = real_ip
         body["geo_location"] = geo_info
         body["registered_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -799,30 +790,173 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
         db.refresh(client)
         
         return {
-            "status": "success",
+            "status": client.status,
+            "approval_status": client.status,
+            "approved": (client.status == "APPROVED"),
+            "is_approved": (client.status == "APPROVED"),
             "hw_id": client.hw_id,
             "api_key": client.api_key,
             "ip_address": real_ip,
-            "client_status": client.status,
-            "subscription_tier": client.subscription_tier,
             "balance_tokens": client.balance_tokens,
-            "geo_location": geo_info,
             "device_type": device_type,
             "browser_name": browser_name,
-            "fingerprint_id": fingerprint_id
+            "fingerprint": fingerprint_id
         }
     except HTTPException as he:
         raise he
     except Exception as e:
         db.rollback()
         logger.error(f"Registration error: {e}")
-        return {"status": "error", "message": str(e)}
+        return {"status": "Discovered", "approval_status": "Discovered", "error": str(e)}
+
+@app.get("/api/device/{hw_id}")
+@app.get("/api/node/{hw_id}")
+@app.get("/api/status")
+@app.get("/api/devices")
+@app.get("/api/nodes")
+@app.get("/api/clients")
+def get_device_status(hw_id: Optional[str] = None, db: Session = Depends(get_db)):
+    if hw_id:
+        client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id, ClientModel.is_deleted == False).first()
+        if not client:
+            return {"status": "Discovered", "approval_status": "Discovered", "approved": False}
+        return {
+            "hw_id": client.hw_id,
+            "status": client.status,
+            "approval_status": client.status,
+            "approved": (client.status == "APPROVED"),
+            "is_approved": (client.status == "APPROVED"),
+            "balance_tokens": client.balance_tokens
+        }
+    clients = db.query(ClientModel).filter(ClientModel.is_deleted == False).all()
+    return [{
+        "hw_id": c.hw_id,
+        "status": c.status,
+        "approval_status": c.status,
+        "approved": (c.status == "APPROVED"),
+        "is_approved": (c.status == "APPROVED")
+    } for c in clients]
+
+@app.post("/api/telemetry")
+@app.post("/api/telemetry/push")
+@app.post("/api/logs")
+@app.post("/api/activity")
+async def receive_telemetry(request: Request, db: Session = Depends(get_db)):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    hw_id = body.get("hw_id") or body.get("hardware_id") or body.get("device_id")
+    if not hw_id:
+        raise HTTPException(status_code=400, detail="Missing dynamic hardware identifier.")
+
+    client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id).first()
+    if not client:
+        api_key = f"sk_tenant_{secrets.token_hex(16)}"
+        client = ClientModel(
+            hw_id=hw_id,
+            api_key=api_key,
+            status="APPROVED",
+            balance_tokens=500000,
+            metadata_json=json.dumps({"ip_address": get_client_ip(request), "device_type": body.get("device", "Desktop Agent")})
+        )
+        db.add(client)
+        db.commit()
+        db.refresh(client)
+
+    if client.status != "APPROVED":
+        raise HTTPException(status_code=403, detail=f"Client node is {client.status}. Access denied by gateway.")
+
+    provider = body.get("llm_telemetry") or body.get("provider") or body.get("endpoint") or "Agent Interceptor"
+    model = body.get("model") or body.get("llm_model") or "Generic LLM"
+    prompt_text = body.get("activity") or body.get("captured_activity") or body.get("prompt") or "AI Traffic Intercepted"
+    sanitized_prompt = sanitize_pii(prompt_text)
+    
+    tokens = body.get("token_usage") or body.get("tokens_used") or 50
+    client.balance_tokens = max(0, client.balance_tokens - tokens)
+    db.commit()
+
+    now_utc = datetime.now(timezone.utc)
+    timestamp_utc = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
+    ist_offset = timezone(timedelta(hours=5, minutes=30))
+    timestamp_local = now_utc.astimezone(ist_offset).strftime("%Y-%m-%d %H:%M:%S Local (IST)")
+
+    meta = {}
+    if client.metadata_json:
+        try:
+            meta = json.loads(client.metadata_json)
+        except Exception:
+            pass
+
+    device_type_val = meta.get("device_type") or body.get("device") or "Desktop Machine"
+    browser_name_val = meta.get("browser_name") or "AI Interceptor Proxy"
+    fingerprint_val = body.get("fingerprint") or (hw_id.split("-")[-1] if "-" in hw_id else "N/A")
+    ip_val = meta.get("ip_address") or get_client_ip(request)
+
+    payload_data = {
+        "provider": provider,
+        "model": model,
+        "query": sanitized_prompt,
+        "response": "Intercepted & Verified Secure",
+        "prompt_tokens": tokens,
+        "completion_tokens": 0,
+        "latency_ms": 15,
+        "timestamp_utc": timestamp_utc,
+        "timestamp_local": timestamp_local,
+        "device_type": device_type_val,
+        "browser_name": browser_name_val,
+        "fingerprint_id": fingerprint_val,
+        "ip_address": ip_val,
+        "balance_tokens": client.balance_tokens
+    }
+
+    try:
+        encrypted_payload = cipher.encrypt(json.dumps(payload_data).encode()).decode()
+    except Exception:
+        encrypted_payload = json.dumps(payload_data)
+
+    log_entry = TrafficLogModel(
+        hw_id=client.hw_id,
+        provider=provider,
+        model=model,
+        version="v10.0-proxy",
+        think_level="Live Intercept",
+        prompt_tokens=tokens,
+        completion_tokens=0,
+        latency_ms=15,
+        payload_json=encrypted_payload
+    )
+    db.add(log_entry)
+    db.commit()
+
+    await manager.broadcast({
+        "type": "NEW_TRAFFIC",
+        "data": {
+            "id": log_entry.id,
+            "timestamp": timestamp_utc,
+            "tenant_id": client.hw_id,
+            "device_type": device_type_val,
+            "browser_name": browser_name_val,
+            "fingerprint_id": fingerprint_val,
+            "ip_address": ip_val,
+            "provider": provider,
+            "model": model,
+            "tokens": tokens,
+            "balance_tokens": client.balance_tokens,
+            "latency_ms": 15,
+            "prompt": sanitized_prompt,
+            "response": "Intercepted & Verified Secure"
+        }
+    })
+
+    return {"status": "success", "balance_tokens": client.balance_tokens}
 
 @app.post("/api/clients/{hw_id}/status")
 async def update_client_status(hw_id: str, request: Request, user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
     try:
         body = await request.json()
-    except:
+    except Exception:
         body = {}
     new_status = body.get("status", "APPROVED")
     
@@ -840,7 +974,7 @@ async def soft_delete_client(hw_id: str, user: dict = Depends(verify_admin_user)
         client.is_deleted = True
         client.status = "DELETED"
         db.commit()
-    return {"status": "success", "message": f"Client {hw_id} soft-deleted and purged from views."}
+    return {"status": "success", "message": f"Client {hw_id} deleted."}
 
 @app.get("/api/export-audit-report")
 def export_audit_report(user: dict = Depends(verify_admin_user), db: Session = Depends(get_db)):
@@ -848,7 +982,7 @@ def export_audit_report(user: dict = Depends(verify_admin_user), db: Session = D
         active_clients = db.query(ClientModel).filter(ClientModel.is_deleted == False, ClientModel.status == "APPROVED").all()
         active_hw_ids = {c.hw_id for c in active_clients}
         rows = db.query(TrafficLogModel).filter(TrafficLogModel.hw_id.in_(active_hw_ids)).order_by(TrafficLogModel.created_at.desc()).all() if active_hw_ids else []
-    except:
+    except Exception:
         rows = []
         
     output = io.StringIO()
@@ -860,17 +994,14 @@ def export_audit_report(user: dict = Depends(verify_admin_user), db: Session = D
             if r.payload_json:
                 try:
                     p = json.loads(cipher.decrypt(r.payload_json.encode()).decode())
-                except:
-                    try:
-                        p = json.loads(r.payload_json)
-                    except:
-                        p = {}
-        except:
+                except Exception:
+                    p = json.loads(r.payload_json)
+        except Exception:
             pass
             
         hw_id = r.hw_id or ""
-        device_type = p.get("device_type") or "Mobile / Browser"
-        browser_name = p.get("browser_name") or "Web Agent"
+        device_type = p.get("device_type") or "Desktop Agent"
+        browser_name = p.get("browser_name") or "Proxy Agent"
         ip_address = p.get("ip_address") or "Dynamic"
         provider = r.provider or ""
         model = r.model or ""
@@ -895,7 +1026,7 @@ def export_audit_report(user: dict = Depends(verify_admin_user), db: Session = D
 async def openai_compatible_chat_completions(request: Request, db: Session = Depends(get_db)):
     try:
         body = await request.json()
-    except:
+    except Exception:
         body = {}
         
     auth_header = request.headers.get("Authorization", "")
@@ -913,14 +1044,14 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
             raise HTTPException(status_code=403, detail="Client node not found.")
 
         if client_node.status != "APPROVED":
-            raise HTTPException(status_code=403, detail=f"Client node is currently {client_node.status}. Access denied by gateway control plane.")
+            raise HTTPException(status_code=403, detail=f"Client node is currently {client_node.status}.")
 
         meta = {}
         if client_node.metadata_json:
             try:
                 meta = json.loads(client_node.metadata_json)
-            except:
-                meta = {}
+            except Exception:
+                pass
 
         raw_prompt = body.get("payload") or body.get("prompt")
         if not raw_prompt and "messages" in body and isinstance(body["messages"], list) and len(body["messages"]) > 0:
@@ -930,18 +1061,13 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
             raise HTTPException(status_code=400, detail="Prompt or payload is required.")
 
         sanitized_prompt = sanitize_pii(str(raw_prompt))
-        
         model = body.get("model", "cross-platform-model")
-        version = body.get("version", "v9.9")
+        version = body.get("version", "v10.0")
         think_level = body.get("think_level", "Realtime")
         
-        # --- Strict Provider Sanitization to Prevent Browser Names as AI Providers ---
         raw_provider = body.get("provider", "System Diagnostic")
         browser_indicators = ["edge", "chrome", "firefox", "safari", "browser", "mobile device", "windows workstation", "macs", "linux"]
-        if not raw_provider or raw_provider.lower().strip() in browser_indicators:
-            provider = "System Diagnostic"
-        else:
-            provider = raw_Provider if 'raw_Provider' in locals() else raw_provider
+        provider = "System Diagnostic" if raw_provider.lower().strip() in browser_indicators else raw_provider
 
         input_tokens = body.get("prompt_tokens") or (len(sanitized_prompt.split()) * 2 + 10)
         output_tokens = body.get("completion_tokens") or 32
@@ -984,7 +1110,7 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
 
         try:
             encrypted_payload = cipher.encrypt(json.dumps(payload_data).encode()).decode()
-        except:
+        except Exception:
             encrypted_payload = json.dumps(payload_data)
 
         log_entry = TrafficLogModel(
@@ -1025,7 +1151,7 @@ async def openai_compatible_chat_completions(request: Request, db: Session = Dep
         raise he
     except Exception as ex:
         db.rollback()
-        logger.error(f"AI Traffic logging error: {ex}")
+        logger.error(f"AI Traffic error: {ex}")
         raise HTTPException(status_code=500, detail=str(ex))
 
     return {
@@ -1052,8 +1178,8 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
             if c.metadata_json:
                 try:
                     meta = json.loads(c.metadata_json)
-                except:
-                    meta = {}
+                except Exception:
+                    pass
 
             if not meta.get("fingerprint_id") and c.hw_id and "-" in c.hw_id:
                 meta["fingerprint_id"] = c.hw_id.split("-")[-1]
@@ -1075,10 +1201,10 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
             if l.payload_json:
                 try:
                     payload = json.loads(cipher.decrypt(l.payload_json.encode()).decode())
-                except:
+                except Exception:
                     try:
                         payload = json.loads(l.payload_json)
-                    except:
+                    except Exception:
                         payload = {}
             
             db_time = l.created_at or datetime.now(timezone.utc)
@@ -1089,8 +1215,8 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
             logs.append({
                 "id": l.id,
                 "hw_id": l.hw_id,
-                "device_type": payload.get("device_type") or "Mobile Device",
-                "browser_name": payload.get("browser_name") or "Web Agent",
+                "device_type": payload.get("device_type") or "Desktop Machine",
+                "browser_name": payload.get("browser_name") or "Agent Interceptor",
                 "ip_address": payload.get("ip_address") or "Dynamic",
                 "timestamp_utc": utc_str,
                 "timestamp_local": payload.get("timestamp_local") or local_str,
@@ -1110,7 +1236,7 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
         return {"clients": clients, "logs": logs, "authenticated_user": "compliance@enterprise.internal"}
     except Exception as e:
         db.rollback()
-        logger.error(f"Error in dashboard_data: {e}")
+        logger.error(f"Dashboard data error: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.websocket("/ws/live-traffic")
