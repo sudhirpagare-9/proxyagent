@@ -128,7 +128,7 @@ def get_db():
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
     description="Secure AI traffic capture, token accounting & cross-platform machine telemetry.",
-    version="9.9.0",
+    version="9.9.1",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -192,6 +192,19 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# --- Inline SVG Icon Helpers (Zero external CDN / Tracking Prevention issues) ---
+ICONS = {
+    "shield": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+    "smartphone": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>',
+    "download": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>',
+    "refresh": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>',
+    "server": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>',
+    "activity": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
+    "cpu": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M9 1v3"/><path d="M15 1v3"/><path d="M9 20v3"/><path d="M15 20v3"/><path d="M20 9h3"/><path d="M20 14h3"/><path d="M1 9h3"/><path d="M1 14h3"/></svg>',
+    "send": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>',
+    "zap": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>'
+}
+
 GLOBAL_CSS = """
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background-color: #030712; color: #f3f4f6; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
@@ -250,14 +263,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Enterprise Cloud AI Gateway & Control Plane</title>
-    <script src="https://unpkg.com/lucide@latest"></script>
     <style>""" + GLOBAL_CSS + """</style>
 </head>
 <body class="min-h-screen p-6 flex flex-col gap-4">
     <header class="flex flex-col md:flex-row items-center justify-between border border-slate-800 pb-4 gap-4 bg-slate-900 p-4 rounded-xl">
         <div class="flex items-center gap-3">
-            <div class="bg-indigo-600 p-2.5 rounded-xl text-white shadow">
-                <i data-lucide="shield-check" class="w-6 h-6"></i>
+            <div class="bg-indigo-600 p-2.5 rounded-xl text-white shadow flex items-center justify-center">
+                """ + ICONS["shield"] + """
             </div>
             <div>
                 <h1 class="text-sm font-bold text-white">Enterprise Cloud AI Gateway & Control Plane</h1>
@@ -269,13 +281,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <span style="width:8px; height:8px; border-radius:50%; background:#10b981;"></span> Connected
             </span>
             <a href="/agent" target="_blank" style="padding: 0.5rem 0.875rem; background: #4f46e5; color: white; border-radius: 0.5rem; text-decoration: none;" class="text-xs font-bold flex items-center gap-1.5">
-                <i data-lucide="smartphone" class="w-4 h-4"></i> Mobile & Browser Agent Window
+                """ + ICONS["smartphone"] + """ Mobile & Browser Agent Window
             </a>
             <a href="/api/export-audit-report" style="padding: 0.5rem 0.875rem; background: #1e293b; color: #e2e8f0; border-radius: 0.5rem; text-decoration: none;" class="text-xs font-semibold flex items-center gap-1.5">
-                <i data-lucide="download" class="w-4 h-4"></i> Export Audit CSV
+                """ + ICONS["download"] + """ Export Audit CSV
             </a>
             <button onclick="loadDashboardData()" style="padding: 0.5rem 0.875rem; background: #1e293b; color: #e2e8f0; border-radius: 0.5rem; border: none; cursor: pointer;" class="text-xs font-semibold flex items-center gap-1.5">
-                <i data-lucide="refresh-cw" class="w-4 h-4"></i> Refresh
+                """ + ICONS["refresh"] + """ Refresh
             </button>
         </div>
     </header>
@@ -303,7 +315,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col shadow-xl">
             <div class="flex items-center justify-between mb-4 pb-2" style="border-bottom: 1px solid #1e293b;">
                 <h2 class="text-xs font-bold uppercase text-slate-200 flex items-center gap-2">
-                    <i data-lucide="server" class="w-4 h-4 text-indigo-400"></i> Client Devices & Token Balance
+                    """ + ICONS["server"] + """ Client Devices & Token Balance
                 </h2>
                 <span id="client-count" class="px-3 py-1 bg-slate-950 text-slate-300 rounded-full text-xs font-mono">0 Registered</span>
             </div>
@@ -315,7 +327,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col shadow-xl">
             <div class="flex items-center justify-between mb-4 pb-2" style="border-bottom: 1px solid #1e293b;">
                 <h2 class="text-xs font-bold uppercase text-slate-200 flex items-center gap-2">
-                    <i data-lucide="activity" class="w-4 h-4 text-emerald-400"></i> Captured Live AI Traffic & Telemetry
+                    """ + ICONS["activity"] + """ Captured Live AI Traffic & Telemetry
                 </h2>
                 <div class="flex items-center gap-2">
                     <span id="selected-client-badge" style="background: #022c22; color: #34d399; border: 1px solid #065f46;" class="px-2 py-0.5 rounded text-xs font-mono">Selected: None</span>
@@ -342,7 +354,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
 
     <script>
-        lucide.createIcons();
         const SERVER_URL = window.location.origin;
         let selectedHwId = null;
         let globalClients = [];
@@ -532,7 +543,6 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Universal Mobile & Browser AI Telemetry Agent</title>
-    <script src="https://unpkg.com/lucide@latest"></script>
     <style>""" + GLOBAL_CSS + """</style>
 </head>
 <body class="min-h-screen p-4 flex flex-col items-center justify-center">
@@ -540,7 +550,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
         <div class="flex flex-col md:flex-row items-center justify-between mb-3 border-b border-slate-800 pb-3 gap-2">
             <div>
                 <h1 class="text-sm font-bold text-white flex items-center gap-2">
-                    <i data-lucide="smartphone" class="w-4 h-4 text-indigo-400"></i> External AI App & Cross-Platform Telemetry Agent
+                    """ + ICONS["smartphone"] + """ External AI App & Cross-Platform Telemetry Agent
                 </h1>
                 <p id="client-info" class="text-xs text-indigo-400 font-mono mt-0.5">Detecting device fingerprint...</p>
             </div>
@@ -551,7 +561,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
 
         <div style="background: #020617; border: 1px solid #1e293b; border-radius: 0.75rem; padding: 1rem; margin-bottom: 0.75rem; font-family: monospace;">
             <div style="font-size: 11px; font-weight: bold; color: #34d399; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
-                <i data-lucide="cpu" class="w-4 h-4"></i> Sync External App Prompt (Perplexity, ChatGPT, Ollama, etc.)
+                """ + ICONS["cpu"] + """ Sync External App Prompt (Perplexity, ChatGPT, Ollama, etc.)
             </div>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mb-2">
                 <div>
@@ -570,7 +580,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                 </div>
             </div>
             <button onclick="captureExternalAppPrompt()" style="width: 100%; padding: 0.5rem; background: #059669; color: white; border-radius: 0.375rem; border: none; cursor: pointer; font-weight: bold; font-size: 11px;" class="flex items-center justify-center gap-1.5">
-                <i data-lucide="send" class="w-3.5 h-3.5"></i> Stream External App Prompt to Control Plane Dashboard
+                """ + ICONS["send"] + """ Stream External App Prompt to Control Plane Dashboard
             </button>
         </div>
 
@@ -580,13 +590,12 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
 
         <div class="flex gap-2">
             <button onclick="triggerQuickTelemetry()" style="width: 100%; padding: 0.6rem; background: #4f46e5; color: white; border-radius: 0.5rem; border: none; cursor: pointer;" class="text-xs font-bold flex items-center justify-center gap-2 shadow">
-                <i data-lucide="zap" class="w-4 h-4"></i> Trigger Automatic System Diagnostic Telemetry
+                """ + ICONS["zap"] + """ Trigger Automatic System Diagnostic Telemetry
             </button>
         </div>
     </div>
 
     <script>
-        lucide.createIcons();
         const SERVER_URL = window.location.origin;
         let clientCredentials = { hw_id: "", api_key: "", device_type: "", browser_name: "" };
 
@@ -708,7 +717,7 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
                         model: "system-telemetry",
                         version: "v9.9",
                         think_level: "Diagnostic",
-                        provider: clientCredentials.browser_name,
+                        provider: "System Diagnostic",
                         payload: defaultPrompt,
                         response: "Verified Secure.",
                         prompt_tokens: 15,
