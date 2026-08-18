@@ -13,8 +13,9 @@ import hashlib
 import hmac
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Header, Request, WebSocket, WebSocketDisconnect, Depends
+from fastapi import FastAPI, HTTPException, Header, Request, WebSocket, WebSocketDisconnect, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
@@ -48,6 +49,8 @@ if DATABASE_URL.startswith("postgres://"):
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
+    pool_pre_ping=True,
+    pool_recycle=3600,
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -263,15 +266,25 @@ def parse_llm_payload(body: dict, headers: dict = None, meta: dict = None) -> di
         "total_tokens": int(total_tokens),
     }
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    logger.info("Enterprise Gateway online and ready for connections.")
+    yield
+    logger.info("Shutting down Enterprise Gateway services.")
+
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
     description="E2E Encrypted Secure Gateway with GDPR, NIST, and DPDP Compliance.",
-    version="10.3.0"
+    version="10.3.0",
+    lifespan=lifespan
 )
+
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -283,10 +296,6 @@ public_pem = public_key.public_bytes(
     encoding=serialization.Encoding.PEM,
     format=serialization.PublicFormat.SubjectPublicKeyInfo,
 ).decode("utf-8")
-
-@app.on_event("startup")
-def startup_event():
-    init_db()
 
 def get_client_ip(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for")
@@ -873,6 +882,22 @@ WEB_AGENT_HTML = """<!DOCTYPE html>
 </body>
 </html>"""
 
+# System Health Probes
+@app.get("/healthz", tags=["System Probes"])
+def health_check():
+    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+@app.get("/readyz", tags=["System Probes"])
+def readiness_check(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+        return {"status": "ready", "database": "connected"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_533_SERVICE_UNAVAILABLE,
+            detail=f"Database unready: {str(e)}"
+        )
+
 @app.get("/", response_class=HTMLResponse)
 def serve_dashboard():
     return DASHBOARD_HTML
@@ -1205,4 +1230,5 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", "8000"))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
