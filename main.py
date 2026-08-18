@@ -40,7 +40,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("EnterpriseAIGateway")
 
-# Database & Cryptographic Initialization
+# Database Initialization
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./enterprise_gateway.db")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
@@ -52,12 +52,19 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Dynamic Cryptographic Key Generation
+# Persistent Cryptographic Key Generation
+KEY_FILE = ".gateway_secret.key"
 ENCRYPTION_KEY_ENV = os.environ.get("ENC_KEY")
+
 if ENCRYPTION_KEY_ENV and not ENCRYPTION_KEY_ENV.startswith("placeholder"):
     ENCRYPTION_KEY = ENCRYPTION_KEY_ENV.encode()
+elif os.path.exists(KEY_FILE):
+    with open(KEY_FILE, "rb") as f:
+        ENCRYPTION_KEY = f.read()
 else:
     ENCRYPTION_KEY = Fernet.generate_key()
+    with open(KEY_FILE, "wb") as f:
+        f.write(ENCRYPTION_KEY)
 
 cipher = Fernet(ENCRYPTION_KEY)
 
@@ -989,6 +996,13 @@ async def process_ai_traffic(request: Request, db: Session = Depends(get_db)):
     if client_node.status != "APPROVED":
         raise HTTPException(status_code=403, detail=f"Client node status is {client_node.status}.")
 
+    # Zero-Balance Guardrail: Rejects request if balance is exhausted
+    if client_node.balance_tokens <= 0:
+        raise HTTPException(
+            status_code=402, 
+            detail="Token quota exhausted. Please request a token top-up from the administrator."
+        )
+
     meta = json.loads(client_node.metadata_json) if client_node.metadata_json else {}
     headers_dict = dict(request.headers)
     metrics = parse_llm_payload(body, headers_dict, meta)
@@ -1179,34 +1193,7 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
         })
 
     return {"clients": clients, "logs": logs, "authenticated_user": user.get("sub")}
-# 1. KEY PERSISTENCE FIX (Prevents audit log corruption on server restart)
-KEY_FILE = ".gateway_secret.key"
-ENCRYPTION_KEY_ENV = os.environ.get("ENC_KEY")
 
-if ENCRYPTION_KEY_ENV and not ENCRYPTION_KEY_ENV.startswith("placeholder"):
-    ENCRYPTION_KEY = ENCRYPTION_KEY_ENV.encode()
-elif os.path.exists(KEY_FILE):
-    with open(KEY_FILE, "rb") as f:
-        ENCRYPTION_KEY = f.read()
-else:
-    ENCRYPTION_KEY = Fernet.generate_key()
-    with open(KEY_FILE, "wb") as f:
-        f.write(ENCRYPTION_KEY)
-
-cipher = Fernet(ENCRYPTION_KEY)
-
-
-# 2. ZERO-BALANCE ENFORCEMENT FIX
-# Insert in process_ai_traffic() right after checking client_node.status:
-if client_node.status != "APPROVED":
-    raise HTTPException(status_code=403, detail=f"Client node status is {client_node.status}.")
-
-# [NEW GUARDRALL] Prevent execution if tokens are exhausted
-if client_node.balance_tokens <= 0:
-    raise HTTPException(
-        status_code=402, 
-        detail="Token quota exhausted. Please request a token top-up from the administrator."
-    )
 @app.websocket("/ws/live-traffic")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
