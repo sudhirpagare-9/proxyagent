@@ -228,15 +228,11 @@ def parse_user_agent_details(user_agent: str) -> str:
     return f"Browser Agent ({ua[:25]}...)"
 
 def normalize_model_name(raw_model: str) -> str:
-    """Accurately normalizes intercepted domain names and raw model identifiers."""
     if not raw_model:
         return "Unknown AI Engine"
     
     model_str = str(raw_model).strip().lower()
-    
     if "perplexity" in model_str:
-        if "count" in model_str:
-            return "Perplexity AI (API Telemetry Endpoint)"
         return "Perplexity AI Engine"
     elif "openai" in model_str or "gpt" in model_str:
         return f"OpenAI ({model_str.upper()})"
@@ -256,28 +252,27 @@ def parse_llm_payload(body: dict, headers: dict = None, meta: dict = None) -> di
     hw_id = body.get("hw_id") or body.get("hardware_id") or headers.get("x-hw-id") or meta.get("hw_id") or f"HW-NODE-{secrets.token_hex(4).upper()}"
     mac_address = body.get("mac_address") or headers.get("x-mac-address") or meta.get("mac_address") or get_system_mac()
     
-    raw_model = body.get("model") or body.get("llm_model") or body.get("host") or "Unknown Model"
+    raw_model = body.get("model") or body.get("llm_model") or body.get("host") or body.get("llm_telemetry") or "Unknown Model"
     model_name = normalize_model_name(raw_model)
     model_version = body.get("version") or headers.get("x-model-version") or "v1.0"
     think_level = body.get("think_level") or body.get("reasoning_effort") or "Standard Reasoning"
 
-    full_prompt = body.get("prompt") or body.get("full_prompt") or body.get("query")
+    full_prompt = body.get("prompt") or body.get("full_prompt") or body.get("query") or body.get("activity") or body.get("captured_activity")
     if not full_prompt and "messages" in body and isinstance(body["messages"], list):
         full_prompt = "\n".join([f"{m.get('role', 'user')}: {m.get('content', '')}" for m in body["messages"]])
 
     if not full_prompt:
-        full_prompt = body.get("activity") or "Realtime Intercepted HTTP Telemetry Stream"
+        full_prompt = "Realtime Intercepted HTTP Telemetry Stream"
 
     usage = body.get("usage") or body.get("usageMetadata") or {}
-    input_tokens = body.get("prompt_tokens") or usage.get("prompt_tokens") or usage.get("promptTokenCount") or 0
-    output_tokens = body.get("completion_tokens") or usage.get("completion_tokens") or usage.get("candidatesTokenCount") or 0
-    total_tokens = body.get("tokens_used") or usage.get("total_tokens") or (input_tokens + output_tokens)
+    input_tokens = body.get("prompt_tokens") or usage.get("prompt_tokens") or body.get("tokens_used") or body.get("token_usage") or 0
+    output_tokens = body.get("completion_tokens") or usage.get("completion_tokens") or 0
+    total_tokens = usage.get("total_tokens") or (input_tokens + output_tokens)
 
     if total_tokens <= 0 and full_prompt:
         words = len(str(full_prompt).split())
         chars = len(str(full_prompt))
         input_tokens = max(12, words, int(chars / 4))
-        output_tokens = 0
         total_tokens = input_tokens
 
     return {
@@ -363,6 +358,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# Icons & Design Static Templates
 ICONS = {
     "shield": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
     "smartphone": '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/></svg>',
@@ -774,24 +770,7 @@ WEB_AGENT_HTML = f"""<!DOCTYPE html>
 
     <script>
         const SERVER_URL = window.location.origin;
-        const SINGLETON_CHANNEL = new BroadcastChannel("agent_singleton_lock");
         let clientCredentials = {{ hw_id: "", api_key: "", device_type: "", browser_name: "", hostname: "", mac_address: "" }};
-
-        SINGLETON_CHANNEL.postMessage({{ type: "PING_AGENT_EXISTENCE" }});
-        SINGLETON_CHANNEL.onmessage = (event) => {{
-            if (event.data.type === "PING_AGENT_EXISTENCE") {{
-                SINGLETON_CHANNEL.postMessage({{ type: "AGENT_ALREADY_RUNNING", hwid: clientCredentials.hw_id }});
-            }} else if (event.data.type === "AGENT_ALREADY_RUNNING") {{
-                showDedupWarning(`Client agent active on this system. Reusing HWID: ${{event.data.hwid}}`);
-            }}
-        }};
-
-        function showDedupWarning(msg) {{
-            const banner = document.getElementById("dedup-warning-banner");
-            const text = document.getElementById("dedup-warning-text");
-            text.innerText = msg;
-            banner.style.display = "block";
-        }}
 
         function getDeviceAndHardwareProfile() {{
             const ua = navigator.userAgent;
@@ -821,9 +800,6 @@ WEB_AGENT_HTML = f"""<!DOCTYPE html>
             const macArr = cachedHwid.replace(/[^A-Z0-9]/g, '').padEnd(12, '0').match(/.{{1,2}}/g) || ["00", "00", "00", "00", "00", "00"];
             const macAddress = macArr.join(":").toUpperCase();
             const inferredHost = window.location.hostname || "local-node";
-            const cpuCores = navigator.hardwareConcurrency || 4;
-            const ramGb = navigator.deviceMemory || 8;
-            const timeZoneStr = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
             return {{
                 hw_id: cachedHwid,
@@ -831,9 +807,9 @@ WEB_AGENT_HTML = f"""<!DOCTYPE html>
                 browser_name: navigator.userAgent.slice(0, 30),
                 mac_address: macAddress,
                 hostname: inferredHost,
-                cpu_cores: cpuCores,
-                system_memory: ramGb,
-                timezone: timeZoneStr,
+                cpu_cores: navigator.hardwareConcurrency || 4,
+                system_memory: navigator.deviceMemory || 8,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
                 agent_version: "v10.5.0-Enterprise"
             }};
         }}
@@ -846,24 +822,9 @@ WEB_AGENT_HTML = f"""<!DOCTYPE html>
                 const res = await fetch(`${{SERVER_URL}}/api/register`, {{
                     method: 'POST',
                     headers: {{'Content-Type': 'application/json'}},
-                    body: JSON.stringify({{
-                        hw_id: profile.hw_id,
-                        hostname: profile.hostname,
-                        mac_address: profile.mac_address,
-                        device_type: profile.device_type,
-                        browser_name: profile.browser_name,
-                        cpu_cores: profile.cpu_cores,
-                        system_memory: profile.system_memory,
-                        timezone: profile.timezone,
-                        agent_version: profile.agent_version,
-                        user_agent: navigator.userAgent
-                    }})
+                    body: JSON.stringify(profile)
                 }});
                 const data = await res.json();
-
-                if (data.status === "EXISTING_SESSION_REUSED") {{
-                    showDedupWarning(data.message);
-                }}
 
                 clientCredentials.hw_id = data.hw_id;
                 clientCredentials.api_key = data.api_key;
@@ -957,6 +918,27 @@ def serve_agent():
 def get_public_key():
     return public_pem
 
+# Unified Status Check Endpoints (Supports agent polling)
+@app.get("/api/device/{hw_id}")
+@app.get("/api/node/{hw_id}")
+@app.get("/api/status")
+def get_node_status(hw_id: Optional[str] = None, db: Session = Depends(get_db)):
+    if not hw_id:
+        return {"status": "Approved", "approval_status": "Approved", "approved": True}
+    
+    client = db.query(ClientModel).filter(ClientModel.hw_id == hw_id, ClientModel.is_deleted == False).first()
+    if not client:
+        return {"status": "Discovered", "approval_status": "Discovered", "approved": False}
+    
+    return {
+        "hw_id": client.hw_id,
+        "status": client.status,
+        "approval_status": client.status,
+        "client_status": client.status,
+        "approved": (client.status == "APPROVED"),
+        "balance_tokens": client.balance_tokens
+    }
+
 @app.post("/api/register")
 @app.post("/register")
 @app.post("/api/v1/agent/discover")
@@ -994,9 +976,9 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
         db.commit()
         
         return {
-            "status": "EXISTING_SESSION_REUSED",
-            "message": f"Client agent active on node {device_type}. Reusing existing session.",
+            "status": client.status,
             "approval_status": client.status,
+            "message": f"Client agent session verified for node {hw_id}.",
             "approved": (client.status == "APPROVED"),
             "hw_id": client.hw_id,
             "hostname": hostname,
@@ -1025,9 +1007,9 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
     db.refresh(client)
 
     return {
-        "status": "REGISTERED_NEW",
-        "message": "New client node registered successfully.",
+        "status": client.status,
         "approval_status": client.status,
+        "message": "New client node registered successfully.",
         "approved": True,
         "hw_id": client.hw_id,
         "hostname": hostname,
@@ -1041,6 +1023,8 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/v1/chat/completions")
 @app.post("/api/telemetry")
+@app.post("/api/telemetry/push")
+@app.post("/api/logs")
 async def process_ai_traffic(request: Request, db: Session = Depends(get_db)):
     try:
         body = await request.json()
@@ -1052,7 +1036,7 @@ async def process_ai_traffic(request: Request, db: Session = Depends(get_db)):
 
     auth_header = request.headers.get("Authorization", "")
     api_key = auth_header.split(" ")[1] if auth_header.startswith("Bearer ") else None
-    hw_id_header = request.headers.get("X-HW-ID") or body.get("hw_id")
+    hw_id_header = request.headers.get("X-HW-ID") or body.get("hw_id") or body.get("hardware_id") or body.get("device_id")
 
     client_node = None
     if api_key:
@@ -1067,13 +1051,10 @@ async def process_ai_traffic(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="Unregistered or deleted client node access denied.")
 
     if client_node.status != "APPROVED":
-        raise HTTPException(status_code=403, detail=f"Client node status is {client_node.status}.")
+        raise HTTPException(status_code=403, detail=f"Client node status is [{client_node.status}]. Telemetry rejected.")
 
     if client_node.balance_tokens <= 0:
-        raise HTTPException(
-            status_code=402, 
-            detail="Token quota exhausted. Please request a token top-up from the administrator."
-        )
+        raise HTTPException(status_code=402, detail="Token quota exhausted. Top up required.")
 
     meta = json.loads(client_node.metadata_json) if client_node.metadata_json else {}
     headers_dict = dict(request.headers)
@@ -1127,7 +1108,7 @@ async def process_ai_traffic(request: Request, db: Session = Depends(get_db)):
 
     log_entry = TrafficLogModel(
         hw_id=client_node.hw_id,
-        provider=body.get("provider", "AI Gateway Engine"),
+        provider=body.get("provider", "AI Gateway Interceptor"),
         model=model,
         version=version,
         think_level=think_level,
@@ -1156,6 +1137,7 @@ async def process_ai_traffic(request: Request, db: Session = Depends(get_db)):
     })
 
     return {
+        "status": "success",
         "id": f"chatcmpl-{int(time.time())}",
         "object": "chat.completion",
         "created": int(time.time()),
