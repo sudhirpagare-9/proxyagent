@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Universal AI Telemetry Agent</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-[#0b0f19] text-gray-200 min-h-screen flex flex-col p-6 font-mono">
+  
+  <!-- Header -->
+  <header class="flex justify-between items-center mb-4 border-b border-gray-800 pb-3">
+    <div>
+      <h1 class="text-xl font-bold text-white flex items-center gap-2">
+        <span class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
+        Universal AI Telemetry Agent
+      </h1>
+      <p class="text-xs text-emerald-400">Initializing Realtime Client Node...</p>
+    </div>
+    <a href="/" class="text-xs text-indigo-400 hover:text-indigo-300">← Return to Control Plane</a>
+  </header>
+
+  <!-- Main Container: Full Distribution Layout -->
+  <main class="flex-1 grid grid-rows-[auto_1fr] gap-4">
+    
+    <!-- Top Card: Transmission Config -->
+    <div class="bg-[#111827] border border-gray-800 rounded-lg p-5 shadow-lg">
+      <div class="text-xs text-emerald-400 font-semibold mb-3">⚡ Dynamic Realtime Telemetry Transmission</div>
+      
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+        <div>
+          <label class="block text-[10px] text-gray-400 uppercase mb-1">Hostname</label>
+          <input id="hostname" type="text" value="SUPLAPTOP" class="w-full bg-[#0b0f19] border border-gray-700 text-xs text-emerald-300 rounded p-2 focus:outline-none focus:border-emerald-500" />
+        </div>
+        <div>
+          <label class="block text-[10px] text-gray-400 uppercase mb-1">LLM Model</label>
+          <select id="llm_model" class="w-full bg-[#0b0f19] border border-gray-700 text-xs text-white rounded p-2 focus:outline-none focus:border-emerald-500">
+            <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+            <option value="gpt-4o">gpt-4o</option>
+            <option value="claude-3-5-sonnet">claude-3-5-sonnet</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[10px] text-gray-400 uppercase mb-1">Reasoning Level</label>
+          <select id="reasoning_level" class="w-full bg-[#0b0f19] border border-gray-700 text-xs text-white rounded p-2 focus:outline-none focus:border-emerald-500">
+            <option value="High Reasoning (DeepThink)">High Reasoning (DeepThink)</option>
+            <option value="Standard">Standard</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[10px] text-gray-400 uppercase mb-1">Version Tag</label>
+          <input id="version_tag" type="text" value="v2.5" class="w-full bg-[#0b0f19] border border-gray-700 text-xs text-white rounded p-2 focus:outline-none focus:border-emerald-500" />
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <textarea id="prompt_payload" rows="2" placeholder="Enter custom prompt payload..." class="w-full bg-[#0b0f19] border border-gray-700 text-xs text-gray-200 rounded p-2 focus:outline-none focus:border-emerald-500"></textarea>
+      </div>
+
+      <button onclick="transmitTelemetry()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold py-2.5 rounded text-xs transition flex items-center justify-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+        Transmit Telemetry Payload
+      </button>
+    </div>
+
+    <!-- Bottom Feed: Fills Remaining Viewport Space -->
+    <div class="bg-[#111827] border border-gray-800 rounded-lg p-4 flex flex-col min-h-[350px]">
+      <div class="flex justify-between items-center mb-2 pb-2 border-b border-gray-800">
+        <span class="text-xs text-gray-400 font-semibold">📡 Live Encrypted Telemetry Outbound Stream</span>
+        <span class="text-[10px] bg-emerald-950 text-emerald-400 px-2 py-0.5 rounded border border-emerald-800">Dynamic Hardware Sync Active</span>
+      </div>
+      <div id="telemetry_log" class="flex-1 bg-[#070a11] rounded p-3 text-xs font-mono text-emerald-400 overflow-y-auto space-y-1">
+        <div class="text-gray-500">[SYSTEM] Ready to stream encrypted telemetry. Dynamic hardware identification enabled.</div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    async function transmitTelemetry() {
+      const logDiv = document.getElementById('telemetry_log');
+      const payload = {
+        hostname: document.getElementById('hostname').value,
+        llm_model: document.getElementById('llm_model').value,
+        reasoning_level: document.getElementById('reasoning_level').value,
+        version_tag: document.getElementById('version_tag').value,
+        payload_prompt: document.getElementById('prompt_payload').value || "Realtime Intercepted HTTP Telemetry Stream",
+        timestamp: new Date().toISOString()
+      };
+
+      try {
+        const res = await fetch('/api/telemetry', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        
+        const entry = document.createElement('div');
+        entry.className = "border-l-2 border-emerald-500 pl-2 py-1 my-1 text-gray-300";
+        entry.innerHTML = `<span class="text-gray-500">[${new Date().toLocaleTimeString()}]</span> Payload Sent → <span class="text-emerald-400">${payload.llm_model} (${payload.version_tag})</span> | Status: <span class="text-indigo-400">${data.status || 'OK'}</span> | Hash: <span class="text-yellow-400">${data.audit_hash || 'SHA256-OK'}</span>`;
+        logDiv.appendChild(entry);
+        logDiv.scrollTop = logDiv.scrollHeight;
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  </script>
+</body>
+</html>
