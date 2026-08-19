@@ -56,7 +56,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("EnterpriseAIGateway")
 
-# Database Initialization
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./enterprise_gateway.db")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
@@ -70,7 +69,6 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Persistent Cryptographic Key Setup
 KEY_FILE = ".gateway_secret.key"
 ENCRYPTION_KEY_ENV = os.environ.get("ENC_KEY")
 
@@ -94,11 +92,9 @@ else:
 
 DEFAULT_TOKEN_BALANCE = int(os.environ.get("DEFAULT_TOKEN_BALANCE", "500000"))
 
-# Compliance Engine (GDPR, DPDP, NIST SP 800-92)
 class ComplianceSecurityEngine:
     @staticmethod
     def sanitize_pii(text_content: str) -> str:
-        """Redacts PII and sensitive tokens under GDPR, DPDP, and NIST guidelines."""
         if not isinstance(text_content, str):
             return str(text_content) if text_content else ""
         
@@ -115,13 +111,11 @@ class ComplianceSecurityEngine:
 
     @staticmethod
     def generate_nist_audit_hash(payload: dict) -> str:
-        """Generates an immutable HMAC-SHA256 audit signature per NIST SP 800-92."""
         serialized = json.dumps(payload, sort_keys=True)
         return hmac.new(MASTER_AES_KEY, serialized.encode('utf-8'), hashlib.sha256).hexdigest()
 
     @staticmethod
     def decrypt_aes_gcm(encrypted_b64: str, iv_b64: str) -> dict:
-        """Decrypts E2E payload using AES-256-GCM."""
         try:
             aesgcm = AESGCM(MASTER_AES_KEY)
             ciphertext = base64.b64decode(encrypted_b64)
@@ -131,7 +125,6 @@ class ComplianceSecurityEngine:
         except Exception as e:
             raise ValueError(f"AES-GCM Decryption failure: {str(e)}")
 
-# ORM Database Models
 class ClientModel(Base):
     __tablename__ = "clients"
     id = Column(Integer, primary_key=True, index=True)
@@ -227,62 +220,57 @@ def parse_user_agent_details(user_agent: str) -> str:
     elif "Safari/" in ua and "Chrome/" not in ua:
         version = ua.split("Version/")[1].split(" ")[0] if "Version/" in ua else "Safari"
         return f"Apple Safari v{version}"
-    elif "Opera/" in ua or "OPR/" in ua:
-        version = ua.split("OPR/")[1].split(" ")[0] if "OPR/" in ua else ua.split("Opera/")[1].split(" ")[0]
-        return f"Opera v{version}"
     elif "PostmanRuntime" in ua:
         return f"Postman Client ({ua.split('/')[1]})"
     elif "python-requests" in ua:
-        return f"Python Requests Agent ({ua.split('/')[1]})"
+        return f"Python Agent ({ua.split('/')[1]})"
     
-    return f"User Agent ({ua[:25]}...)"
+    return f"Browser Agent ({ua[:25]}...)"
 
 def normalize_model_name(raw_model: str) -> str:
-    """Formats intercepted domains or model identifiers into clean enterprise names."""
+    """Accurately normalizes intercepted domain names and raw model identifiers."""
     if not raw_model:
-        return "Unknown AI Model"
+        return "Unknown AI Engine"
     
-    model_str = str(raw_model).strip()
-    if "perplexity.ai" in model_str.lower():
-        return f"Perplexity AI ({model_str.lower()})"
-    elif "openai" in model_str.lower() or "gpt" in model_str.lower():
-        return f"OpenAI ({model_str})"
-    elif "anthropic" in model_str.lower() or "claude" in model_str.lower():
-        return f"Anthropic Claude ({model_str})"
-    elif "gemini" in model_str.lower():
-        return f"Google Gemini ({model_str})"
+    model_str = str(raw_model).strip().lower()
     
-    if model_str.lower().endswith(" ai model"):
-        return model_str.title()
+    if "perplexity" in model_str:
+        if "count" in model_str:
+            return "Perplexity AI (API Telemetry Endpoint)"
+        return "Perplexity AI Engine"
+    elif "openai" in model_str or "gpt" in model_str:
+        return f"OpenAI ({model_str.upper()})"
+    elif "anthropic" in model_str or "claude" in model_str:
+        return f"Anthropic Claude ({model_str.title()})"
+    elif "gemini" in model_str or "google" in model_str:
+        return f"Google Gemini ({model_str.title()})"
     
-    return model_str
+    clean_str = re.sub(r'https?://', '', model_str).split('/')[0]
+    return clean_str.title()
 
 def parse_llm_payload(body: dict, headers: dict = None, meta: dict = None) -> dict:
     headers = headers or {}
     meta = meta or {}
     
     hostname = body.get("hostname") or headers.get("x-hostname") or meta.get("hostname") or socket.gethostname()
-    hw_id = body.get("hw_id") or body.get("hardware_id") or body.get("device_id") or headers.get("x-hw-id") or meta.get("hw_id") or f"HW-NODE-{secrets.token_hex(4).upper()}"
+    hw_id = body.get("hw_id") or body.get("hardware_id") or headers.get("x-hw-id") or meta.get("hw_id") or f"HW-NODE-{secrets.token_hex(4).upper()}"
     mac_address = body.get("mac_address") or headers.get("x-mac-address") or meta.get("mac_address") or get_system_mac()
     
-    raw_model = body.get("model") or body.get("llm_model") or body.get("model_name") or body.get("host") or "Unknown Model"
+    raw_model = body.get("model") or body.get("llm_model") or body.get("host") or "Unknown Model"
     model_name = normalize_model_name(raw_model)
-    model_version = body.get("version") or body.get("model_version") or headers.get("x-model-version") or "v1.0"
+    model_version = body.get("version") or headers.get("x-model-version") or "v1.0"
     think_level = body.get("think_level") or body.get("reasoning_effort") or "Standard Reasoning"
 
-    full_prompt = body.get("prompt") or body.get("full_prompt") or body.get("payload") or body.get("activity")
+    full_prompt = body.get("prompt") or body.get("full_prompt") or body.get("query")
     if not full_prompt and "messages" in body and isinstance(body["messages"], list):
         full_prompt = "\n".join([f"{m.get('role', 'user')}: {m.get('content', '')}" for m in body["messages"]])
 
     if not full_prompt:
-        full_prompt = "Active Telemetry Session Intercepted."
+        full_prompt = body.get("activity") or "Realtime Intercepted HTTP Telemetry Stream"
 
     usage = body.get("usage") or body.get("usageMetadata") or {}
-    if not isinstance(usage, dict):
-        usage = {}
-
-    input_tokens = body.get("prompt_tokens") or body.get("input_tokens") or usage.get("prompt_tokens") or usage.get("promptTokenCount") or 0
-    output_tokens = body.get("completion_tokens") or body.get("output_tokens") or usage.get("completion_tokens") or usage.get("candidatesTokenCount") or 0
+    input_tokens = body.get("prompt_tokens") or usage.get("prompt_tokens") or usage.get("promptTokenCount") or 0
+    output_tokens = body.get("completion_tokens") or usage.get("completion_tokens") or usage.get("candidatesTokenCount") or 0
     total_tokens = body.get("tokens_used") or usage.get("total_tokens") or (input_tokens + output_tokens)
 
     if total_tokens <= 0 and full_prompt:
@@ -308,14 +296,14 @@ def parse_llm_payload(body: dict, headers: dict = None, meta: dict = None) -> di
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    logger.info("Enterprise Gateway online and ready for connections.")
+    logger.info("Enterprise Gateway online and ready for real-time telemetry connections.")
     yield
     logger.info("Shutting down Enterprise Gateway services.")
 
 app = FastAPI(
     title="Enterprise Cloud AI Gateway & Control Plane",
-    description="E2E Encrypted Secure Gateway with GDPR, NIST, and DPDP Compliance.",
-    version="10.4.0",
+    description="E2E Encrypted Secure Gateway with Real-time Intercept & Expanded Hardware Context",
+    version="10.5.0",
     lifespan=lifespan
 )
 
@@ -625,6 +613,10 @@ DASHBOARD_HTML = f"""<!DOCTYPE html>
                         <div>Hostname: <strong style="color: #38bdf8;">${{c.hostname || 'N/A'}}</strong></div>
                         <div>Host IP Address: <strong style="color: #fbbf24;">${{c.host_ip || c.ip_address || 'N/A'}}</strong></div>
                         <div>MAC Address: <strong style="color: #f43f5e;">${{c.mac_address || 'N/A'}}</strong></div>
+                        <div>CPU Cores & Arch: <strong style="color: #a7f3d0;">${{c.cpu_cores || 'N/A'}} Cores (${{c.system_arch || 'x64'}})</strong></div>
+                        <div>Memory RAM: <strong style="color: #fde047;">${{c.system_memory || 'N/A'}} GB</strong></div>
+                        <div>Timezone: <strong style="color: #e0e7ff;">${{c.timezone || 'UTC'}}</strong></div>
+                        <div>Agent Version: <strong style="color: #c084fc;">${{c.agent_version || 'v10.5.0-Enterprise'}}</strong></div>
                         <div>Browser Agent: <strong style="color: #34d399;">${{c.browser_name || 'N/A'}}</strong></div>
                         <div>OS Context: <strong style="color: #67e8f9;">${{c.device_type || 'N/A'}}</strong></div>
                         <div style="margin-top: 4px; padding-top: 4px; border-top: 1px dashed #1e293b;">Token Balance: <strong style="color: #34d399;">${{(c.balance_tokens || 0).toLocaleString()}} tokens</strong></div>
@@ -829,8 +821,21 @@ WEB_AGENT_HTML = f"""<!DOCTYPE html>
             const macArr = cachedHwid.replace(/[^A-Z0-9]/g, '').padEnd(12, '0').match(/.{{1,2}}/g) || ["00", "00", "00", "00", "00", "00"];
             const macAddress = macArr.join(":").toUpperCase();
             const inferredHost = window.location.hostname || "local-node";
+            const cpuCores = navigator.hardwareConcurrency || 4;
+            const ramGb = navigator.deviceMemory || 8;
+            const timeZoneStr = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
-            return {{ hw_id: cachedHwid, device_type: osName, browser_name: navigator.userAgent.slice(0, 30), mac_address: macAddress, hostname: inferredHost }};
+            return {{
+                hw_id: cachedHwid,
+                device_type: osName,
+                browser_name: navigator.userAgent.slice(0, 30),
+                mac_address: macAddress,
+                hostname: inferredHost,
+                cpu_cores: cpuCores,
+                system_memory: ramGb,
+                timezone: timeZoneStr,
+                agent_version: "v10.5.0-Enterprise"
+            }};
         }}
 
         async function initClient() {{
@@ -847,6 +852,10 @@ WEB_AGENT_HTML = f"""<!DOCTYPE html>
                         mac_address: profile.mac_address,
                         device_type: profile.device_type,
                         browser_name: profile.browser_name,
+                        cpu_cores: profile.cpu_cores,
+                        system_memory: profile.system_memory,
+                        timezone: profile.timezone,
+                        agent_version: profile.agent_version,
                         user_agent: navigator.userAgent
                     }})
                 }});
@@ -907,7 +916,7 @@ WEB_AGENT_HTML = f"""<!DOCTYPE html>
                     <strong style="color: #34d399;">[Transmitted Telemetry]:</strong>
                     <div style="background: #020617; padding: 0.4rem; border-radius: 0.25rem; margin: 4px 0; color: #f8fafc;">${{promptText}}</div>
                     <div style="font-size: 10px; color: #38bdf8; margin-top: 3px;">
-                        HWID: ${{clientCredentials.hw_id}} | Remaining Balance:     ${{(data.balance_tokens || 0).toLocaleString()}} tokens | NIST Hash: ${{data.audit_hash.substring(0, 10)}}...
+                        HWID: ${{clientCredentials.hw_id}} | Remaining Balance: ${{data.balance_tokens.toLocaleString()}} tokens | NIST Hash: ${{data.audit_hash.substring(0, 10)}}...
                     </div>
                 </div>`;
                 chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -921,7 +930,6 @@ WEB_AGENT_HTML = f"""<!DOCTYPE html>
 </body>
 </html>"""
 
-# System Probes
 @app.get("/healthz", tags=["System Probes"])
 def health_check():
     return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
@@ -937,7 +945,6 @@ def readiness_check(db: Session = Depends(get_db)):
             detail=f"Database unready: {str(e)}"
         )
 
-# Dashboard & UI Endpoints
 @app.get("/", response_class=HTMLResponse)
 def serve_dashboard():
     return DASHBOARD_HTML
@@ -950,7 +957,6 @@ def serve_agent():
 def get_public_key():
     return public_pem
 
-# Unified Client Registration & Deduplication Endpoint
 @app.post("/api/register")
 @app.post("/register")
 @app.post("/api/v1/agent/discover")
@@ -1033,7 +1039,6 @@ async def register_client(request: Request, db: Session = Depends(get_db)):
         "browser_name": browser_name
     }
 
-# Encrypted AI Ingestion Endpoint
 @app.post("/v1/chat/completions")
 @app.post("/api/telemetry")
 async def process_ai_traffic(request: Request, db: Session = Depends(get_db)):
@@ -1235,6 +1240,10 @@ def dashboard_data(user: dict = Depends(verify_admin_user), db: Session = Depend
             "status": c.status or "APPROVED",
             "balance_tokens": c.balance_tokens if c.balance_tokens is not None else 0,
             "browser_name": meta.get("browser_name") or "",
+            "cpu_cores": meta.get("cpu_cores") or 4,
+            "system_memory": meta.get("system_memory") or 8,
+            "timezone": meta.get("timezone") or "UTC",
+            "agent_version": meta.get("agent_version") or "v10.5.0-Enterprise",
             "api_key": c.api_key or ""
         })
 
