@@ -280,6 +280,10 @@ def parse_llm_payload(body: dict, headers: dict = None, meta: dict = None) -> di
     input_tokens = body.get("prompt_tokens") or usage.get("prompt_tokens") or body.get("tokens_used") or body.get("token_usage") or 0
     output_tokens = body.get("completion_tokens") or usage.get("completion_tokens") or 0
     total_tokens = usage.get("total_tokens") or (input_tokens + output_tokens)
+    
+    if total_tokens == 0 and full_prompt != NOT_AVAILABLE_HTML:
+        total_tokens = max(25, len(full_prompt) // 4)
+        input_tokens = total_tokens
 
     return {
         "hostname": str(hostname),
@@ -672,7 +676,7 @@ def serve_agent():
     if os.path.exists("agent.html"):
         with open("agent.html", "r", encoding="utf-8") as f:
             return f.read()
-    return HTMLResponse(content=f"<h2>Agent file agent.html missing in server root.</h2>", status_code=404)
+    return HTMLResponse(content="<h2>Agent template agent.html missing in server root.</h2>", status_code=404)
 
 @app.get("/public-key", response_class=PlainTextResponse)
 def get_public_key():

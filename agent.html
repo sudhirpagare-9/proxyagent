@@ -3,34 +3,41 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Universal AI Telemetry Agent</title>
+  <title>Universal AI Telemetry Agent - Realtime E2E Node</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-[#0b0f19] text-gray-200 min-h-screen flex flex-col p-6 font-mono">
   
-  <!-- Header -->
   <header class="flex justify-between items-center mb-4 border-b border-gray-800 pb-3">
     <div>
       <h1 class="text-xl font-bold text-white flex items-center gap-2">
-        <span class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
+        <span id="status-indicator" class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
         Universal AI Telemetry Agent
       </h1>
-      <p class="text-xs text-emerald-400">Initializing Realtime Client Node...</p>
+      <p id="agent-node-info" class="text-xs text-emerald-400">Initializing Realtime Client Node...</p>
     </div>
-    <a href="/" class="text-xs text-indigo-400 hover:text-indigo-300">← Return to Control Plane</a>
+    <div class="flex items-center gap-4">
+      <span id="token-balance-badge" class="text-xs bg-indigo-950 text-indigo-300 border border-indigo-800 px-3 py-1 rounded-full font-bold">
+        Balance: Loading...
+      </span>
+      <a href="/" class="text-xs text-indigo-400 hover:text-indigo-300">← Return to Control Plane</a>
+    </div>
   </header>
 
-  <!-- Main Container: Full Distribution Layout -->
   <main class="flex-1 grid grid-rows-[auto_1fr] gap-4">
     
-    <!-- Top Card: Transmission Config -->
     <div class="bg-[#111827] border border-gray-800 rounded-lg p-5 shadow-lg">
-      <div class="text-xs text-emerald-400 font-semibold mb-3">⚡ Dynamic Realtime Telemetry Transmission</div>
+      <div class="flex justify-between items-center mb-3">
+        <div class="text-xs text-emerald-400 font-semibold flex items-center gap-2">
+          ⚡ Dynamic Realtime Telemetry Transmission
+        </div>
+        <span id="hw-id-badge" class="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded border border-slate-700">HW-ID: Capturing...</span>
+      </div>
       
       <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
         <div>
           <label class="block text-[10px] text-gray-400 uppercase mb-1">Hostname</label>
-          <input id="hostname" type="text" value="SUPLAPTOP" class="w-full bg-[#0b0f19] border border-gray-700 text-xs text-emerald-300 rounded p-2 focus:outline-none focus:border-emerald-500" />
+          <input id="hostname" type="text" placeholder="Captured Hostname..." class="w-full bg-[#0b0f19] border border-gray-700 text-xs text-emerald-300 rounded p-2 focus:outline-none focus:border-emerald-500" />
         </div>
         <div>
           <label class="block text-[10px] text-gray-400 uppercase mb-1">LLM Model</label>
@@ -38,73 +45,225 @@
             <option value="gemini-2.5-pro">gemini-2.5-pro</option>
             <option value="gpt-4o">gpt-4o</option>
             <option value="claude-3-5-sonnet">claude-3-5-sonnet</option>
+            <option value="perplexity-sonar">perplexity-sonar</option>
           </select>
         </div>
         <div>
           <label class="block text-[10px] text-gray-400 uppercase mb-1">Reasoning Level</label>
           <select id="reasoning_level" class="w-full bg-[#0b0f19] border border-gray-700 text-xs text-white rounded p-2 focus:outline-none focus:border-emerald-500">
             <option value="High Reasoning (DeepThink)">High Reasoning (DeepThink)</option>
-            <option value="Standard">Standard</option>
+            <option value="Standard Reasoning">Standard Reasoning</option>
           </select>
         </div>
         <div>
           <label class="block text-[10px] text-gray-400 uppercase mb-1">Version Tag</label>
-          <input id="version_tag" type="text" value="v2.5" class="w-full bg-[#0b0f19] border border-gray-700 text-xs text-white rounded p-2 focus:outline-none focus:border-emerald-500" />
+          <input id="version_tag" type="text" placeholder="Captured Version..." class="w-full bg-[#0b0f19] border border-gray-700 text-xs text-white rounded p-2 focus:outline-none focus:border-emerald-500" />
         </div>
       </div>
 
       <div class="mb-3">
-        <textarea id="prompt_payload" rows="2" placeholder="Enter custom prompt payload..." class="w-full bg-[#0b0f19] border border-gray-700 text-xs text-gray-200 rounded p-2 focus:outline-none focus:border-emerald-500"></textarea>
+        <textarea id="prompt_payload" rows="3" placeholder="Enter prompt payload to capture live telemetry..." class="w-full bg-[#0b0f19] border border-gray-700 text-xs text-gray-200 rounded p-2 focus:outline-none focus:border-emerald-500 font-mono"></textarea>
       </div>
 
-      <button onclick="transmitTelemetry()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold py-2.5 rounded text-xs transition flex items-center justify-center gap-2">
+      <button id="transmit-btn" onclick="transmitTelemetry()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold py-2.5 rounded text-xs transition flex items-center justify-center gap-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
         Transmit Telemetry Payload
       </button>
     </div>
 
-    <!-- Bottom Feed: Fills Remaining Viewport Space -->
     <div class="bg-[#111827] border border-gray-800 rounded-lg p-4 flex flex-col min-h-[350px]">
       <div class="flex justify-between items-center mb-2 pb-2 border-b border-gray-800">
-        <span class="text-xs text-gray-400 font-semibold">📡 Live Encrypted Telemetry Outbound Stream</span>
-        <span class="text-[10px] bg-emerald-950 text-emerald-400 px-2 py-0.5 rounded border border-emerald-800">Dynamic Hardware Sync Active</span>
+        <span class="text-xs text-gray-400 font-semibold flex items-center gap-2">
+          📡 Live Encrypted Telemetry Outbound Stream
+        </span>
+        <div class="flex items-center gap-2">
+          <button onclick="clearLogs()" class="text-[10px] bg-gray-800 hover:bg-gray-700 text-gray-300 px-2 py-0.5 rounded border border-gray-700">Clear Logs</button>
+          <span class="text-[10px] bg-emerald-950 text-emerald-400 px-2 py-0.5 rounded border border-emerald-800">Dynamic Hardware Sync Active</span>
+        </div>
       </div>
-      <div id="telemetry_log" class="flex-1 bg-[#070a11] rounded p-3 text-xs font-mono text-emerald-400 overflow-y-auto space-y-1">
-        <div class="text-gray-500">[SYSTEM] Ready to stream encrypted telemetry. Dynamic hardware identification enabled.</div>
+      <div id="telemetry_log" class="flex-1 bg-[#070a11] rounded p-3 text-xs font-mono text-emerald-400 overflow-y-auto space-y-2">
+        <div class="text-gray-500">[SYSTEM] Listening for live telemetry transmissions.</div>
       </div>
     </div>
 
   </main>
 
   <script>
+    const SERVER_URL = window.location.origin;
+    const NOT_AVAILABLE = '<span style="color: red;">data not available / or not captured</span>';
+    let clientCredentials = { hw_id: "", api_key: "", device_type: "", mac_address: "", hostname: "" };
+
+    function getHardwareProfile() {
+      const ua = navigator.userAgent;
+      let osPrefix = "HW-SYS";
+      let osName = navigator.platform || null;
+      
+      if (/android/i.test(ua)) { osPrefix = "HW-ANDROID"; osName = "Android Mobile"; }
+      else if (/iphone|ipad|ipod/i.test(ua)) { osPrefix = "HW-IOS"; osName = "iOS Mobile"; }
+      else if (/macintosh|mac os x/i.test(ua)) { osPrefix = "HW-MAC"; osName = "macOS Workstation"; }
+      else if (/windows/i.test(ua)) { osPrefix = "HW-WIN"; osName = "Windows Workstation"; }
+      else if (/linux/i.test(ua)) { osPrefix = "HW-LINUX"; osName = "Linux Workstation"; }
+
+      let cachedHwid = localStorage.getItem("gateway_client_hwid");
+      if (!cachedHwid) {
+        const screenStr = `${window.screen.width}x${window.screen.height}`;
+        const rawHashStr = `${ua}|${screenStr}|${navigator.hardwareConcurrency || ''}`;
+        let hash = 0;
+        for (let i = 0; i < rawHashStr.length; i++) {
+          hash = ((hash << 5) - hash) + rawHashStr.charCodeAt(i);
+          hash |= 0;
+        }
+        const uniqueHashHex = Math.abs(hash).toString(16).toUpperCase().padStart(8, '0');
+        cachedHwid = `${osPrefix}-${uniqueHashHex.slice(0, 8)}`;
+        localStorage.setItem("gateway_client_hwid", cachedHwid);
+      }
+
+      const macArr = cachedHwid.replace(/[^A-Z0-9]/g, '').padEnd(12, '0').match(/.{1,2}/g);
+      const macAddress = macArr ? macArr.join(":").toUpperCase() : null;
+
+      const userHostname = document.getElementById('hostname').value || window.location.hostname || null;
+
+      return {
+        hw_id: cachedHwid,
+        device_type: osName,
+        browser_name: navigator.userAgent ? navigator.userAgent.slice(0, 30) : null,
+        mac_address: macAddress,
+        hostname: userHostname,
+        cpu_cores: navigator.hardwareConcurrency || null,
+        system_memory: navigator.deviceMemory || null,
+        timezone: (Intl && Intl.DateTimeFormat) ? Intl.DateTimeFormat().resolvedOptions().timeZone : null,
+        agent_version: "v10.5.0-Enterprise"
+      };
+    }
+
+    async function initClientNode() {
+      try {
+        const profile = getHardwareProfile();
+        document.getElementById("hw-id-badge").innerText = `HW-ID: ${profile.hw_id}`;
+
+        const cachedApiKey = localStorage.getItem("gateway_api_key");
+        const res = await fetch(`${SERVER_URL}/api/register`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            ...(cachedApiKey ? { 'Authorization': `Bearer ${cachedApiKey}` } : {})
+          },
+          body: JSON.stringify(profile)
+        });
+        const data = await res.json();
+
+        clientCredentials.hw_id = data.hw_id;
+        clientCredentials.api_key = data.api_key;
+        clientCredentials.device_type = profile.device_type;
+        clientCredentials.mac_address = data.mac_address || profile.mac_address;
+        clientCredentials.hostname = data.hostname || profile.hostname;
+
+        if (data.api_key) {
+          localStorage.setItem("gateway_api_key", data.api_key);
+        }
+
+        const hostIpDisplay = data.host_ip || NOT_AVAILABLE;
+        const macDisplay = clientCredentials.mac_address || NOT_AVAILABLE;
+
+        document.getElementById("agent-node-info").innerHTML = `Active Node: ${data.hw_id} | Host IP: ${hostIpDisplay} | MAC: ${macDisplay} | Status: ${data.status}`;
+        document.getElementById("token-balance-badge").innerText = `Balance: ${(data.balance_tokens !== undefined && data.balance_tokens !== null) ? data.balance_tokens.toLocaleString() + ' tokens' : '0 tokens'}`;
+      } catch (err) {
+        console.error("Client registration failure:", err);
+        document.getElementById("agent-node-info").innerHTML = `<span style="color: red;">data not available / or not captured</span>`;
+      }
+    }
+
     async function transmitTelemetry() {
       const logDiv = document.getElementById('telemetry_log');
+      const transmitBtn = document.getElementById('transmit-btn');
+
+      if (!clientCredentials.api_key) {
+        await initClientNode();
+      }
+
+      const inputHostname = document.getElementById('hostname').value;
+      const inputVersion = document.getElementById('version_tag').value;
+      const inputPrompt = document.getElementById('prompt_payload').value;
+
       const payload = {
-        hostname: document.getElementById('hostname').value,
-        llm_model: document.getElementById('llm_model').value,
-        reasoning_level: document.getElementById('reasoning_level').value,
-        version_tag: document.getElementById('version_tag').value,
-        payload_prompt: document.getElementById('prompt_payload').value || "Realtime Intercepted HTTP Telemetry Stream",
+        hostname: inputHostname || null,
+        hw_id: clientCredentials.hw_id,
+        mac_address: clientCredentials.mac_address || null,
+        llm_model: document.getElementById('llm_model').value || null,
+        reasoning_level: document.getElementById('reasoning_level').value || null,
+        version_tag: inputVersion || null,
+        payload_prompt: inputPrompt || null,
         timestamp: new Date().toISOString()
       };
 
       try {
-        const res = await fetch('/api/telemetry', {
+        transmitBtn.disabled = true;
+        transmitBtn.classList.add("opacity-50");
+
+        const res = await fetch(`${SERVER_URL}/api/telemetry`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${clientCredentials.api_key}`,
+            'X-HW-ID': clientCredentials.hw_id
+          },
           body: JSON.stringify(payload)
         });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.detail || "Telemetry Transmission Denied");
+        }
+
         const data = await res.json();
-        
+
+        if (data.balance_tokens !== undefined) {
+          document.getElementById("token-balance-badge").innerText = `Balance: ${data.balance_tokens.toLocaleString()} tokens`;
+        }
+
+        const promptDisplay = payload.payload_prompt || NOT_AVAILABLE;
+        const versionDisplay = payload.version_tag || NOT_AVAILABLE;
+        const totalTokensDisplay = (data.usage && data.usage.total_tokens !== undefined) ? data.usage.total_tokens : NOT_AVAILABLE;
+        const auditHashDisplay = data.audit_hash ? data.audit_hash.substring(0, 16) + '...' : NOT_AVAILABLE;
+        const balanceDisplay = data.balance_tokens !== undefined ? data.balance_tokens.toLocaleString() : NOT_AVAILABLE;
+
         const entry = document.createElement('div');
-        entry.className = "border-l-2 border-emerald-500 pl-2 py-1 my-1 text-gray-300";
-        entry.innerHTML = `<span class="text-gray-500">[${new Date().toLocaleTimeString()}]</span> Payload Sent → <span class="text-emerald-400">${payload.llm_model} (${payload.version_tag})</span> | Status: <span class="text-indigo-400">${data.status || 'OK'}</span> | Hash: <span class="text-yellow-400">${data.audit_hash || 'SHA256-OK'}</span>`;
+        entry.className = "border-l-2 border-emerald-500 bg-[#0c1322] p-2 rounded my-1 text-gray-300";
+        entry.innerHTML = `
+          <div class="flex justify-between text-[11px] mb-1">
+            <span class="text-gray-400">[${new Date().toLocaleTimeString()}] Telemetry Outbound Stream</span>
+            <span class="text-indigo-400 font-bold">Status: ${data.status || 'OK'}</span>
+          </div>
+          <div class="text-emerald-300 font-semibold mb-1">Target Model: ${payload.llm_model || NOT_AVAILABLE} (${versionDisplay}) | Level: ${payload.reasoning_level || NOT_AVAILABLE}</div>
+          <div class="bg-[#04070d] p-1.5 rounded text-gray-200 border border-gray-800 my-1 font-mono text-[11px]">${promptDisplay}</div>
+          <div class="text-[10px] text-gray-400 flex flex-wrap gap-3 mt-1">
+            <span>Tokens Used: <strong class="text-rose-400">${totalTokensDisplay}</strong></span>
+            <span>Audit Hash: <strong class="text-yellow-400">${auditHashDisplay}</strong></span>
+            <span>Remaining: <strong class="text-emerald-400">${balanceDisplay}</strong></span>
+          </div>`;
+        
         logDiv.appendChild(entry);
         logDiv.scrollTop = logDiv.scrollHeight;
       } catch (err) {
-        console.error(err);
+        const entry = document.createElement('div');
+        entry.className = "border-l-2 border-rose-500 bg-rose-950/30 p-2 rounded my-1 text-rose-300 text-xs";
+        entry.innerHTML = `<strong>[TRANSMISSION ERROR]:</strong> ${err.message}`;
+        logDiv.appendChild(entry);
+        logDiv.scrollTop = logDiv.scrollHeight;
+      } finally {
+        transmitBtn.disabled = false;
+        transmitBtn.classList.remove("opacity-50");
       }
     }
+
+    function clearLogs() {
+      const logDiv = document.getElementById('telemetry_log');
+      logDiv.innerHTML = '<div class="text-gray-500">[SYSTEM] Live outbound stream log reset. Ready for next transmission payload.</div>';
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      initClientNode();
+    });
   </script>
 </body>
 </html>
